@@ -1,0 +1,60 @@
+{
+  "name": "dunlin",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Local knowledge search with source evidence, powered by Rust",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": "^22.13.0 || >=24"
+  },
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/*.js",
+    "dist/index.d.ts",
+    "dist/types.d.ts",
+    "dist/mcp.d.ts",
+    "dist/native.cjs",
+    "dist/*.node",
+    "examples/*.mjs"
+  ],
+  "napi": {
+    "binaryName": "dunlin",
+    "targets": [
+      "x86_64-pc-windows-msvc",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin"
+    ]
+  },
+  "scripts": {
+    "build": "npm run build:native && npm run build:js",
+    "build:native": "napi build --platform --output-dir dist --js native.cjs --dts native.d.cts --release --features node",
+    "build:js": "tsc -p tsconfig.json",
+    "test": "tsc -p tests/tsconfig.json && node --test tests/*.test.mjs",
+    "test:package": "napi create-npm-dirs && node scripts/test-package.mjs",
+    "bench": "node benches/keyword.mjs"
+  },
+  "peerDependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@modelcontextprotocol/server": { "optional": true },
+    "zod": { "optional": true }
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@napi-rs/cli": "3.10.12",
+    "@types/node": "^22.0.0",
+    "typescript": "5.9.3",
+    "zod": "4.6.7"
+  }
+}

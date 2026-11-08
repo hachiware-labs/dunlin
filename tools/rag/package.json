@@ -1,0 +1,33 @@
+{
+  "name": "@dunlin/rag",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "dunlin": "./cli.mjs"
+  },
+  "engines": {
+    "node": "^22.13.0 || >=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "dunlin": "file:../..",
+    "markdown-it": "15.0.3",
+    "zod": "^4.6.7"
+  },
+  "optionalDependencies": {
+    "@ast-grep/lang-python": "0.0.6",
+    "@ast-grep/lang-rust": "0.0.7",
+    "@ast-grep/napi": "0.51.1",
+    "@napi-rs/canvas": "1.1.0",
+    "@tesseract.js-data/jpn": "1.0.0",
+    "@tesseract.js-data/jpn_vert": "1.0.0",
+    "docling.rs": "2.67.1",
+    "pdfjs-dist": "6.5.438",
+    "sqlite-vec": "^0.1.9",
+    "tesseract.js": "7.0.0"
+  }
+}

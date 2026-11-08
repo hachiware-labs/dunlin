@@ -1,0 +1,352 @@
+//! Local, single-tenant knowledge indexing and evidence retrieval.
+
+mod corpus;
+mod engine;
+mod evaluate;
+mod explore;
+mod legacy_delete;
+mod model;
+mod plans;
+mod source;
+mod storage;
+mod sync;
+mod wiki;
+
+#[cfg(all(feature = "node", not(test)))]
+mod node;
+
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+pub use corpus::{CorpusDocument, CorpusMetadata, ParserInfo, SourceLocation};
+use engine::KeywordIndex;
+pub use evaluate::{
+    CandidateMetrics, EvaluationCase, EvaluationOptions, EvaluationReport, EvaluationSet,
+    OptimizationReport, OptimizeOptions, RelevantObject,
+};
+pub use explore::{
+    ExploreEvidence, ExploreIssue, ExploreOptions, ExploreOutcome, ExploreStop, ExploreVia,
+};
+pub use model::{
+    Cancellation, DocumentFormat, DocumentRef, DocumentSnapshot, Error, Evidence, IndexChanges,
+    IndexStatus, LineRange, ReadOutcome, Result, SearchHit, SearchOutcome, SourceDocument,
+    SourceRef, SyncOutcome,
+};
+use plans::{DEFAULT_LIMIT, PlanStore};
+pub use plans::{PlanEvaluation, RetrievalMethod, RetrievalPlan};
+use source::{DocumentInput, SourceInput};
+pub use sync::{DeltaSyncOutcome, RegeneratedPage, WikiSyncFailure, WikiSyncOutcome};
+use wiki::WikiStore;
+pub use wiki::{
+    WikiBuildOptions, WikiChange, WikiChangeReason, WikiCitation, WikiImpact, WikiPage, WikiStatus,
+    WikiUnavailable,
+};
+
+pub struct KnowledgeBase {
+    index: KeywordIndex,
+    plans: PlanStore,
+    wiki: WikiStore,
+}
+
+impl KnowledgeBase {
+    /// Inspects the current keyword index without creating a knowledge base.
+    pub fn inspect_index(path: &Path, cancel: &Cancellation) -> Result<Option<IndexStatus>> {
+        KeywordIndex::inspect(&path.join(".dunlin-index-v1"), cancel)
+    }
+
+    pub fn open(path: &Path, cancel: &Cancellation) -> Result<Self> {
+        cancel.check()?;
+        let index_path = path.join(".dunlin-index-v1");
+        std::fs::create_dir_all(&index_path)
+            .map_err(|_| Error::Io("Could not create the index directory"))?;
+        let index = KeywordIndex::open(&index_path, &path.join(".dunlin-corpus-v1"))?;
+        let plans = PlanStore::open(&path.join(".dunlin-plans-v1"))?;
+        let wiki = WikiStore::new(path.join(".dunlin-wiki-v1"));
+        cancel.check()?;
+        Ok(Self { index, plans, wiki })
+    }
+
+    pub fn add_source(
+        &self,
+        id: &str,
+        path: PathBuf,
+        cancel: &Cancellation,
+    ) -> Result<SyncOutcome> {
+        source::validate_id(id)?;
+        self.index
+            .replace_source(id, SourceInput::Filesystem(&path), cancel)
+    }
+
+    /// Replaces the source with the supplied documents in a single commit.
+    pub fn replace_documents(
+        &self,
+        id: &str,
+        documents: Vec<SourceDocument>,
+        cancel: &Cancellation,
+    ) -> Result<SyncOutcome> {
+        self.replace_document_inputs(id, documents.into_iter().map(Into::into).collect(), cancel)
+    }
+
+    pub(crate) fn replace_document_inputs(
+        &self,
+        id: &str,
+        documents: Vec<DocumentInput>,
+        cancel: &Cancellation,
+    ) -> Result<SyncOutcome> {
+        source::validate_id(id)?;
+        self.index
+            .replace_source(id, SourceInput::Documents(documents), cancel)
+    }
+
+    pub fn remove_source(&self, id: &str, cancel: &Cancellation) -> Result<()> {
+        self.replace_documents(id, Vec::new(), cancel)?;
+        Ok(())
+    }
+
+    pub fn sync_source(
+        &self,
+        id: &str,
+        path: PathBuf,
+        cancel: &Cancellation,
+    ) -> Result<DeltaSyncOutcome> {
+        sync::sync(self, id, SourceInput::Filesystem(&path), cancel)
+    }
+
+    pub fn sync_documents(
+        &self,
+        id: &str,
+        documents: Vec<SourceDocument>,
+        cancel: &Cancellation,
+    ) -> Result<DeltaSyncOutcome> {
+        self.sync_document_inputs(id, documents.into_iter().map(Into::into).collect(), cancel)
+    }
+
+    pub(crate) fn sync_document_inputs(
+        &self,
+        id: &str,
+        documents: Vec<DocumentInput>,
+        cancel: &Cancellation,
+    ) -> Result<DeltaSyncOutcome> {
+        sync::sync(self, id, SourceInput::Documents(documents), cancel)
+    }
+
+    pub fn search(
+        &self,
+        query: &str,
+        limit: usize,
+        cancel: &Cancellation,
+    ) -> Result<SearchOutcome> {
+        self.search_with_method(query, Some(limit), None, cancel)
+    }
+
+    pub fn search_with_method(
+        &self,
+        query: &str,
+        limit: Option<usize>,
+        method: Option<RetrievalMethod>,
+        cancel: &Cancellation,
+    ) -> Result<SearchOutcome> {
+        self.search_with_sources(query, limit, method, &[], cancel)
+    }
+
+    pub fn search_with_sources(
+        &self,
+        query: &str,
+        limit: Option<usize>,
+        method: Option<RetrievalMethod>,
+        source_ids: &[String],
+        cancel: &Cancellation,
+    ) -> Result<SearchOutcome> {
+        let start = Instant::now();
+        cancel.check()?;
+        source::validate_scope(source_ids)?;
+        let (plan_id, method, default_limit) = match method {
+            Some(method) => (method.plan_id().into(), method, DEFAULT_LIMIT),
+            None => self.plans.active_route()?,
+        };
+        let limit = limit.unwrap_or(default_limit);
+        if !(1..=100).contains(&limit) {
+            return Err(Error::Invalid("Limit must be 1–100"));
+        }
+        let (hits, total_hits) = self
+            .index
+            .snapshot()
+            .search_scoped(method, query, limit, source_ids, cancel)?;
+        cancel.check()?;
+        Ok(SearchOutcome {
+            hits,
+            total_hits,
+            status: if total_hits < limit {
+                "fewer_matches"
+            } else {
+                "complete"
+            },
+            engine: method.engine(),
+            method,
+            plan_id,
+            elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+        })
+    }
+
+    pub fn explore(
+        &self,
+        query: &str,
+        options: ExploreOptions,
+        cancel: &Cancellation,
+    ) -> Result<ExploreOutcome> {
+        let start = Instant::now();
+        options.validate()?;
+        let deadline = start + Duration::from_millis(options.timeout_ms.into());
+        let cancel = cancel.clone().with_deadline(Some(deadline));
+        let route = self.plans.active_route()?;
+        explore::explore(
+            &self.index.snapshot(),
+            query,
+            route,
+            options,
+            &cancel,
+            start,
+        )
+    }
+
+    pub fn evaluate(
+        &self,
+        options: EvaluationOptions,
+        cancel: &Cancellation,
+    ) -> Result<EvaluationReport> {
+        cancel.check()?;
+        evaluate::evaluate(&self.index.snapshot(), options, cancel)
+    }
+
+    pub fn optimize(
+        &self,
+        options: OptimizeOptions,
+        cancel: &Cancellation,
+    ) -> Result<OptimizationReport> {
+        let budget = options.p95_latency_budget_ms;
+        if !budget.is_finite() || budget <= 0.0 {
+            return Err(Error::Invalid(
+                "P95 latency budget must be finite and positive",
+            ));
+        }
+        let report = self.evaluate(options.evaluation, cancel)?;
+        let best = report
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.p95_latency_ms <= budget)
+            .max_by(|left, right| {
+                left.ndcg_at_k
+                    .total_cmp(&right.ndcg_at_k)
+                    .then_with(|| left.recall_at_k.total_cmp(&right.recall_at_k))
+                    .then_with(|| right.p95_latency_ms.total_cmp(&left.p95_latency_ms))
+                    .then_with(|| right.plan_id.cmp(&left.plan_id))
+            });
+        let selected_plan_id = best
+            .map(|candidate| {
+                self.plans.save(
+                    candidate.method,
+                    PlanEvaluation {
+                        p95_latency_budget_ms: budget,
+                        report: report.clone(),
+                    },
+                    cancel,
+                )
+            })
+            .transpose()?;
+        Ok(OptimizationReport {
+            status: if selected_plan_id.is_some() {
+                "selected"
+            } else {
+                "budget_unmet"
+            },
+            selected_plan_id,
+            p95_latency_budget_ms: budget,
+            evaluation: report,
+        })
+    }
+
+    pub fn get_active_plan(&self, cancel: &Cancellation) -> Result<RetrievalPlan> {
+        cancel.check()?;
+        self.plans.active()
+    }
+
+    pub fn activate_plan(&self, id: &str, cancel: &Cancellation) -> Result<RetrievalPlan> {
+        self.plans.activate(id, cancel)
+    }
+
+    /// Exports stored documents and their line evidence from one index revision.
+    pub fn snapshot_documents(&self, cancel: &Cancellation) -> Result<DocumentSnapshot> {
+        cancel.check()?;
+        let snapshot = self.index.current_snapshot()?;
+        let documents = snapshot.documents(cancel)?;
+        cancel.check()?;
+        Ok(DocumentSnapshot {
+            revision: snapshot.revision(),
+            documents,
+        })
+    }
+
+    pub fn get_index_revision(&self, cancel: &Cancellation) -> Result<String> {
+        cancel.check()?;
+        Ok(self.index.current_snapshot()?.revision())
+    }
+
+    /// Looks up a stored document by its stable source and object IDs.
+    pub fn get_document(
+        &self,
+        document: &DocumentRef,
+        cancel: &Cancellation,
+    ) -> Result<Option<ReadOutcome>> {
+        cancel.check()?;
+        source::validate_id(&document.source_id)?;
+        let result = self
+            .index
+            .current_snapshot()?
+            .object(&document.source_id, &document.object_id)?;
+        cancel.check()?;
+        Ok(result)
+    }
+
+    /// Reads the parsed document and its metadata for a saved revision, including old revisions.
+    pub fn get_corpus_document(
+        &self,
+        document: &DocumentRef,
+        version: &str,
+        cancel: &Cancellation,
+    ) -> Result<Option<CorpusDocument>> {
+        cancel.check()?;
+        source::validate_id(&document.source_id)?;
+        let result = self.index.corpus.get(document, version)?;
+        cancel.check()?;
+        Ok(result)
+    }
+
+    pub fn read(&self, evidence: &Evidence, cancel: &Cancellation) -> Result<ReadOutcome> {
+        cancel.check()?;
+        source::validate_id(&evidence.source.source_id)?;
+        let result = self.index.read(evidence)?;
+        cancel.check()?;
+        Ok(result)
+    }
+
+    pub fn wiki_build(&self, options: WikiBuildOptions, cancel: &Cancellation) -> Result<WikiPage> {
+        self.wiki.build(&self.index, options, cancel)
+    }
+
+    pub fn wiki_get(&self, id: &str, cancel: &Cancellation) -> Result<Option<WikiPage>> {
+        self.wiki.get(&self.index.snapshot(), id, cancel)
+    }
+
+    pub fn wiki_affected(
+        &self,
+        source_id: Option<&str>,
+        cancel: &Cancellation,
+    ) -> Result<Vec<WikiImpact>> {
+        self.wiki
+            .affected(&self.index.snapshot(), source_id, cancel)
+    }
+
+    pub fn wiki_regenerate(&self, id: &str, cancel: &Cancellation) -> Result<WikiPage> {
+        self.wiki.regenerate(&self.index, id, cancel)
+    }
+}

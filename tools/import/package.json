@@ -1,0 +1,17 @@
+{
+  "name": "@dunlin/import",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.13.0 || >=24"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1164.0",
+    "cheerio": "^1.2.0",
+    "dunlin": "file:../.."
+  }
+}

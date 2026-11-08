@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "declaration": true,
+    "verbatimModuleSyntax": true,
+    "rootDir": "js",
+    "outDir": "dist",
+    "types": ["node"]
+  },
+  "include": ["js/**/*.ts"]
+}

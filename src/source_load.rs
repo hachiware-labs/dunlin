@@ -442,6 +442,14 @@ fn load_one(
             if file.kind == "ocr" {
                 parts.push(string(&request.ocr_version));
             }
+            // PDFs read in Rust: switching parsers reads them again (spec 28.9 step 2a).
+            if file.kind == "pdf" {
+                parts.push(string(&format!(
+                    "{}@{}",
+                    crate::pdf_text::PARSER,
+                    crate::pdf_text::VERSION
+                )));
+            }
             json(&ConfigValue::Array(parts))
         }
     };
@@ -490,6 +498,8 @@ fn load_one(
             slots,
             cancel,
         )?
+    } else if file.kind == "pdf" {
+        crate::pdf_text::parse(&read.bytes, &|| cancel.check().is_ok())?
     } else {
         host.parse(file, &read.bytes)?
     };

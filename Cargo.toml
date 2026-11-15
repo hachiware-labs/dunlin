@@ -20,6 +20,8 @@ lindera = { version = "=6.2.0", default-features = false, features = ["embed-ipa
 memmap2 = { version = "0.9", optional = true }
 napi = { version = "3", default-features = false, features = ["napi8", "serde-json"], optional = true }
 napi-derive = { version = "3", optional = true }
+# Pinned: the version is part of the extraction cache key for PDFs.
+pdf_oxide = { version = "=0.3.78", default-features = false, features = ["legacy-crypto"] }
 percent-encoding = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
 rayon = { version = "1", optional = true }

@@ -26,6 +26,8 @@ mod command_parser;
 #[cfg(all(feature = "node", not(test)))]
 mod node;
 #[cfg(any(feature = "node", test))]
+mod pdf_text;
+#[cfg(any(feature = "node", test))]
 mod source_files;
 #[cfg(any(feature = "node", test))]
 mod source_load;

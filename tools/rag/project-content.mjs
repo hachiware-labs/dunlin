@@ -163,7 +163,6 @@ function parserHost(progress = () => {}) {
     async parse({ kind, name }, bytes) {
       const signal = trialSignal();
       const parsed = kind === 'ocr' ? await loadOcr(bytes)
-        : kind === 'pdf' ? await loadPdf(bytes)
         : kind === 'html' ? await loadHtml(bytes)
         : await decodeRemote([bytes], undefined, name, { parsers: { documents: { tool: 'docling-rs' } }, keepOriginal: true, signal });
       return { content: parsed.content, format: parsed.format, locations: parsed.locations, parser: parsed.parser };
@@ -180,12 +179,6 @@ async function loadOcr(bytes) {
     if (error.code === 'OCR_NOT_PREPARED') throw new Error('Local GPU OCR is not prepared. Run dunlin add ocr.', { cause: error });
     throw error;
   }
-}
-
-async function loadPdf(bytes) {
-  const { pdfText } = await import('./parsers/documents.mjs');
-  const { content, locations } = await pdfText(bytes, trialSignal());
-  return { content, locations, format: 'text', bytes, parser: { tool: 'pdfjs' } };
 }
 
 async function loadHtml(bytes) {

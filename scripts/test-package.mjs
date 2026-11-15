@@ -41,11 +41,14 @@ async function installAndSearch(name, tarballs) {
   });
   assert.match(result, /OAuthの根拠/u);
   const cli = join(consumer, 'node_modules', 'dunlin', 'tools', 'rag', 'cli.mjs');
-  const run = (...args) => execFileSync(process.execPath, [cli, ...args], { cwd: consumer, encoding: 'utf8' });
+  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(consumer, 'global.yaml') };
+  const run = (...args) => execFileSync(process.execPath, [cli, ...args], { cwd: consumer, env, encoding: 'utf8' });
   await mkdir(join(consumer, 'manuals'));
   await writeFile(join(consumer, 'manuals', 'guide.md'), '# 認証\n作業手順を確認する。\n');
   run('init', 'mcp', 'kb', '--source', 'manuals');
+  run('config', 'set', 'llm', '--model', 'packaged-test-model');
   run('init', 'rag', 'rag', '--source', 'manuals');
+  assert.match(await readFile(join(consumer, 'rag', 'Dunlinfile.yaml'), 'utf8'), /model: packaged-test-model/u);
   run('init', 'wiki', 'wiki', '--purpose', 'Wiki');
   run('init', 'para', 'para', '--purpose', 'PARA');
   run('--project', 'kb', 'build');

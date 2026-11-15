@@ -14,7 +14,7 @@ dunlin search "手順" --json
 dunlin serve --print-config
 ```
 
-最後のコマンドが出力する `command` と `args` を MCP クライアントに登録します。クライアントが `dunlin serve` を起動し、`knowledge.search` と `knowledge.read` が使えます。検索には回答モデル、埋め込みモデル、評価データの設定は不要です。
+最後のコマンドが出力する `command` と `args` を MCP クライアントに登録します。クライアントが `dunlin serve` を起動し、`knowledge.search` と `knowledge.read` が使えます。標準のキーワード検索は、モデルや評価データの設定なしで使えます。
 
 資料を更新したら `dunlin build` を再実行します。実行中の MCP は次の要求から完成した索引を使います。未対応のファイルは `source.filesystem` の `with.exclude` に除外パターンを指定するか、`dunlin build --skip-unsupported` で飛ばせます。
 
@@ -33,7 +33,7 @@ dunlin init rag ./rag --source ./manuals
 cd rag
 ```
 
-`Dunlinfile.yaml` の `models.answerer.model` に、ローカル Ollama で利用できるモデル名を設定します。既定の接続先は `http://localhost:11434` です。モデルへ送るリクエストの大きさはモデル定義の `max_input_bytes` で制限できます。
+`init` で回答モデルを指定していない場合は、`Dunlinfile.yaml` の `models.answerer.model` にモデル名を設定します。既定の接続先はローカル Ollama の `http://localhost:11434` です。モデルへ送るリクエストの大きさはモデル定義の `max_input_bytes` で制限できます。
 
 ```sh
 dunlin build
@@ -68,9 +68,33 @@ HTTP の登録用 URL を出力するには、`mcp` エンドポイントと固�
 
 `serve.limits` の既定は、リクエスト本文 1 MiB、タイムアウト 120 秒、同時要求 8 件です。`--host` と `--port` は起動時だけ上書きできます。ポートが使用中の場合は終了コード 1 を返します。`serve` の設定変更によってビルド ID や検索設定 ID は変わりません。[接続制限の仕様](dunlin-spec.md#275-serve-の設定項目)
 
+## 初期化時にモデルを選ぶ
+
+使い続けるモデルは、プロジェクトを作る前に一度登録します。次の例では、Ollama に登録済みのモデル名を使います。
+
+```sh
+dunlin config set embedding --provider ollama --model hf.co/Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0
+dunlin config set llm --provider ollama --model qwen3:4b
+dunlin config list
+dunlin init rag ./rag
+```
+
+グローバル設定の保存先は `~/.dunlin/config.yaml` です。`DUNLIN_GLOBAL_CONFIG` で保存先を指定でき、`dunlin config unset embedding` や `dunlin config unset llm` で登録を解除できます。設定は初期化時に新しいプロジェクトへ書き出されます。
+
+個別のプロジェクトでは、`init` のオプションで優先する設定を指定します。
+
+| 用途 | モデル・プロバイダー指定 | グローバル設定を省く指定 |
+| --- | --- | --- |
+| 埋め込み（MCP/RAG） | `--embedding-model <name>`、`--embedding-provider <ollama\|openai>` | `--no-embedding` でキーワード検索 |
+| 回答・執筆（RAG/Wiki/PARA） | `--llm-model <name>`、`--llm-provider <ollama\|openai\|strata>` | `--no-llm` でモデル名を未設定にする |
+
+埋め込みを指定すると、`models.embedder`、`index.vector`、`retrieval.vector`、`fusion.rrf` を生成し、キーワード検索とベクトル検索を組み合わせます。RAG の LLM は `models.answerer`、Wiki/PARA の LLM は `models.writer` になります。モデル名を添えずにプロバイダーを変更した場合、以前のプロバイダーのモデル名は継承されません。埋め込みを使う場合はモデル名も指定します。
+
+初期化は設定の書き出しまでです。OpenAI の生成設定に含まれる `api_key_env: OPENAI_API_KEY` は、モデルを実行するときに参照されます。
+
 ## 初期化で生成される Dunlinfile.yaml
 
-`--source` を省略すると、両種別とも `./docs` を入力にします。`--source` を渡すと、そのディレクトリへのパスが `source.filesystem` の `with.path` に入ります。
+`--source` を省略すると、両種別とも `./docs` を入力にします。`--source` を渡すと、そのディレクトリへのパスが `source.filesystem` の `with.path` に入ります。次の2例は、グローバル設定でモデルを登録していないときの出力です。
 
 ### `dunlin init mcp ./mcp`
 

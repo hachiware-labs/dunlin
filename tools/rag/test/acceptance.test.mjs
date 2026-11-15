@@ -25,7 +25,7 @@ test('keeps the chunk.length compatibility fixture stable', () => {
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-acceptance-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const run = (...args) => exec(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => exec(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const invoke = (...args) => run('--project', 'kb', ...args, '--json').then(({ stdout }) => JSON.parse(stdout));
   const json = async (...args) => {
     const result = await invoke(...args);

@@ -120,6 +120,22 @@ dunlin init para ./notes
 - 初期化は、モデルのダウンロード、外部APIの呼び出し、構築を行わない。既存のプロジェクトや同名ファイルを上書きしない。
 - コマンドは、現在のディレクトリから親方向に `Dunlinfile.yaml` を探してプロジェクトを特定する。別の場所からは `--project <dir>` で指定する。
 
+#### 初期化時のモデル指定
+
+`init` にモデル名とプロバイダーを渡して、初期設定に書き出せる。
+
+| 用途 | 指定 | 対応する種別 | プロバイダー |
+| --- | --- | --- | --- |
+| 埋め込み | `--embedding-model <name>`、`--embedding-provider <provider>` | `mcp`、`rag` | `ollama`、`openai` |
+| 回答・執筆 | `--llm-model <name>`、`--llm-provider <provider>` | `rag`、`wiki`、`para` | `ollama`、`openai`、`strata` |
+
+頻繁に使う組み合わせは `dunlin config set <embedding|llm> --provider <provider> --model <name>` でユーザーごとに保存する。`dunlin config list` で確認し、`dunlin config unset <embedding|llm>` で解除する。保存先は `~/.dunlin/config.yaml` とし、`DUNLIN_GLOBAL_CONFIG` で変更できる。
+
+- プロジェクト種別が使えるモデルだけを引き継ぐ。`init` の指定、ユーザー設定、標準値の順に優先する。プロバイダーを変えた場合、以前のプロバイダーのモデル名は引き継がない。埋め込みを使う場合はモデル名を指定する。
+- `--no-embedding`、`--no-llm` で、それぞれのユーザー設定をその初期化だけ適用しない。同じ用途のモデル・プロバイダー指定との併用はエラーにする。
+- プロバイダーの標準値は Ollama。OpenAI を選ぶと、認証用の環境変数名 `OPENAI_API_KEY` を生成する設定に書く。キー本体は保存しない。
+- モデルの設定と、必要なモジュール・引数を `Dunlinfile.yaml` に書く。以後の実行は、そのプロジェクトの設定を使う。ユーザー設定の変更は次回以降の初期化に適用する。
+
 | 作成物 | 内容 |
 | --- | --- |
 | `Dunlinfile.yaml` | 編集可能な設定の正本 |
@@ -331,7 +347,7 @@ serve:
   transport: stdio
 ```
 
-`dunlin init rag` の場合は、`type` が `rag` になり、回答生成のためのモデルの定義と区切りが加わる。それ以外は同じである。
+`dunlin init rag` の場合は、`type` が `rag` になり、回答生成のためのモデルの定義と区切りが加わる。HTTP 提供の設定は27.3節に示す。
 
 ```yaml
 # 使うモデル
@@ -351,6 +367,8 @@ ask:
         cite: true                # 回答に出典を添える
         on_no_evidence: decline   # 根拠がないときは答えない
 ```
+
+`--embedding-model` またはユーザー設定で埋め込みモデルを指定すると、`mcp` と `rag` は `models.embedder` を書き出す。`index` には `index.vector`、`search` には `retrieval.vector` と `fusion.rrf` が加わり、キーワードとベクトルを組み合わせて検索する。`rag` の LLM の指定は `models.answerer`、`wiki` と `para` の LLM の指定は `models.writer` に書き出す。
 
 評価を始めるときに、次の区切りが加わる。最初の `eval-data add` が書き足す。
 

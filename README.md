@@ -17,6 +17,8 @@ Dunlin は、手元の資料から立ち上げられるローカルのナレッ�
 
 MCP と RAG では、`--source <directory>` を省くとプロジェクト内の `docs/` を使います。両種別で同じ構築・検索モジュールを使い、`search --json` の `data`、MCP の `structuredContent`、HTTP の `/v1/search` は共通形式です。RAG の回答を使うには `models.answerer.model` にモデル名を設定します。[起動手順](docs/mcp.md) · [生成される Dunlinfile.yaml](docs/mcp.md#初期化で生成される-dunlinfileyaml)
 
+よく使うモデルは、たとえば `dunlin config set llm --provider ollama --model qwen3:4b` で一度登録できます。次の `init rag`、`init wiki`、`init para` が、新しい `Dunlinfile.yaml` に書き出します。MCP や RAG でハイブリッド検索を使う場合は、同様に `dunlin config set embedding` で埋め込みモデルを登録できます。[モデルの初期化設定](docs/mcp.md#初期化時にモデルを選ぶ)
+
 Wiki/PARA は `--purpose` で目的を指定し、`Dunlinfile.yaml` の `models.writer.model` を設定してから `dunlin ingress <資料パス>` を実行します。生成した HTML は `site/` に保存されます。`ingress` と `verify --content` は作業 ID と進捗を標準エラーに表示し、`dunlin progress <作業ID> --json` でも確認できます。ブラウザでは順番待ちから完了まで同じ作業ページで追えます。内容検査の指摘には比較した二つの引用と出典が付きます。[Wiki/PARA の操作](docs/dunlin-spec.md#131-コマンド)
 
 ## CLI のセットアップ

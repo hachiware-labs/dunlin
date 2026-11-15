@@ -17,7 +17,7 @@ const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 test('uses trial settings without changing the active build and evaluates saved evidence', { timeout: 30_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-evaluation-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   await run('init', 'mcp', 'kb');
   await writeFile(join(root, 'kb', 'docs', 'guide.txt'), '交換手順の根拠。\n');
@@ -77,7 +77,7 @@ test('builds exact vector and hybrid search using the configured chunk ranges', 
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   await run('init', 'mcp', 'kb');
   await writeFile(join(root, 'kb', 'docs', 'guide.txt'), 'フィルターを交換します。\n');
@@ -155,7 +155,7 @@ test('enforces trial counters and time without blocking short operations', { tim
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); });
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   const failure = async (code, ...args) => {
     try { await json(...args); assert.fail('Expected failure.'); }
@@ -246,7 +246,7 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'wiki', ...args, '--json')).stdout);
   await run('init', 'wiki', 'wiki', '--purpose', '設備保全の手順');
   await writeFile(join(root, 'manual.txt'), '交換手順を確認する。\n');

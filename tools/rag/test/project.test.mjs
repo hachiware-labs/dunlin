@@ -17,7 +17,7 @@ const runNode = promisify(execFile);
 test('initializes the four project types through the public CLI', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-init-types-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   for (const type of ['mcp', 'rag', 'wiki', 'para']) {
     const searchProject = ['mcp', 'rag'].includes(type);
     const purpose = searchProject ? [] : ['--purpose', '運用手順を整理する'];
@@ -57,10 +57,76 @@ test('initializes the four project types through the public CLI', async (t) => {
   await assert.rejects(run('init', '--preset', 'rag'), { code: 2 });
 });
 
+test('copies global model defaults into new projects and accepts explicit overrides', { timeout: 30_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dunlin-global-config-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const path = join(root, 'settings', 'config.yaml');
+  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: path, OPENAI_API_KEY: '' };
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 10_000 });
+  const json = async (...args) => JSON.parse((await run(...args, '--json')).stdout);
+  const read = (project) => readFile(join(root, project, 'Dunlinfile.yaml'), 'utf8');
+  assert.deepEqual((await json('config', 'list')).data, { path, version: 1 });
+  await json('config', 'set', 'embedding', '--model', 'local-embed');
+  await json('config', 'set', 'llm', '--provider', 'openai', '--model', 'answer-model');
+
+  await run('init', 'mcp', 'kb');
+  const mcp = parse(await read('kb'));
+  assert.deepEqual(mcp.models, { embedder: {
+    provider: 'ollama', kind: 'embedding', base_url: 'http://localhost:11434', model: 'local-embed',
+  } });
+  assert.deepEqual(mcp.index.modules.map(({ use }) => use), ['index.keyword', 'index.vector']);
+  assert.deepEqual(mcp.index.modules[1].with, { model: 'embedder' });
+  assert.deepEqual(mcp.search.modules.map(({ use }) => use),
+    ['query.normalize', 'retrieval.keyword', 'retrieval.vector', 'fusion.rrf', 'context.assemble']);
+  assert.deepEqual(mcp.search.modules[2].with, { model: 'embedder', top_k: 10 });
+  assert.deepEqual(mcp.search.modules[3].with, { k: 60 });
+
+  await run('init', 'rag', 'qa');
+  const rag = await read('qa');
+  assert.deepEqual(parse(rag).models, { answerer: {
+    provider: 'openai', kind: 'chat', base_url: 'https://api.openai.com/v1', api_key_env: 'OPENAI_API_KEY', model: 'answer-model',
+  }, ...mcp.models });
+  assert.equal((await json('--project', 'qa', 'validate')).data.valid, true);
+  for (const type of ['wiki', 'para']) {
+    await run('init', type, type);
+    const config = parse(await read(type));
+    assert.deepEqual(config.models, { writer: parse(rag).models.answerer });
+  }
+
+  await run('init', 'rag', 'custom', '--embedding-model', 'custom-embed', '--embedding-provider', 'openai',
+    '--llm-model', 'custom-chat', '--llm-provider', 'strata');
+  const custom = parse(await read('custom'));
+  assert.equal(custom.models.embedder.provider, 'openai');
+  assert.equal(custom.models.embedder.model, 'custom-embed');
+  assert.equal(custom.models.embedder.api_key_env, 'OPENAI_API_KEY');
+  assert.deepEqual(custom.models.answerer, {
+    provider: 'strata', kind: 'chat', base_url: 'http://127.0.0.1:8080/v1', model: 'custom-chat',
+  });
+  await run('init', 'rag', 'keyword', '--no-embedding', '--no-llm');
+  const keyword = parse(await read('keyword'));
+  assert.equal(keyword.models.answerer.model, null);
+  assert.equal(keyword.models.embedder, undefined);
+  assert.equal(keyword.index.modules.length, 1);
+  assert.equal(keyword.search.modules.length, 3);
+
+  await assert.rejects(run('init', 'mcp', 'bad', '--llm-model', 'unsupported'), { code: 2 });
+  await assert.rejects(run('init', 'wiki', 'bad', '--embedding-model', 'unsupported'), { code: 2 });
+  await assert.rejects(run('init', 'rag', 'bad', '--embedding-provider', 'strata'), { code: 2 });
+  await assert.rejects(run('init', 'rag', 'bad', '--embedding-provider', 'openai'), { code: 2 });
+  await assert.rejects(run('init', 'rag', 'bad', '--no-llm', '--llm-model', 'conflict'), { code: 2 });
+  await assert.rejects(read('bad'), { code: 'ENOENT' });
+
+  await json('config', 'unset', 'embedding');
+  assert.deepEqual((await json('config', 'list')).data.llm, { provider: 'openai', model: 'answer-model' });
+  await run('init', 'mcp', 'next');
+  assert.equal(parse(await read('next')).models, undefined);
+  assert.equal(await read('qa'), rag);
+});
+
 test('runs only the selected stages and indexes the saved chunk ranges', { timeout: 30_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-stages-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   await run('init', 'mcp', 'kb');
   const path = join(root, 'kb', 'Dunlinfile.yaml');
@@ -120,7 +186,7 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   await mkdir(docs);
   await writeFile(join(docs, 'guide.md'), '# ガイド\n作業手順を確認してください。\n');
   await writeFile(join(docs, 'notes.bin'), 'not a supported standard file');
-  const run = (cwd, ...args) => runNode(process.execPath, [cli, ...args], { cwd, timeout: 10_000, encoding: 'utf8' });
+  const run = (cwd, ...args) => runNode(process.execPath, [cli, ...args], { cwd, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, timeout: 10_000, encoding: 'utf8' });
   const json = async (cwd, ...args) => JSON.parse((await run(cwd, ...args, '--json')).stdout);
 
   await run(root, 'init', 'mcp', './knowledge', '--source', './manuals');

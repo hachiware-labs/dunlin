@@ -111,6 +111,7 @@
 | 項目 | 確認 |
 | --- | --- |
 | `init mcp` の stdio と `init rag` のモデル・`ask`・HTTP 設定 | P1、P3、npm。[生成される設定](mcp.md#初期化で生成される-dunlinfileyaml) |
+| グローバル設定からのモデル継承、`init` での上書き・適用除外 | [プロジェクトテスト](../tools/rag/test/project.test.mjs) と npm。ローカル Ollama で、登録した埋め込み・回答モデルを使う RAG の `build`・`search`・`ask` も確認 |
 | RAG の初期設定のまま検索と HTTP の起動ができ、回答の要求には `503 MODEL_REQUIRED` が返る | R1 |
 | CLI・stdio MCP・HTTP MCP・HTTP 検索の JSON 一致と、実効設定 ID の更新 | P3、R1 |
 | 文書更新後に稼働中の HTTP 検索・MCP・回答が同じ索引に切り替わる | R1 |

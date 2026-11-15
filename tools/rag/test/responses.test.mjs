@@ -25,7 +25,7 @@ async function project(t) {
     for (const close of cleanup.reverse()) await close();
     await rm(cwd, { recursive: true, force: true, maxRetries: 5 });
   });
-  const env = { ...process.env, DUNLIN_TEST_TOKEN: '' };
+  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(cwd, 'global.yaml'), DUNLIN_TEST_TOKEN: '' };
   const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd, env, encoding: 'utf8', timeout: 15_000 });
   const json = async (...args) => JSON.parse((await run(...args, '--json')).stdout);
   await run('init', 'rag', '.');

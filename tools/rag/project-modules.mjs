@@ -5,6 +5,7 @@ import { resolveConfigValue } from './config.mjs';
 import { checkTools } from './project-tools.mjs';
 import { checkTrialLimits, trialCheckpoint } from './project-trials.mjs';
 import { isSearchProject, serveTemplate, validateServe } from './project-serving.mjs';
+import { projectModel } from './project-global.mjs';
 
 const integer = (min, max, value) => z.number().int().min(min).max(max).default(value);
 const choice = (values, value) => z.enum(values).default(value);
@@ -131,26 +132,32 @@ const sectionComments = {
 
 function defaultEntry(name, overrides = {}) {
   const { args } = modules.get(name);
-  return { use: name, with: { ...z.object(args).parse({}), ...overrides } };
+  return { use: name, with: z.object(args).parse(overrides) };
 }
 
-export function ragTemplate(type, path) {
+export function ragTemplate(type, path, { embedding, llm } = {}) {
   const config = { init: { version: 1, type } };
   for (const [stage, names] of Object.entries(sequences)) {
     if (stage === 'ask' && type !== 'rag') continue;
     config[stage] = { modules: names.map((name) => defaultEntry(name, name === 'source.filesystem' ? { path } : {})) };
   }
-  if (type === 'rag') config.models = { answerer: { provider: 'ollama', kind: 'chat', base_url: 'http://localhost:11434', model: null } };
+  if (type === 'rag') config.models = { answerer: projectModel('chat', llm) };
+  if (embedding) {
+    const reference = { model: 'embedder' };
+    config.models = { ...config.models, embedder: projectModel('embedding', embedding) };
+    config.index.modules.push(defaultEntry('index.vector', reference));
+    config.search.modules.splice(-1, 0, defaultEntry('retrieval.vector', reference), defaultEntry('fusion.rrf'));
+  }
   config.serve = serveTemplate(type);
   return config;
 }
 
-export function wikiTemplate(type, title, purpose) {
+export function wikiTemplate(type, title, purpose, llm) {
   const entry = (use, args = {}) => ({ use, with: args });
   return {
     init: { version: 1, type },
     about: { title, purpose: purpose ?? '', out_of_scope: '' },
-    models: { writer: { provider: 'ollama', kind: 'chat', base_url: 'http://localhost:11434', model: null } },
+    models: { writer: projectModel('chat', llm) },
     ingress: { modules: [
       defaultEntry('loader.auto'), defaultEntry('index.keyword'),
       entry(type === 'wiki' ? 'wiki.write' : 'para.write', { model: 'writer', rules: './rules.md', max_pages_per_job: 20 }),
@@ -174,7 +181,11 @@ export function writeTemplate(config) {
       transform: 'Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.',
       index: 'Additional index: use: index.vector, with: { model: local-embed }.',
       search: 'For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.',
-    })) yaml = yaml.replace(new RegExp('^' + stage + ':$', 'mu'), '# ' + example + '\n' + stage + ':');
+    })) {
+      if (stage === 'index' && config.index?.modules?.some?.(({ use }) => ['index.vector', 'hannoy.index'].includes(use))
+        || stage === 'search' && config.search?.modules?.some?.(({ use }) => use === 'fusion.rrf')) continue;
+      yaml = yaml.replace(new RegExp('^' + stage + ':$', 'mu'), '# ' + example + '\n' + stage + ':');
+    }
   }
   return yaml.replace(/^(source|transform|index|search|ask|serve):$/gmu, (text, section) =>
     '# ' + sectionComments[section] + '\n' + text);

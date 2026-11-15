@@ -23,6 +23,7 @@ import { changeTool, toolsCatalog } from './project-tools.mjs';
 import { checkIndexTool, hannoy } from './project-index-tool.mjs';
 import { checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage } from './project-trials.mjs';
 import { answerModel, answerQuestion, answerText } from './project-answer.mjs';
+import { configureGlobal, initialModels } from './project-global.mjs';
 import { serveRagHttp } from './project-rag-http.mjs';
 import { searchOutput } from './project-search-output.mjs';
 import { isSearchProject, serveAddress, serveCredential, withServeOverrides } from './project-serving.mjs';
@@ -33,7 +34,8 @@ const configName = 'Dunlinfile.yaml';
 let DatabaseSync;
 const projectTypes = ['mcp', 'rag', 'wiki', 'para'];
 export const projectCommands = {
-  init: 'dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> (mcp/rag) | --purpose <text> (wiki/para)] [--json]',
+  init: 'dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--json]',
+  config: 'dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config unset <embedding|llm> [--json]',
   build: 'dunlin build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]',
   source: 'dunlin source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]',
   transform: 'dunlin transform [--project <directory>] [--config <file>] [--dry-run] [--json]',
@@ -143,7 +145,8 @@ function ensureStages(db) {
     CREATE TABLE IF NOT EXISTS embeddings (id TEXT PRIMARY KEY, data BLOB NOT NULL);`);
 }
 
-async function initialize(type, directory, { source, purpose }) {
+async function initialize(type, directory, values) {
+  const { source, purpose } = values;
   const root = resolve(directory);
   const paths = projectPaths(root);
   const configPath = join(root, configName);
@@ -153,8 +156,9 @@ async function initialize(type, directory, { source, purpose }) {
   }
   const location = source?.match(/^~[\\/]/u) ? resolve(homedir(), source.slice(2)) : source;
   const path = source === undefined ? './docs' : relative(root, resolve(location)).split(sep).join('/') || '.';
+  const models = await initialModels(type, values);
+  const config = isSearchProject(type) ? ragTemplate(type, path, models) : wikiTemplate(type, basename(root), purpose, models.llm);
   await mkdir(root, { recursive: true });
-  const config = isSearchProject(type) ? ragTemplate(type, path) : wikiTemplate(type, basename(root), purpose);
   await writeFile(configPath, writeTemplate(config), { flag: 'wx' });
   if (isSearchProject(type) && source === undefined) await mkdir(join(root, 'docs'), { recursive: true });
   if (!isSearchProject(type)) {
@@ -182,9 +186,14 @@ async function initialize(type, directory, { source, purpose }) {
   await writeFile(join(root, '.gitignore'), '.dunlin/\n.env\n.env.*\n', { flag: 'wx' }).catch((error) => {
     if (error.code !== 'EEXIST') throw error;
   });
-  const next = type === 'rag' ? 'Add documents and run dunlin build. Set models.answerer.model before using ask or the responses endpoint.'
-    : type === 'mcp' ? 'Add documents, then run dunlin build and dunlin serve --print-config.'
-      : 'Set models.writer.model and about.purpose, then run dunlin ingress.';
+  let next;
+  if (type === 'mcp') next = 'Add documents, then run dunlin build and dunlin serve --print-config.';
+  else if (type === 'rag') next = 'Add documents and run dunlin build. ' + (models.llm?.model
+    ? 'Run dunlin ask or dunlin serve.' : 'Set models.answerer.model before using ask or the responses endpoint.');
+  else {
+    const missing = [!models.llm?.model && 'models.writer.model', !purpose && 'about.purpose'].filter(Boolean);
+    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run dunlin ingress.' : 'Run dunlin ingress <path>.';
+  }
   return { config: configPath, type, next };
 }
 
@@ -1096,8 +1105,11 @@ export async function runProjectCommand(command, args, explicitProject) {
     const options = { help: { type: 'boolean', short: 'h' } };
     options.json = { type: 'boolean' };
     if (command === 'init') {
-      options.source = { type: 'string' };
-      options.purpose = { type: 'string' };
+      for (const key of ['source', 'purpose', 'embedding-model', 'embedding-provider', 'llm-model', 'llm-provider']) options[key] = { type: 'string' };
+      for (const key of ['no-embedding', 'no-llm']) options[key] = { type: 'boolean' };
+    } else if (command === 'config') {
+      options.provider = { type: 'string' };
+      options.model = { type: 'string' };
     } else options.project = { type: 'string' };
     if (command === 'build' || command === 'source') options['skip-unsupported'] = { type: 'boolean' };
     if (command === 'build' || stages.includes(command)) options['dry-run'] = { type: 'boolean' };
@@ -1154,7 +1166,8 @@ export async function runProjectCommand(command, args, explicitProject) {
     if (command === 'serve' && json && !values['print-config']) {
       throw new ProjectError(2, 'INVALID_ARGUMENT', 'Use --json with serve --print-config.');
     }
-    const actions = command === 'eval-data' ? { add: 1, import: 2, export: 2, list: 1, show: 2, split: 1,
+    const actions = command === 'config' ? { list: 1, set: 2, unset: 2 }
+      : command === 'eval-data' ? { add: 1, import: 2, export: 2, list: 1, show: 2, split: 1,
       generate: 1, review: 2, sync: 2, diff: 3, tag: 3, use: 2 }
       : command === 'report' ? { show: 2, list: 1, compare: 3 }
       : command === 'evidence-map' ? { create: 1, list: 1, show: 2, export: 2, import: 2, confirm: 2 } : null;
@@ -1166,7 +1179,7 @@ export async function runProjectCommand(command, args, explicitProject) {
       : ['search', 'ask', 'modules', 'use', 'query', 'archive', 'undo', 'remove', 'instruct', 'progress'].includes(command) || command === 'add' && !values.list ? 1 : 0;
     if (positionals.length !== count || positionals.some((item) => !item.trim())
       || values.source === '' || values.project === '' || (explicitProject !== undefined && values.project !== undefined)
-      || (command === 'init' && explicitProject !== undefined)) {
+      || (['init', 'config'].includes(command) && explicitProject !== undefined)) {
       throw new ProjectError(2, 'INVALID_ARGUMENT', projectCommands[command]);
     }
     const [type, directory] = positionals;
@@ -1211,6 +1224,9 @@ export async function runProjectCommand(command, args, explicitProject) {
       });
     } else if (command === 'add' && values.list) {
       data = [...toolsCatalog.values()];
+    } else if (command === 'config') {
+      if (type !== 'list') runId = `run-${randomUUID()}`;
+      data = await configureGlobal(type, directory, values);
     } else if (command === 'init') {
       ({ DatabaseSync } = await import('node:sqlite'));
       runId = `run-${randomUUID()}`;
@@ -1386,6 +1402,10 @@ export async function runProjectCommand(command, args, explicitProject) {
     if (!json) for (const { message } of warnings) console.error(message);
     if (json) console.log(JSON.stringify(envelope(command, 'succeeded', runId, data, warnings)));
     else if (command === 'init') console.log(data.config + (data.next ? '\n' + data.next : ''));
+    else if (command === 'config') console.log([data.path, ...['embedding', 'llm'].map((role) => {
+      const setting = data[role];
+      return role + '  ' + (setting ? setting.provider + ' / ' + setting.model : 'unset');
+    })].join('\n'));
     else if (command === 'search') console.log(`${data.build_id} ${data.search_config_id}\n${data.context.text || 'No matches.'}`);
     else if (command === 'ask') console.log(answerText(data));
     else if (command === 'status' && data.build_id) {

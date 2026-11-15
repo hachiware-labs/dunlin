@@ -13,7 +13,7 @@ Dunlin は、手元の資料から立ち上げられるローカルのナレッ�
 | `init wiki` | `ingress`、`query`、`verify` で資料をページに反映・検査 | `127.0.0.1:4319` で Wiki を表示 |
 | `init para` | Wiki と同じ操作で Projects・Areas・Resources・Archives のノートを管理 | `127.0.0.1:4319` で PARA を表示 |
 
-初期化すると、作業ディレクトリに `Dunlinfile.yaml` と `.dunlin/state.sqlite` を作ります。コマンドはそのディレクトリ内で実行するか、`--project <directory>` で対象を指定します。
+初期化すると、作業ディレクトリに `Dunlinfile.yaml` と `.dunlin/state.sqlite` を作ります。コマンドはそのディレクトリ内で実行するか、`--project <directory>` で対象を指定します。 [4種別の初期設定](docs/dunlin-spec.md#41-初期化と作業ディレクトリ)
 
 MCP と RAG では、`--source <directory>` を省くとプロジェクト内の `docs/` を使います。標準のキーワード検索は同梱の Lindera と IPADIC で分かち書きし、自然文で問い合わせできます。`search --json` の `data`、MCP の `structuredContent`、HTTP の `/v1/search` は共通形式です。RAG の回答を使うには `models.answerer.model` にモデル名を設定します。[起動手順](docs/mcp.md) · [日本語検索とユーザー辞書](docs/mcp.md#日本語検索とユーザー辞書)
 

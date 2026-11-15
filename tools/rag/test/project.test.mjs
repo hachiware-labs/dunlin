@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -225,6 +225,53 @@ test('runs only the selected stages and indexes the saved chunk ranges', { timeo
     assert.ok(result.errors.every(({ file, line }) => file.endsWith('Dunlinfile.yaml') && line > 0));
     return true;
   });
+});
+
+test('shares immutable segment files while preserving the previous build', { timeout: 30_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dunlin-index-segments-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const json = async (...args) => JSON.parse((await runNode(process.execPath, [cli, ...args, '--json'],
+    { cwd: root, env, encoding: 'utf8', timeout: 10_000 })).stdout);
+  await json('init', 'rag', '.');
+  const document = join(root, 'docs', 'guide.txt');
+  await writeFile(document, '交換周期は6か月です。\n');
+  await writeFile(join(root, 'docs', 'reference.txt'), '検査には絶縁手袋を使います。\n');
+  const initial = await json('build');
+  const original = (await json('search', '交換周期')).data;
+  assert.match(original.context.text, /6か月/u);
+
+  const artifacts = join(root, '.dunlin', 'artifacts');
+  const prior = join(artifacts, initial.run_id, '.dunlin-index-v1');
+  const files = await readdir(prior);
+  const segment = files.find((name) => /^[0-9a-f]{32}\.idx$/u.test(name));
+  assert.ok(segment);
+  const priorIndex = join(prior, segment);
+  const probe = join(root, 'link-probe');
+  const supportsLinks = await link(priorIndex, probe).then(() => true, (failure) => {
+    if (['EACCES', 'EINVAL', 'EMLINK', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'EXDEV'].includes(failure.code)) return false;
+    throw failure;
+  });
+  if (supportsLinks) await rm(probe);
+  const metadata = await readFile(join(prior, 'meta.json'));
+  const managed = await readFile(join(prior, '.managed.json'));
+
+  await writeFile(document, '交換周期は3か月です。\n');
+  const updated = await json('build');
+  const next = join(artifacts, updated.run_id, '.dunlin-index-v1');
+  const [oldFile, newFile] = await Promise.all([stat(priorIndex, { bigint: true }), stat(join(next, segment), { bigint: true })]);
+  if (supportsLinks) {
+    assert.equal(newFile.ino, oldFile.ino);
+    assert.ok(newFile.nlink > 1n);
+  } else {
+    assert.deepEqual(await readFile(join(next, segment)), await readFile(priorIndex));
+  }
+  assert.deepEqual(await readFile(join(prior, 'meta.json')), metadata);
+  assert.deepEqual(await readFile(join(prior, '.managed.json')), managed);
+  const current = (await json('search', '交換周期')).data;
+  assert.equal(current.build_id, updated.data.build_id);
+  assert.match(current.context.text, /3か月/u);
+  assert.deepEqual((await json('search', '交換周期', '--build', initial.data.build_id)).data, original);
 });
 
 test('initializes, builds, searches and serves the same Japanese evidence over MCP', { timeout: 30_000 }, async (t) => {

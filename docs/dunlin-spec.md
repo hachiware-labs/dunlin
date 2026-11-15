@@ -105,12 +105,12 @@ dunlin init para ./notes
 
 種別は4つあり、それぞれ「引く」ためのコマンドが決まっている。
 
-| 種別 | 系統 | 引くコマンド | 返すもの | モデル |
-| --- | --- | --- | --- | --- |
-| `mcp` | RAG/MCP側 | `search` | 根拠となる文脈と出典 | 不要 |
-| `rag` | RAG/MCP側 | `ask` | 回答の文章と出典 | 回答用のモデルが必要 |
-| `wiki` | LLM Wiki/PARA側 | `query` | ページに基づく回答と出典 | 執筆用のモデルが必要 |
-| `para` | LLM Wiki/PARA側 | `query` | ノートに基づく回答と出典 | 執筆用のモデルが必要 |
+| 種別 | 系統 | 引くコマンド | 返すもの | モデル | 生成される初期設定 |
+| --- | --- | --- | --- | --- | --- |
+| `mcp` | RAG/MCP側 | `search` | 根拠となる文脈と出典 | 不要 | [MCP の YAML](#mcp-の-dunlinfileyaml) |
+| `rag` | RAG/MCP側 | `ask` | 回答の文章と出典 | 回答用のモデルが必要 | [RAG の YAML](#rag-の-dunlinfileyaml) |
+| `wiki` | LLM Wiki/PARA側 | `query` | ページに基づく回答と出典 | 執筆用のモデルが必要 | [Wiki の YAML](#wiki-の-dunlinfileyaml) |
+| `para` | LLM Wiki/PARA側 | `query` | ノートに基づく回答と出典 | 執筆用のモデルが必要 | [PARA の YAML](#para-の-dunlinfileyaml) |
 
 `mcp` と `rag` は、構築から評価までの仕組みを共有する。違いは、回答を作るのが誰かである。`mcp` では根拠を受け取ったエージェントが回答を作り、`rag` では Dunlin が回答を作る。`rag` は `mcp` の設定に回答生成の区切りを足したものなので、`mcp` で始めて後から `rag` に広げられる。
 
@@ -280,15 +280,22 @@ dunlin serve
 
 ### 5.5 設定ファイルの例
 
-`dunlin init mcp ./kb --source ./docs` が書き出す標準構成の例を示す。モジュール名、キー、数値は案である。このファイルを編集しなくても、`build`、`search`、`serve` が動く。
+次の2例は、グローバル設定にモデルを登録せず、`init` に追加のオプションを渡さずに生成した `Dunlinfile.yaml` の全文である。入力ディレクトリの既定は `./docs`。`--source` を指定すると、`source.filesystem` の `with.path` にプロジェクトから見た指定先のパスが入る。
+
+標準の `search` は、Lindera + IPADIC で分かち書きし、Tantivy の BM25 でキーワード検索する。MCP は `serve` で stdio を使う。RAG は `ask` と HTTP の `serve` を備え、回答を生成するには `models.answerer.model` にモデル名を設定する。検索はモデル名が `null` のまま使える。 [HTTP の提供設定](#273-種別-rag-の-serve)
+
+`--embedding-model` またはグローバル設定で埋め込みモデルを指定すると、`models.embedder` と `index.vector` が加わる。`search` には `retrieval.vector`（`top_k: 10`）と `fusion.rrf`（`k: 60`）が加わり、キーワードとベクトルを組み合わせて検索する。 [初期化時のモデル指定](#初期化時のモデル指定)
+
+#### MCP の Dunlinfile.yaml
+
+`dunlin init mcp ./mcp`
 
 ```yaml
-# Dunlinfile.yaml（RAG/MCP側の標準構成）
 init:
   version: 1
   type: mcp
-
-# 情報源を走査し、原文テキストを抽出する
+# Additional parser: loader.ocr (requires dunlin add ocr).
+# Scan and extract documents. Optional OCR requires a loader.ocr module.
 source:
   modules:
     - use: source.filesystem
@@ -297,10 +304,10 @@ source:
         exclude: []
     - use: loader.auto
       with:
-        unsupported: error        # error または skip
+        unsupported: error
         ocr: none
-
-# テキストを前処理し、チャンクに分ける
+# Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.
+# Normalize and split text. Additional chunking modules can replace chunk.length.
 transform:
   modules:
     - use: text.normalize
@@ -311,20 +318,16 @@ transform:
         unit: characters
         size: 800
         overlap: 100
-
-# 索引を作る
+# Additional index: use: index.vector, with: { model: local-embed }.
+# Build the keyword index. An optional vector index uses index.vector.
 index:
   modules:
     - use: index.keyword
       with:
         tokenizer: lindera
-        user_dictionary: null    # UTF-8 のユーザー辞書 CSV を任意で指定する
-    # 追加例: ベクトル索引（models に埋め込み用モデルの定義が必要）
-    # - use: index.vector
-    #   with:
-    #     model: local-embed
-
-# 検索し、渡す文脈を組み立てる
+        user_dictionary: null
+# For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.
+# Retrieve candidates and assemble source context.
 search:
   modules:
     - use: query.normalize
@@ -336,41 +339,114 @@ search:
     - use: context.assemble
       with:
         budget_chars: 4000
-        retrieval: fill_budget    # fill_budget または top_k
+        retrieval: fill_budget
         max_candidates: 100
         merge_overlaps: true
         truncate_last: true
         include_headings: true
-
-# MCPで提供する
+# Expose the project through its configured transport.
 serve:
   transport: stdio
 ```
 
-`dunlin init rag` の場合は、`type` が `rag` になり、回答生成のためのモデルの定義と区切りが加わる。HTTP 提供の設定は27.3節に示す。
+#### RAG の Dunlinfile.yaml
+
+`dunlin init rag ./rag`
 
 ```yaml
-# 使うモデル
-models:
-  answerer:
-    provider: ollama
-    kind: chat
-    base_url: http://localhost:11434
-    model: null                   # 利用環境で指定する
-
-# 検索した文脈を使って回答を作る
+init:
+  version: 1
+  type: rag
+# Additional parser: loader.ocr (requires dunlin add ocr).
+# Scan and extract documents. Optional OCR requires a loader.ocr module.
+source:
+  modules:
+    - use: source.filesystem
+      with:
+        path: ./docs
+        exclude: []
+    - use: loader.auto
+      with:
+        unsupported: error
+        ocr: none
+# Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.
+# Normalize and split text. Additional chunking modules can replace chunk.length.
+transform:
+  modules:
+    - use: text.normalize
+      with:
+        unicode: nfkc
+    - use: chunk.length
+      with:
+        unit: characters
+        size: 800
+        overlap: 100
+# Additional index: use: index.vector, with: { model: local-embed }.
+# Build the keyword index. An optional vector index uses index.vector.
+index:
+  modules:
+    - use: index.keyword
+      with:
+        tokenizer: lindera
+        user_dictionary: null
+# For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.
+# Retrieve candidates and assemble source context.
+search:
+  modules:
+    - use: query.normalize
+      with:
+        unicode: nfkc
+    - use: retrieval.keyword
+      with:
+        top_k: 10
+    - use: context.assemble
+      with:
+        budget_chars: 4000
+        retrieval: fill_budget
+        max_candidates: 100
+        merge_overlaps: true
+        truncate_last: true
+        include_headings: true
+# Generate a sourced answer from the search context.
 ask:
   modules:
     - use: answer.generate
       with:
         model: answerer
-        cite: true                # 回答に出典を添える
-        on_no_evidence: decline   # 根拠がないときは答えない
+        cite: true
+        on_no_evidence: decline
+models:
+  answerer:
+    provider: ollama
+    kind: chat
+    base_url: http://localhost:11434
+    model: null
+# Expose the project through its configured transport.
+serve:
+  transport: http
+  host: 127.0.0.1
+  port: 4318
+  endpoints:
+    - responses
+    - search
+    - mcp
+  access:
+    allowed_hosts:
+      - localhost
+      - 127.0.0.1
+    allowed_origins: []
+    auth:
+      type: none
+      token_env: null
+  limits:
+    max_request_bytes: 1048576
+    request_timeout_seconds: 120
+    max_concurrent: 8
 ```
 
-`--embedding-model` またはユーザー設定で埋め込みモデルを指定すると、`mcp` と `rag` は `models.embedder` を書き出す。`index` には `index.vector`、`search` には `retrieval.vector` と `fusion.rrf` が加わり、キーワードとベクトルを組み合わせて検索する。`rag` の LLM の指定は `models.answerer`、`wiki` と `para` の LLM の指定は `models.writer` に書き出す。
+#### 評価用の設定例
 
-評価を始めるときに、次の区切りが加わる。最初の `eval-data add` が書き足す。
+評価データと評価方法を設定ファイルで指定する場合は、次の区切りを使う。
 
 ```yaml
 # 評価に使うデータ
@@ -391,6 +467,8 @@ eval:
       with:
         percentiles: [50, 95, 99]
 ```
+
+#### 試行用の設定
 
 試行では、このファイルを写した候補の設定を作り、変えたい値だけを書き換える。たとえば `transform` の `size` を 1200 にした候補を `build --from transform --config` に渡す。ファイル同士の差分が、そのまま「何を変えたか」になる。
 
@@ -952,49 +1030,46 @@ Wiki/PARA側は、資料を読んで知識をページやノートに蓄積し�
 
 ### 13.5 設定ファイルの例
 
-`dunlin init wiki ./wiki` が書き出す標準構成の例を示す。モジュール名、キー、数値は案である。利用者が最初に埋めるのは、`about` の目的と範囲、および使うモデルの名前だけである。
+次の2例は、グローバル設定にモデルを登録せず、`init` に追加のオプションを渡さずに生成した `Dunlinfile.yaml` の全文である。`about.title` にはプロジェクトのディレクトリ名が入る。`--purpose` を指定すると、その文が `about.purpose` に入る。取り込みを始めるには目的と `models.writer.model` を設定する。`--llm-model` やグローバル設定から執筆モデルを指定できる。 [初期化時のモデル指定](#初期化時のモデル指定)
+
+Wiki は `wiki.write` でページを書き、PARA は `para.write` でノートを書く。PARA の分類は Projects、Areas、Resources、Archives の4つで、`init para` が `site/` の下に各ディレクトリを作る。
+
+#### Wiki の Dunlinfile.yaml
+
+`dunlin init wiki ./wiki`
 
 ```yaml
-# Dunlinfile.yaml（LLM Wiki側の標準構成）
 init:
   version: 1
   type: wiki
-
-# この場所の目的と範囲。人が書く。AIは書き換えない
 about:
-  title: 設備保全ナレッジ
-  purpose: 設備保全の手順と部品情報をまとめる。
-  out_of_scope: 購買と契約は扱わない。
-
-# 使うモデル
+  title: wiki
+  purpose: ""
+  out_of_scope: ""
 models:
   writer:
     provider: ollama
     kind: chat
     base_url: http://localhost:11434
-    model: null                   # 利用環境で指定する
-
-# 資料を受け取り、読んでページに反映する
+    model: null
 ingress:
   modules:
     - use: loader.auto
       with:
         unsupported: error
         ocr: none
-    - use: index.keyword          # 根拠探し用。調整も評価もしない
+    - use: index.keyword
       with:
         tokenizer: trigram
         short_query: bigram
     - use: wiki.write
       with:
         model: writer
-        rules: ./rules.md         # 運用の決まり
+        rules: ./rules.md
         max_pages_per_job: 20
     - use: citation.verify
       with:
-        on_failure: reject        # 検証に通らない記述は保存しない
-
-# ページに対して質問する
+        on_failure: reject
 query:
   modules:
     - use: wiki.search
@@ -1003,37 +1078,133 @@ query:
     - use: wiki.answer
       with:
         model: writer
-
-# 検査する
 verify:
   modules:
     - use: check.citations
+      with: {}
     - use: check.stale_versions
+      with: {}
     - use: check.links
+      with: {}
     - use: check.orphans
-  content:                        # verify --content で実行する
+      with: {}
+  content:
     - use: check.contradictions
       with:
         model: writer
         scope: changed_and_related
-
-# アーカイブする
 archive:
   modules:
     - use: wiki.archive
       with:
         keep_links: true
-
-# 画面を提供する
+# Expose the project through its configured transport.
 serve:
+  transport: http
   host: 127.0.0.1
   port: 4319
-  pages: ./site                   # ページのHTMLの出力先
+  endpoints:
+    - web
+  access:
+    allowed_hosts:
+      - localhost
+      - 127.0.0.1
+    allowed_origins: []
+    auth:
+      type: none
+      token_env: null
+  limits:
+    max_request_bytes: 1048576
+    request_timeout_seconds: 120
+    max_concurrent: 8
+  pages: ./site
 ```
 
-PARAの場合は `type: para` とし、書くモジュールがノート用に変わる。区分は Projects、Areas、Resources、Archives の4つで固定されるので、設定では指定しない。それ以外の区切りは同じ形である。
+#### PARA の Dunlinfile.yaml
 
-RAG/MCP側と違い、こちらはモデルの指定がないと `ingress` が動かない。`init` の時点でモデルが未指定であることを表示し、指定のしかたを案内する。
+`dunlin init para ./para`
+
+```yaml
+init:
+  version: 1
+  type: para
+about:
+  title: para
+  purpose: ""
+  out_of_scope: ""
+models:
+  writer:
+    provider: ollama
+    kind: chat
+    base_url: http://localhost:11434
+    model: null
+ingress:
+  modules:
+    - use: loader.auto
+      with:
+        unsupported: error
+        ocr: none
+    - use: index.keyword
+      with:
+        tokenizer: trigram
+        short_query: bigram
+    - use: para.write
+      with:
+        model: writer
+        rules: ./rules.md
+        max_pages_per_job: 20
+    - use: citation.verify
+      with:
+        on_failure: reject
+query:
+  modules:
+    - use: wiki.search
+      with:
+        include_archived: false
+    - use: wiki.answer
+      with:
+        model: writer
+verify:
+  modules:
+    - use: check.citations
+      with: {}
+    - use: check.stale_versions
+      with: {}
+    - use: check.links
+      with: {}
+    - use: check.orphans
+      with: {}
+  content:
+    - use: check.contradictions
+      with:
+        model: writer
+        scope: changed_and_related
+archive:
+  modules:
+    - use: wiki.archive
+      with:
+        keep_links: true
+# Expose the project through its configured transport.
+serve:
+  transport: http
+  host: 127.0.0.1
+  port: 4319
+  endpoints:
+    - web
+  access:
+    allowed_hosts:
+      - localhost
+      - 127.0.0.1
+    allowed_origins: []
+    auth:
+      type: none
+      token_env: null
+  limits:
+    max_request_bytes: 1048576
+    request_timeout_seconds: 120
+    max_concurrent: 8
+  pages: ./site
+```
 
 ## 14 ingress、query、verify、archive の動作
 

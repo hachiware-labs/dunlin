@@ -264,8 +264,8 @@ export class Dunlin {
     return cancellable(signal, (cancel) => native().inspectIndex(directory, cancel));
   }
 
-  /** Score a completed immutable float32 vector artifact. */
-  static async rankVectors(path: string, options: { needle: readonly number[]; positions: readonly number[]; rows: number; limit: number },
+  /** Score a completed immutable float32 vector artifact. Omit positions to search all rows. */
+  static async rankVectors(path: string, options: { needle: readonly number[]; positions?: readonly number[]; rows: number; limit: number },
     { signal }: OperationOptions = {}): Promise<{ i: number; score: number }[]> {
     return cancellable(signal, (cancel) => native().rankVectors(resolve(path), JSON.stringify(options), cancel));
   }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { cp, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, link, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { once } from 'node:events';
 import { homedir } from 'node:os';
@@ -18,7 +18,7 @@ import { chunkCorpus, inventory, loadCorpus, scanFolder, unsupportedFiles } from
 import { ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
-import { buildVectorIndex, fuseResults, semanticChunks, vectorBackend, vectorModel, vectorSearch } from './project-vectors.mjs';
+import { buildVectorIndex, fuseResults, releaseVectorMetadata, semanticChunks, vectorBackend, vectorModel, vectorSearch } from './project-vectors.mjs';
 import { changeTool, toolsCatalog } from './project-tools.mjs';
 import { checkIndexTool, hannoy } from './project-index-tool.mjs';
 import { checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage } from './project-trials.mjs';
@@ -421,6 +421,32 @@ function dictionarySnapshot(paths, hash) {
   return join(paths.artifacts, 'dictionaries', hash + '.csv');
 }
 
+async function copyIndexSnapshot(source, target) {
+  const keywordDir = '.dunlin-index-v1';
+  const from = join(source, keywordDir);
+  const to = join(target, keywordDir);
+  const options = { recursive: true, mode: constants.COPYFILE_FICLONE,
+    filter: (path) => !path.endsWith('-shm') && !/vectors\.(json|f32)$/u.test(path) && basename(path) !== 'hannoy' };
+  await cp(source, target, { ...options, filter: (path) => path !== from && options.filter(path) });
+
+  await mkdir(to);
+  for (const entry of await readdir(from, { withFileTypes: true })) {
+    const input = join(from, entry.name);
+    const output = join(to, entry.name);
+    // Tantivy writes these completed segment components once. Metadata, delete bitsets, and locks get their own copies.
+    if (entry.isFile() && /^[0-9a-f]{32}\.(?:idx|pos|term|store|fast|fieldnorm)$/u.test(entry.name)) {
+      try {
+        await link(input, output);
+        continue;
+      } catch (error) {
+        if (!['EACCES', 'EINVAL', 'EMLINK', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'EXDEV'].includes(error.code)) throw error;
+      }
+    }
+    await cp(input, output, options);
+  }
+  await chmod(to, (await lstat(from)).mode);
+}
+
 async function runIndex(db, project, runId, transformed, { keyword: args, vector: vectorArgs }, { force, activate, tag, generation, warnings, signal }) {
   const { paths } = project;
   const source = readStage(db, 'source', transformed.source_id);
@@ -480,10 +506,7 @@ async function runIndex(db, project, runId, transformed, { keyword: args, vector
       const baseline = !force && prior?.shared_corpus && JSON.stringify(prior.keyword) === JSON.stringify(keyword)
         && await Dunlin.inspectIndex(join(paths.artifacts, prior.index));
       if (baseline) {
-        await cp(join(paths.artifacts, prior.index), location, {
-          recursive: true, mode: constants.COPYFILE_FICLONE,
-          filter: (path) => !path.endsWith('-shm') && !/vectors\.(json|f32)$/u.test(path) && basename(path) !== 'hannoy',
-        });
+        await copyIndexSnapshot(join(paths.artifacts, prior.index), location);
       }
       const database = await Dunlin.open(location, { corpusBackend: 'sqlite', corpusDirectory: paths.corpus, ...keywordOptions(keyword, paths) })
         .catch((error) => {
@@ -905,7 +928,7 @@ async function searchProject(database, build, plan, query, project, options = {}
       if (!input.query.trim()) throw new ProjectError(2, 'INVALID_QUERY', 'Enter a search query.');
       const embedder = vectorModel({ models: build.search_models ?? project.config.models }, model);
       const result = await vectorSearch(join(project.paths.artifacts, build.index), build, embedder, input.query, {
-        max: contextPlan.retrieval === 'top_k' ? limit ?? top_k : max, sourceIds, signal,
+        database, max: contextPlan.retrieval === 'top_k' ? limit ?? top_k : max, sourceIds, signal,
         backend: vectorBackend(name, project.paths, { settings, signal }),
       });
       results.push(result);
@@ -1021,8 +1044,14 @@ async function waitForHttp(server, type, host) {
 async function serveProject(project, settings) {
   const type = project.config.init.type;
   const state = openState(project.paths, true);
-  let database;
+  const indexes = new Map();
   let handle;
+  async function closeIndex({ opening }) {
+    const database = await opening.catch(() => null);
+    if (!database) return;
+    releaseVectorMetadata(database);
+    await database.close();
+  }
   try {
     const initial = state.prepare(`SELECT manifest, coalesce((SELECT max(id) FROM adoption_history), 0) AS generation
       FROM project JOIN builds ON builds.id = project.build_id WHERE project.id = 1`).get();
@@ -1030,26 +1059,47 @@ async function serveProject(project, settings) {
     const build = JSON.parse(initial.manifest);
     assertSearchIndexes(build, project.plan.search);
     const model = settings.endpoints?.includes('responses') ? answerModel(project, { optional: true }) : null;
-    database = await openBuild(project.paths, build);
+    const database = await openBuild(project.paths, build);
+    indexes.set(build.index, { opening: Promise.resolve(database), users: 0 });
     const usesKeyword = project.plan.search.some(({ module }) => module.name === 'retrieval.keyword');
     const usesVector = project.plan.search.some(({ module }) => ['retrieval.vector', 'hannoy.search'].includes(module.name));
     const activeBuild = state.prepare(`SELECT manifest FROM serving_generations JOIN builds ON builds.id = serving_generations.build_id
       WHERE serving_generations.id = ?`);
     let compatible = build;
+    function closeUnusedIndex(index) {
+      const entry = indexes.get(index);
+      if (entry?.users === 0 && index !== compatible.index) {
+        indexes.delete(index);
+        return closeIndex(entry);
+      }
+    }
     async function withActive(callback) {
       const row = activeBuild.get(initial.generation);
       const current = row ? JSON.parse(row.manifest) : build;
       const keywordChanged = usesKeyword && JSON.stringify(current.keyword) !== JSON.stringify(build.keyword);
       const vectorChanged = usesVector && (current.vector?.identity !== build.vector?.identity
         || (current.vector?.backend ?? 'exact') !== (build.vector?.backend ?? 'exact'));
+      const previousIndex = compatible.index;
       if (!keywordChanged && !vectorChanged) compatible = current;
       const selected = compatible;
-      if (selected.index === build.index) return callback(database, selected);
-      const latest = await openBuild(project.paths, selected);
+      let entry = indexes.get(selected.index);
+      if (!entry) {
+        const opening = openBuild(project.paths, selected).catch((error) => {
+          indexes.delete(selected.index);
+          throw error;
+        });
+        entry = { opening, users: 0 };
+        indexes.set(selected.index, entry);
+      }
+      // Concurrent requests share the open and keep their index until the callback finishes.
+      entry.users++;
       try {
-        return await callback(latest, selected);
+        return await callback(await entry.opening, selected);
       } finally {
-        await latest.close();
+        entry.users--;
+        if (previousIndex !== selected.index || selected.index !== compatible.index) {
+          await Promise.all([closeUnusedIndex(previousIndex), closeUnusedIndex(selected.index)]);
+        }
       }
     }
     const search = (query, options) => withActive((db, active) =>
@@ -1099,7 +1149,7 @@ async function serveProject(project, settings) {
     try { await handle?.close(); }
     finally {
       state.close();
-      await database?.close();
+      await Promise.all([...indexes.values()].map(closeIndex));
     }
   }
 }

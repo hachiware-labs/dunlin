@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -38,8 +38,8 @@ async function project(t) {
   return { cwd, env, run, json, document, config, configFile, save, build, cleanup };
 }
 
-async function start({ cwd, env, cleanup }, ...args) {
-  const child = spawn(process.execPath, [cli, 'serve', ...args], { cwd, env, stdio: ['ignore', 'ignore', 'pipe'] });
+async function start({ cwd, env, cleanup, nodeArgs = [] }, ...args) {
+  const child = spawn(process.execPath, [...nodeArgs, cli, 'serve', ...args], { cwd, env, stdio: ['ignore', 'ignore', 'pipe'] });
   const exited = once(child, 'exit');
   cleanup.push(async () => {
     if (child.exitCode === null && child.signalCode === null) child.kill();
@@ -144,7 +144,18 @@ test('shares one RAG search payload, grounded answers and live index across CLI,
   const stdioLaunch = (await kb.json('serve', '--transport', 'stdio', '--print-config')).data;
   kb.cleanup.push(() => stdio.close());
   await stdio.connect(new StdioClientTransport({ ...stdioLaunch, cwd: kb.cwd, stderr: 'ignore' }));
-  const base = await start(kb, '--port', '0');
+  const openLog = join(kb.cwd, 'index-opens.log');
+  const traceOpens = join(kb.cwd, 'trace-index-opens.mjs');
+  await writeFile(traceOpens, `
+    import { appendFile } from 'node:fs/promises';
+    import { Dunlin } from ${JSON.stringify(import.meta.resolve('dunlin'))};
+    const open = Dunlin.open;
+    Dunlin.open = async function (path, options) {
+      await appendFile(${JSON.stringify(openLog)}, path + '\\n');
+      return open.call(this, path, options);
+    };
+  `);
+  const base = await start({ ...kb, nodeArgs: ['--import', pathToFileURL(traceOpens).href] }, '--port', '0');
   const mcp = new Client({ name: 'http-test', version: '1.0.0' });
   kb.cleanup.push(() => mcp.close());
   await mcp.connect(new StreamableHTTPClientTransport(new URL('/mcp', base)));
@@ -196,9 +207,20 @@ test('shares one RAG search payload, grounded answers and live index across CLI,
   await kb.json('build');
   const updated = (await kb.json('search', query)).data;
   assert.notEqual(updated.build_id, cliSearch.build_id);
+  assert.match(updated.context.text, /3か月/u);
+  const concurrent = await Promise.all([
+    ok(post(base, '/v1/search', { query })),
+    ok(post(base, '/v1/search', { query })),
+    mcpSearch(mcp),
+  ]);
+  for (const result of concurrent) assert.deepEqual(result, updated);
   assert.deepEqual(await ok(post(base, '/v1/search', { query })), updated);
   assert.deepEqual(await mcpSearch(mcp), updated);
+  assert.deepEqual(await mcpSearch(stdio), updated);
   checkAnswer(await ok(post(base, '/v1/responses', { input: query })), updated);
+  const opens = (await readFile(openLog, 'utf8')).trimEnd().split('\n');
+  assert.equal(opens.length, 2, 'open the startup and updated indexes once each');
+  assert.notEqual(opens[0], opens[1]);
 });
 
 test('enforces host, origin, token, endpoint, size, time and concurrency limits on a live listener', { timeout: 45_000 }, async (t) => {

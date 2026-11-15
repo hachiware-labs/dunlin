@@ -9,7 +9,7 @@ use crate::{Cancellation, Error, Result};
 #[derive(Deserialize)]
 pub(crate) struct Search {
     needle: Vec<f64>,
-    positions: Vec<usize>,
+    positions: Option<Vec<usize>>,
     rows: usize,
     limit: usize,
 }
@@ -31,11 +31,14 @@ pub(crate) fn rank(path: &Path, search: Search, cancel: &Cancellation) -> Result
         || needle.len() > 65_536
         || !(1..=100).contains(&limit)
         || needle.iter().any(|value| !value.is_finite())
-        || positions.iter().any(|&index| index >= rows)
+        || positions
+            .as_ref()
+            .is_some_and(|positions| positions.iter().any(|&index| index >= rows))
     {
         return Err(Error::Invalid("Invalid vector ranking input"));
     }
-    if positions.is_empty() {
+    let count = positions.as_ref().map_or(rows, Vec::len);
+    if count == 0 {
         return Ok(Vec::new());
     }
     let width = needle.len() * size_of::<f32>();
@@ -56,8 +59,11 @@ pub(crate) fn rank(path: &Path, search: Search, cancel: &Cancellation) -> Result
     // The build path supplied by the CLI refers to an immutable, completed artifact.
     let vectors = unsafe { MmapOptions::new().len(bytes).map(&file) }
         .map_err(|_| Error::Io("Could not map the vector index"))?;
-    let score = |i: usize| {
+    let score = |candidate: usize| {
         cancel.check()?;
+        let i = positions
+            .as_ref()
+            .map_or(candidate, |positions| positions[candidate]);
         let score = vectors[i * width..(i + 1) * width]
             .chunks_exact(4)
             .zip(&needle)
@@ -71,13 +77,14 @@ pub(crate) fn rank(path: &Path, search: Search, cancel: &Cancellation) -> Result
         }
         Ok(Hit { i, score })
     };
-    let mut ranked: Vec<Hit> = if positions.len().saturating_mul(needle.len()) >= 1_000_000 {
-        positions
+    let candidates = 0..count;
+    let mut ranked: Vec<Hit> = if count.saturating_mul(needle.len()) >= 1_000_000 {
+        candidates
             .into_par_iter()
             .map(score)
             .collect::<Result<_>>()?
     } else {
-        positions.into_iter().map(score).collect::<Result<_>>()?
+        candidates.map(score).collect::<Result<_>>()?
     };
     let order = |a: &Hit, b: &Hit| b.score.total_cmp(&a.score).then(a.i.cmp(&b.i));
     if ranked.len() > limit {

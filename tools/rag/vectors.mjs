@@ -78,8 +78,8 @@ async function loadSnapshot(store, sourceIds) {
   return snapshot;
 }
 
-async function embedBatch(embedder, input) {
-  const vectors = await embedder.embed(input);
+export async function embedBatch(embedder, input, signal) {
+  const vectors = await embedder.embed(input, signal);
   if (!Array.isArray(vectors) || vectors.length !== input.length) {
     throw new Error('Embedding provider returned the wrong number of vectors');
   }

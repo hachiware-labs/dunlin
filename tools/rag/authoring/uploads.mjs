@@ -15,18 +15,18 @@ export async function withUploadLock(root, document, write) {
   return withWriteLock(parent, write);
 }
 
-export async function prepareDocument(root, sourceId, document, parsed) {
+export async function prepareDocument(root, sourceId, document, parsed, { sharedOriginals = false } = {}) {
   const { bytes, content, format, locations, parser } = parsed;
-  const original = bytes && await saveOriginal(root, { sourceId, ...document }, bytes);
+  const original = bytes && await saveOriginal(root, { sourceId, ...document }, bytes, sharedOriginals);
   return {
     input: { ...document, content, format, corpus: { locations, parser, originalSha256: original?.sha256 } },
     original,
   };
 }
 
-async function saveOriginal(root, document, bytes) {
-  const sourceId = archiveId(document);
-  const parent = uploadDirectory(root, sourceId);
+async function saveOriginal(root, document, bytes, shared) {
+  const sourceId = shared ? 'shared' : archiveId(document);
+  const parent = shared ? join(root, 'shared') : uploadDirectory(root, sourceId);
   await directory(root, true);
   await directory(parent, true);
   const sha256 = revision(bytes);
@@ -42,6 +42,14 @@ async function saveOriginal(root, document, bytes) {
 
 export function originalForDigest(document, sha256) {
   return originalReference(archiveId(document), sha256, originalName(document.objectId));
+}
+
+export async function sharedOriginalForDigest(root, document, sha256) {
+  if (!sha256Pattern.test(sha256)) throw new Error('Invalid original digest');
+  const bytesPath = join(root, 'shared', sha256 + '.bin');
+  const { stat } = await import('node:fs/promises');
+  const info = await stat(bytesPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+  return info?.isFile() ? originalReference('shared', sha256, originalName(document.objectId)) : originalForDigest(document, sha256);
 }
 
 export function isUploadedSource(sourceId) {

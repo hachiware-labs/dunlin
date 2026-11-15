@@ -1,3 +1,4 @@
+use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,8 +12,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
-    Cancellation, DocumentRef, Evidence, ExploreOptions, KnowledgeBase, RetrievalMethod,
-    source::DocumentInput,
+    Cancellation, CorpusBackend, DocumentRef, Evidence, ExploreOptions, KnowledgeBase,
+    RetrievalMethod, source::DocumentInput,
 };
 
 #[napi]
@@ -35,13 +36,68 @@ impl NativeCancellation {
 pub struct NativeDatabase(Option<Arc<KnowledgeBase>>);
 
 #[napi]
-pub fn open_native(path: String, cancel: &NativeCancellation) -> AsyncTask<Job<NativeDatabase>> {
+pub struct NativeExecutionLock(Option<File>);
+
+#[napi]
+impl NativeExecutionLock {
+    #[napi]
+    pub fn release(&mut self) {
+        self.0.take();
+    }
+}
+
+#[napi]
+pub fn acquire_execution_lock(path: String) -> Result<NativeExecutionLock> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|_| {
+            native_error(crate::Error::Io(
+                "Could not open the project execution lock",
+            ))
+        })?;
+    file.try_lock().map_err(|error| match error {
+        TryLockError::WouldBlock => native_error(crate::Error::Busy),
+        TryLockError::Error(_) => native_error(crate::Error::Io(
+            "Could not acquire the project execution lock",
+        )),
+    })?;
+    Ok(NativeExecutionLock(Some(file)))
+}
+
+#[napi]
+pub fn open_native(
+    path: String,
+    cancel: &NativeCancellation,
+    backend: Option<String>,
+    keyword_ngrams: Option<bool>,
+    keyword_bigrams: Option<bool>,
+    corpus_path: Option<String>,
+) -> AsyncTask<Job<NativeDatabase>> {
     let cancel = cancel.0.clone();
     task(move || {
-        Ok(NativeDatabase(Some(Arc::new(KnowledgeBase::open(
-            Path::new(&path),
-            &cancel,
-        )?))))
+        let backend = match backend.as_deref() {
+            None | Some("sqlite") => CorpusBackend::Sqlite,
+            Some("json") => CorpusBackend::Json,
+            _ => {
+                return Err(crate::Error::Invalid(
+                    "Expected corpus backend sqlite or json",
+                ));
+            }
+        };
+        Ok(NativeDatabase(Some(Arc::new(
+            KnowledgeBase::open_with_options(
+                Path::new(&path),
+                backend,
+                corpus_path.as_deref().map(Path::new),
+                keyword_ngrams.unwrap_or(false),
+                keyword_bigrams.unwrap_or(false),
+                &cancel,
+            )?,
+        ))))
     })
 }
 
@@ -49,6 +105,20 @@ pub fn open_native(path: String, cancel: &NativeCancellation) -> AsyncTask<Job<N
 pub fn inspect_index(path: String, cancel: &NativeCancellation) -> AsyncTask<Job<Json>> {
     let cancel = cancel.0.clone();
     task(move || json(KnowledgeBase::inspect_index(Path::new(&path), &cancel)?))
+}
+
+#[napi]
+pub fn rank_vectors(
+    path: String,
+    request: String,
+    cancel: &NativeCancellation,
+) -> AsyncTask<Job<Json>> {
+    let cancel = cancel.0.clone();
+    task(move || {
+        let search = serde_json::from_str(&request)
+            .map_err(|_| crate::Error::Invalid("Invalid vector ranking options"))?;
+        json(crate::vector::rank(Path::new(&path), search, &cancel)?)
+    })
 }
 
 #[napi]

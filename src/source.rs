@@ -4,14 +4,14 @@ use std::io::Read;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 use walkdir::{DirEntry, WalkDir};
 
 use crate::corpus::CorpusMetadata;
 use crate::{
-    Cancellation, DocumentFormat, Error, Evidence, LineRange, Result, SourceDocument, SourceRef,
-    SyncOutcome,
+    ByteRange, Cancellation, DocumentFormat, Error, Evidence, LineRange, Result, SourceDocument,
+    SourceRef, SyncOutcome,
 };
 
 const MAX_BYTES: u64 = 1024 * 1024;
@@ -30,6 +30,16 @@ pub(crate) struct DocumentInput {
     #[serde(default)]
     corpus: CorpusMetadata,
     modified_at_ms: Option<u64>,
+    chunks: Option<Vec<DocumentChunk>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DocumentChunk {
+    heading: String,
+    range: LineRange,
+    byte_range: Option<ByteRange>,
+    search_text: Option<String>,
 }
 
 impl From<SourceDocument> for DocumentInput {
@@ -38,6 +48,7 @@ impl From<SourceDocument> for DocumentInput {
             document,
             corpus: CorpusMetadata::default(),
             modified_at_ms: None,
+            chunks: None,
         }
     }
 }
@@ -63,6 +74,7 @@ pub(crate) struct SourceObject {
     pub metadata: CorpusMetadata,
     pub parsed_version: String,
     markdown: bool,
+    chunks: Option<Vec<DocumentChunk>>,
 }
 
 impl SourceObject {
@@ -71,6 +83,7 @@ impl SourceObject {
             document,
             corpus: mut metadata,
             modified_at_ms,
+            chunks,
         } = input;
         let SourceDocument {
             object_id,
@@ -104,6 +117,7 @@ impl SourceObject {
             metadata,
             parsed_version,
             markdown: matches!(format, DocumentFormat::Markdown),
+            chunks,
         })
     }
 
@@ -115,39 +129,47 @@ impl SourceObject {
         }
     }
 
-    pub fn units(&self) -> impl Iterator<Item = (&str, &str, LineRange)> {
-        let mut lines = self.content.split_inclusive('\n').peekable();
-        let mut line_number = 1;
-        let mut offset = 0;
-        let mut heading = "";
-        std::iter::from_fn(move || {
-            let start_line = line_number;
-            let start_offset = offset;
-            for index in 0..WINDOW_LINES {
-                let Some(&line) = lines.peek() else { break };
-                if self.markdown
-                    && let Some(next_heading) = markdown_heading(line)
-                {
-                    if index > 0 {
-                        break;
-                    }
-                    heading = next_heading;
+    pub fn units(
+        &self,
+    ) -> Box<dyn Iterator<Item = (&str, &str, LineRange, Option<ByteRange>)> + '_> {
+        if let Some(chunks) = &self.chunks {
+            let mut lines = self.content.split_inclusive('\n');
+            let mut offset = 0;
+            return Box::new(chunks.iter().map(move |chunk| {
+                if let Some(bytes) = chunk.byte_range {
+                    let text = chunk
+                        .search_text
+                        .as_deref()
+                        .unwrap_or(&self.content[bytes.start..bytes.end]);
+                    return (chunk.heading.as_str(), text, chunk.range, Some(bytes));
                 }
-                lines.next();
-                offset += line.len();
-                line_number += 1;
-            }
-            (offset > start_offset).then(|| {
+                let start = offset;
+                offset += lines
+                    .by_ref()
+                    .take(chunk.range.end_line - chunk.range.start_line + 1)
+                    .map(str::len)
+                    .sum::<usize>();
                 (
-                    heading,
-                    &self.content[start_offset..offset],
-                    LineRange {
-                        start_line,
-                        end_line: line_number - 1,
-                    },
+                    chunk.heading.as_str(),
+                    &self.content[start..offset],
+                    chunk.range,
+                    None,
                 )
+            }));
+        }
+        Box::new(
+            line_units(&self.content, self.markdown, WINDOW_LINES).map(|(h, t, r)| (h, t, r, None)),
+        )
+    }
+
+    pub fn chunk_layout(&self) -> Result<Option<String>> {
+        self.chunks
+            .as_ref()
+            .map(|chunks| {
+                let encoded = serde_json::to_vec(chunks).map_err(|_| Error::Index)?;
+                Ok(blake3::hash(&encoded).to_hex().to_string())
             })
-        })
+            .transpose()
     }
 
     pub fn evidence(&self, range: LineRange) -> Evidence {
@@ -155,8 +177,46 @@ impl SourceObject {
             source: self.source.clone(),
             acquired_at_ms: self.acquired_at_ms,
             range,
+            byte_range: None,
         }
     }
+}
+
+fn line_units(
+    content: &str,
+    markdown: bool,
+    window: usize,
+) -> impl Iterator<Item = (&str, &str, LineRange)> {
+    let mut lines = content.split_inclusive('\n').peekable();
+    let mut line_number = 1;
+    let mut offset = 0;
+    let mut heading = "";
+    std::iter::from_fn(move || {
+        let start_line = line_number;
+        let start_offset = offset;
+        for index in 0..window {
+            let Some(&line) = lines.peek() else { break };
+            if markdown && let Some(next_heading) = markdown_heading(line) {
+                if index > 0 {
+                    break;
+                }
+                heading = next_heading;
+            }
+            lines.next();
+            offset += line.len();
+            line_number += 1;
+        }
+        (offset > start_offset).then(|| {
+            (
+                heading,
+                &content[start_offset..offset],
+                LineRange {
+                    start_line,
+                    end_line: line_number - 1,
+                },
+            )
+        })
+    })
 }
 
 pub(crate) fn validate_id(id: &str) -> Result<()> {
@@ -232,6 +292,59 @@ fn ingest_documents(
             return Err(Error::Invalid("A source document exceeds 1 MiB"));
         }
         let line_count = document.content.split_inclusive('\n').count();
+        if let Some(chunks) = &input.chunks {
+            let byte_mode = chunks
+                .first()
+                .is_some_and(|chunk| chunk.byte_range.is_some());
+            let line_starts = byte_mode.then(|| {
+                std::iter::once(0)
+                    .chain(document.content.match_indices('\n').map(|(i, _)| i + 1))
+                    .collect::<Vec<_>>()
+            });
+            let mut end = 0;
+            let mut start = 0;
+            for chunk in chunks {
+                let range = chunk.range;
+                if let Some(starts) = &line_starts {
+                    let bytes = chunk
+                        .byte_range
+                        .ok_or(Error::Invalid("Expected byte ranges for all chunks"))?;
+                    if (end > 0 && bytes.start <= start)
+                        || bytes.start > end
+                        || bytes.end <= end
+                        || bytes.end <= bytes.start
+                        || document.content.get(bytes.start..bytes.end).is_none()
+                        || range.start_line != starts.partition_point(|&i| i <= bytes.start)
+                        || range.end_line != starts.partition_point(|&i| i < bytes.end)
+                    {
+                        return Err(Error::Invalid("Invalid chunk byte offsets or source lines"));
+                    }
+                    start = bytes.start;
+                    end = bytes.end;
+                    continue;
+                }
+                if chunk.byte_range.is_some()
+                    || chunk.search_text.is_some()
+                    || range.start_line != end + 1
+                    || range.end_line < range.start_line
+                    || range.end_line > line_count
+                {
+                    return Err(Error::Invalid(
+                        "Expected consecutive chunk ranges within the document",
+                    ));
+                }
+                end = range.end_line;
+            }
+            if end
+                != if byte_mode {
+                    document.content.len()
+                } else {
+                    line_count
+                }
+            {
+                return Err(Error::Invalid("Chunk ranges must cover the document"));
+            }
+        }
         if input.corpus.locations.iter().any(|location| {
             let range = location.range;
             range.start_line == 0

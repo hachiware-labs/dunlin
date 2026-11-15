@@ -1,17 +1,23 @@
 # Dunlin
 
-Dunlin は、手元の資料を検索し、出典 URL と該当行を返すローカル知識基盤です。同じコーパスと索引を、PARA ノートの整理、LLM Wiki の作成、RAG による回答、MCP クライアントからの検索に使えます。
+Dunlin は、手元の資料から立ち上げられるローカルのナレッジ基盤です。コマンドと設定の仕様は [Dunlin 設計仕様 統合版 (2)](docs/dunlin-spec.md) を参照してください。
 
-## 目的別ガイド
+[受け入れ確認](docs/acceptance.md) に、§22 と §27 の確認結果を記録しています。
 
-| やりたいこと | 最初に作るもの | ガイド |
+## CLI の初期化
+
+| 初期化 | 主なコマンド | `serve` の既定 |
 |---|---|---|
-| PARA として使う | 進行中のプロジェクトに、資料を引用した HTML ノートを保存する | [PARA を始める](docs/para.md) |
-| LLM Wiki を作る | 出典付きの HTML ページを、目次・更新履歴と一緒に公開する | [LLM Wiki を作る](docs/llm-wiki.md) |
-| RAG を作る | 取り込んだ資料に質問し、回答と引用をターミナルで確認する | [RAG を作る](docs/rag.md) |
-| MCP を作る | ローカル資料の検索と根拠取得を、stdio 対応のクライアントから呼び出す | [MCP サーバーを作る](docs/mcp.md) |
+| `init mcp` | `build`、`search` で出典付きの文脈を取得 | stdio MCP |
+| `init rag` | `build`、`search`、`ask` で出典付きの回答を生成 | `127.0.0.1:4318` で `/v1/responses`、`/v1/search`、`/mcp` |
+| `init wiki` | `ingress`、`query`、`verify` で資料をページに反映・検査 | `127.0.0.1:4319` で Wiki を表示 |
+| `init para` | Wiki と同じ操作で Projects・Areas・Resources・Archives のノートを管理 | `127.0.0.1:4319` で PARA を表示 |
 
-PARA と LLM Wiki は、MCP クライアントが書いた本文と検証済みの出典を HTML ファイルとして保存します。ファイルはブラウザーで直接開けます。`dunlin serve --web` を使うと、ページ一覧から出典の該当行や原本までたどれます。RAG では `dunlin ask` が設定したモデルを呼び出します。検索専用の MCP は Dunlin 側のモデル設定なしで起動できます。
+初期化すると、作業ディレクトリに `Dunlinfile.yaml` と `.dunlin/state.sqlite` を作ります。コマンドはそのディレクトリ内で実行するか、`--project <directory>` で対象を指定します。
+
+MCP と RAG では、`--source <directory>` を省くとプロジェクト内の `docs/` を使います。両種別で同じ構築・検索モジュールを使い、`search --json` の `data`、MCP の `structuredContent`、HTTP の `/v1/search` は共通形式です。RAG の回答を使うには `models.answerer.model` にモデル名を設定します。[起動手順](docs/mcp.md) · [生成される Dunlinfile.yaml](docs/mcp.md#初期化で生成される-dunlinfileyaml)
+
+Wiki/PARA は `--purpose` で目的を指定し、`Dunlinfile.yaml` の `models.writer.model` を設定してから `dunlin ingress <資料パス>` を実行します。生成した HTML は `site/` に保存されます。`ingress` と `verify --content` は作業 ID と進捗を標準エラーに表示し、`dunlin progress <作業ID> --json` でも確認できます。ブラウザでは順番待ちから完了まで同じ作業ページで追えます。内容検査の指摘には比較した二つの引用と出典が付きます。[Wiki/PARA の操作](docs/dunlin-spec.md#131-コマンド)
 
 ## CLI のセットアップ
 
@@ -20,57 +26,15 @@ PARA と LLM Wiki は、MCP クライアントが書いた本文と検証済み�
 ```sh
 npm ci
 npm run build
-npm --prefix tools/rag ci
-cd tools/rag
 npm link
-cd ../..
 dunlin --help
 ```
 
 `npm link` は、このチェックアウトを `dunlin` コマンドとして登録します。コマンドが見つからない場合は、`npm prefix -g` で確認したフォルダを Windows の `PATH` に追加します。macOS・Linux ではその配下の `bin` を追加します。
 
-ガイドの例はリポジトリのルートから実行できます。作業フォルダ内で実行すると、そのフォルダの `dunlin.json` が使われます。HTML・HTTP(S)・S3 の取り込みや、MCP クライアントから添付ファイルを送る場合は `npm --prefix tools/import ci` も実行してください。
-
-端末で `dunlin init` を実行すると用途を選べます。作業フォルダを確認し、Enter を押すと `dunlin.json` と資料を置く `docs/` が作成されます。各ガイドのように `init --preset` で用途を直接指定することもできます。初期化が終わると、プリセットに合わせて次の手順が表示されます。取り込み元の `sources`、コーパスや索引を置く `index`、ノートや Wiki の保存先は設定ファイルを基準に解決されます。[コーパスと索引を複数の用途で使う](docs/mcp.md#コーパスと索引を複数の用途で使う)
-
-詳しい設定は [CLI リファレンス](tools/rag/README.md) と [HTTP・S3 取り込みリファレンス](tools/import/README.md) にあります。
-
-## 文書コーパスと原本
-
-```text
-原本
-└─ パース → 全文と位置メタデータをコーパスに保存
-   └─ チャンキング → チャンク
-      ├─ キーワード索引を作成
-      └─ 埋め込みを生成 → ベクトル索引に保存
-```
-
-| 用語 | Dunlin での意味 |
-|---|---|
-| 原本 | 取得時のバイト列 |
-| コーパス | パース後の全文と位置メタデータを、文書ごと・版ごとに保存した集合 |
-| チャンク | チャンキングで全文から切り出した検索用の断片 |
-| 埋め込み | チャンクや検索語をモデルで変換したベクトル表現 |
-| キーワード索引・ベクトル索引 | それぞれチャンク内の語、チャンクの埋め込みを使って検索するためのデータ |
-
-コーパスは `<index>/.dunlin-corpus-v1/` に保存します。位置メタデータには全文の行範囲と、取得できたページ・座標・シンボルなどが含まれます。検索は現在の索引を使い、PARA と LLM Wiki の公開済み出典は、コーパスに保存した引用時の版から本文を表示します。
-
-パーサーで取り込む PDF・Office・画像と MCP 添付は、取得時のバイト列も `<index>/.dunlin-uploads-v1/` に保存します。テキストや HTML で原本も残す場合は、ソース ID ごとに設定します。
-
-```sh
-dunlin config set keepOriginals.docs true
-dunlin ingest --source docs
-```
-
-文書を索引から外しても、コーパスに保存した版と原本は保持されます。以後の取り込みで原本保存を無効にしても、保存済みの原本は引き続き参照できます。[保存設定と過去版の読み方](tools/rag/README.md#文書コーパスと原本の設定)
-
-コーパス全体には、名称・説明・担当チームなどを付けられます。これらはコーパスと一緒に保存されるため、複数の設定で同じコーパスを開いても共有されます。[コーパスの名称とメタデータ](tools/rag/README.md#コーパスの名称とメタデータ)
-
-`dunlin corpus show` で、参照中の設定ファイルと保存先、ソース別の文書数、キーワード索引とベクトル索引の状態を確認できます。[コーパスと検索の状態](tools/rag/README.md#コーパスと検索の状態)
-
 ## Node.js ライブラリのインストール
 
-公開 API は TypeScript と JavaScript の ESM で利用できます。Rust の Tantivy が索引と検索を担い、NAPI-RS v3 で Node.js に接続します。[Tantivy](https://docs.rs/tantivy/0.27.0/tantivy/) · [NAPI-RS](https://napi.rs/docs/introduction/manual-setup)
+以下の API 例では、`Dunlin.open()` から索引を直接操作します。公開 API は TypeScript と JavaScript の ESM で利用できます。Rust の Tantivy が索引と検索を担い、NAPI-RS v3 で Node.js に接続します。[Tantivy](https://docs.rs/tantivy/0.27.0/tantivy/) · [NAPI-RS](https://napi.rs/docs/introduction/manual-setup)
 
 ビルド済みのバンドル版を、同じ OS と CPU アーキテクチャの Node.js プロジェクトへインストールします。
 
@@ -262,9 +226,9 @@ for (const { id, changes } of affected) {
 
 再生成は保存済みの資料一覧を使い、現在の索引から引用とリビジョンを更新します。削除・空文書で引用が不足する場合は `insufficient_evidence` と `unavailable` を返します。欠けた資料の ID は保持し、索引に復元されたときにも影響を検知します。
 
-## MCP
+## Node.js API から MCP を提供する
 
-MCP を使うプロジェクトでは `@modelcontextprotocol/server` v2 と `zod` v4 を追加します。stdio で `knowledge.search`、`knowledge.read`、`knowledge.explore`、`knowledge.wiki_get` を公開します。接続したクライアントは登録済みの索引全体を検索できます。[MCP TypeScript SDK v2](https://ts.sdk.modelcontextprotocol.io/v2/)
+`Dunlin.serveMcp()` は、直接開いた索引を stdio で公開します。既定のツールは `knowledge.search`、`knowledge.read`、`knowledge.explore`、`knowledge.wiki_get` です。`@modelcontextprotocol/server` と `zod` は `dunlin` の依存パッケージです。Dunlinfile を使う場合は CLI の起動手順を参照してください。[CLI の起動手順](docs/mcp.md) · [MCP TypeScript SDK v2](https://ts.sdk.modelcontextprotocol.io/v2/)
 
 ```js
 import { Dunlin } from 'dunlin';
@@ -282,6 +246,8 @@ Rust 1.94.1 と Node.js 22.20 以降の 22 系、または Node.js 24.12 以降�
 npm ci
 npm run build
 npm test
+npm --prefix tools/rag ci
+npm --prefix tools/rag test
 npm run test:package
 npm run bench -- 1000 300
 ```

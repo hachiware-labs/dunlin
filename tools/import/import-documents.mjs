@@ -14,7 +14,7 @@ const extensions = new Map([
   ['.txt', 'text'], ['.md', 'markdown'], ['.markdown', 'markdown'], ['.html', 'html'], ['.htm', 'html'],
 ]);
 
-export async function importDocuments(indexPath, sourceId, locations, s3Endpoint, { keepOriginal, decode, supports } = {}) {
+export async function importDocuments(indexPath, sourceId, locations, s3Endpoint, { corpusBackend, keepOriginal, decode, supports } = {}) {
   const documents = new Map();
   const uploadRoot = resolve(indexPath, '.dunlin-uploads-v1');
   const decodeDocument = decode ?? ((body, type, name) => readDocument(body, type, name, { keepOriginal }));
@@ -63,7 +63,7 @@ export async function importDocuments(indexPath, sourceId, locations, s3Endpoint
   }
 
   if (documents.size === 0) throw new Error('No supported documents found');
-  const database = await Dunlin.open(indexPath);
+  const database = await Dunlin.open(indexPath, { corpusBackend });
   try {
     return await database.replaceDocuments(sourceId, [...documents.values()]);
   } finally {

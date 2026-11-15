@@ -29,8 +29,8 @@ async function installAndSearch(name, tarballs) {
   await writeFile(join(consumer, 'package.json'), '{"private":true,"type":"module"}');
   npm(['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs], consumer);
   const installed = await readdir(join(consumer, 'node_modules'));
-  assert.ok(!installed.includes('@modelcontextprotocol'));
-  assert.ok(!installed.includes('zod'));
+  assert.ok(installed.includes('@modelcontextprotocol'));
+  assert.ok(installed.includes('zod'));
 
   await writeFile(join(consumer, 'source.md'), '# 認証\nOAuthの根拠\n[Policy](dunlin://policies/policy.txt)');
   await writeFile(join(consumer, 'policy.txt'), 'Linked policy evidence');
@@ -40,6 +40,24 @@ async function installAndSearch(name, tarballs) {
     encoding: 'utf8',
   });
   assert.match(result, /OAuthの根拠/u);
+  const cli = join(consumer, 'node_modules', 'dunlin', 'tools', 'rag', 'cli.mjs');
+  const run = (...args) => execFileSync(process.execPath, [cli, ...args], { cwd: consumer, encoding: 'utf8' });
+  await mkdir(join(consumer, 'manuals'));
+  await writeFile(join(consumer, 'manuals', 'guide.md'), '# 認証\n作業手順を確認する。\n');
+  run('init', 'mcp', 'kb', '--source', 'manuals');
+  run('init', 'rag', 'rag', '--source', 'manuals');
+  run('init', 'wiki', 'wiki', '--purpose', 'Wiki');
+  run('init', 'para', 'para', '--purpose', 'PARA');
+  run('--project', 'kb', 'build');
+  assert.match(run('--project', 'kb', 'search', '手順'), /作業手順/u);
+  const config = JSON.parse(run('--project', 'kb', 'serve', '--print-config', '--json'));
+  assert.equal(config.schema_version, 1);
+  assert.ok(config.data.args.includes('serve'));
+  run('--project', 'rag', 'build');
+  const rag = JSON.parse(run('--project', 'rag', 'search', '手順', '--json'));
+  assert.equal(rag.data.results[0].document_id, 'docs:guide.md');
+  assert.equal(JSON.parse(run('--project', 'rag', 'serve', '--print-config', '--json')).data.url, 'http://127.0.0.1:4318/mcp');
+  assert.equal(JSON.parse(run('--project', 'kb', 'add', 'hannoy', '--json')).data.version, '0.2.0');
   execFileSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
     import { Dunlin } from 'dunlin';
@@ -89,12 +107,13 @@ try {
   const nativeDir = join(stage, 'native');
   await mkdir(nativeDir);
   await copyFile(join(project, binary), join(nativeDir, platform.main));
-  await writeFile(join(nativeDir, 'package.json'), JSON.stringify({ ...platform, private: true }));
+  await cp(join(project, 'dist', 'tools'), join(nativeDir, 'tools'), { recursive: true });
+  await writeFile(join(nativeDir, 'package.json'), JSON.stringify({ ...platform, files: [...platform.files, 'tools/*'], private: true }));
   const nativeTar = await pack(nativeDir, join(output, 'split'));
 
   const rootDir = join(stage, 'root');
   const rootManifest = JSON.parse(await readFile(join(project, 'package.json'), 'utf8'));
-  rootManifest.files = rootManifest.files.filter((path) => path !== 'dist/*.node');
+  rootManifest.files = rootManifest.files.filter((path) => !['dist/*.node', 'dist/tools/*'].includes(path));
   rootManifest.optionalDependencies = Object.fromEntries(
     configs.map(({ name }) => [name, rootManifest.version]),
   );
@@ -103,7 +122,7 @@ try {
   await copyFile(join(project, 'README.md'), join(rootDir, 'README.md'));
   await cp(join(project, 'examples'), join(rootDir, 'examples'), { recursive: true });
   for (const { path } of bundled.files) {
-    if (path.startsWith('dist/') && !path.endsWith('.node')) {
+    if ((path.startsWith('dist/') && !path.startsWith('dist/tools/') && !path.endsWith('.node')) || /^(tools\/rag|docs)\//u.test(path)) {
       const target = join(rootDir, path);
       await mkdir(dirname(target), { recursive: true });
       await copyFile(join(project, path), target);

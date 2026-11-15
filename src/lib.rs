@@ -14,11 +14,13 @@ mod wiki;
 
 #[cfg(all(feature = "node", not(test)))]
 mod node;
+#[cfg(all(feature = "node", not(test)))]
+mod vector;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-pub use corpus::{CorpusDocument, CorpusMetadata, ParserInfo, SourceLocation};
+pub use corpus::{CorpusBackend, CorpusDocument, CorpusMetadata, ParserInfo, SourceLocation};
 use engine::KeywordIndex;
 pub use evaluate::{
     CandidateMetrics, EvaluationCase, EvaluationOptions, EvaluationReport, EvaluationSet,
@@ -28,9 +30,9 @@ pub use explore::{
     ExploreEvidence, ExploreIssue, ExploreOptions, ExploreOutcome, ExploreStop, ExploreVia,
 };
 pub use model::{
-    Cancellation, DocumentFormat, DocumentRef, DocumentSnapshot, Error, Evidence, IndexChanges,
-    IndexStatus, LineRange, ReadOutcome, Result, SearchHit, SearchOutcome, SourceDocument,
-    SourceRef, SyncOutcome,
+    ByteRange, Cancellation, DocumentFormat, DocumentRef, DocumentSnapshot, Error, Evidence,
+    IndexChanges, IndexStatus, LineRange, ReadOutcome, Result, SearchHit, SearchOutcome,
+    SourceDocument, SourceRef, SyncOutcome,
 };
 use plans::{DEFAULT_LIMIT, PlanStore};
 pub use plans::{PlanEvaluation, RetrievalMethod, RetrievalPlan};
@@ -55,11 +57,37 @@ impl KnowledgeBase {
     }
 
     pub fn open(path: &Path, cancel: &Cancellation) -> Result<Self> {
+        Self::open_with_corpus(path, CorpusBackend::default(), cancel)
+    }
+
+    pub fn open_with_corpus(
+        path: &Path,
+        backend: CorpusBackend,
+        cancel: &Cancellation,
+    ) -> Result<Self> {
+        Self::open_with_options(path, backend, None, false, false, cancel)
+    }
+
+    pub(crate) fn open_with_options(
+        path: &Path,
+        backend: CorpusBackend,
+        corpus_path: Option<&Path>,
+        ngrams: bool,
+        bigrams: bool,
+        cancel: &Cancellation,
+    ) -> Result<Self> {
         cancel.check()?;
         let index_path = path.join(".dunlin-index-v1");
         std::fs::create_dir_all(&index_path)
             .map_err(|_| Error::Io("Could not create the index directory"))?;
-        let index = KeywordIndex::open(&index_path, &path.join(".dunlin-corpus-v1"))?;
+        let index = KeywordIndex::open(
+            &index_path,
+            corpus_path.unwrap_or(&path.join(".dunlin-corpus-v1")),
+            backend,
+            ngrams,
+            bigrams,
+            cancel,
+        )?;
         let plans = PlanStore::open(&path.join(".dunlin-plans-v1"))?;
         let wiki = WikiStore::new(path.join(".dunlin-wiki-v1"));
         cancel.check()?;

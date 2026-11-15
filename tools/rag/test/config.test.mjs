@@ -14,7 +14,7 @@ import { Dunlin } from 'dunlin';
 import { promptInitPreset } from '../init-prompt.mjs';
 
 const runNode = promisify(execFile);
-const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
+const cli = fileURLToPath(new URL('./fixtures/legacy-cli.mjs', import.meta.url));
 
 test('asks for a preset and accepts the default confirmation or cancellation', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-init-prompt-'));
@@ -68,6 +68,7 @@ test('keeps corpus information with the shared corpus across ingestion and confi
   await run('init', '.', '--preset', 'mcp');
   const initial = await show();
   assert.equal(initial.version, 1);
+  assert.equal(initial.status.corpusBackend, 'sqlite');
   assert.deepEqual(initial.status.sources, [{ sourceId: 'docs', configured: true, documents: 0 }]);
   assert.equal(initial.status.search.keyword.state, 'not_indexed');
   await assert.rejects(access(join(root, 'knowledge')), { code: 'ENOENT' });
@@ -78,11 +79,17 @@ test('keeps corpus information with the shared corpus across ingestion and confi
   const expected = { version: 1, name: 'バックアップ運用', description: '保管方針と復旧手順',
     metadata: { team: 'インフラ運用', tags: ['運用', '規程'] } };
 
+  await run('config', 'set', 'corpus.backend', 'json');
+  assert.equal((await show()).status.corpusBackend, 'json');
   await run('ingest');
   assert.equal((await show()).status.search.keyword.state, 'empty');
   await writeFile(join(root, 'docs', 'policy.md'), '# バックアップ\n30日保管する。\n');
   await run('ingest');
+  const sqlite = join(root, 'knowledge', '.dunlin-corpus-v1', 'corpus.sqlite');
+  await assert.rejects(access(sqlite), { code: 'ENOENT' });
+  await run('config', 'set', 'corpus.backend', 'sqlite');
   await run('ingest', '--source', 'extra', './docs/policy.md');
+  await access(sqlite);
   await mkdir(join(root, 'shared'));
   const shared = join(root, 'shared', 'dunlin.json');
   await writeFile(shared, JSON.stringify({ version: 1, index: '../knowledge' }));
@@ -275,6 +282,6 @@ test('initializes a project and applies configuration edits to the next ingest, 
 
   await run(root, 'init', './mcp', '--preset', 'mcp');
   assert.deepEqual(JSON.parse(await readFile(join(root, 'mcp', 'dunlin.json'), 'utf8')), {
-    version: 1, index: './knowledge', sources: { docs: './docs' },
+    version: 1, index: './knowledge', corpus: { backend: 'sqlite' }, sources: { docs: './docs' },
   });
 });

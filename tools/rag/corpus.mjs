@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
 
 import { Dunlin } from 'dunlin';
+import { resolveCorpusBackend } from './config.mjs';
 
 import { atomicWrite, directory, prepareRoot, readText, withWriteLock } from './authoring/files.mjs';
 import { inspectVectorIndex } from './vectors.mjs';
@@ -44,7 +45,7 @@ export async function describeCorpus(index, config, getVectorStore) {
   }
   return {
     ...info,
-    status: { configPath: config?.path ?? null, indexPath: resolve(index), sources, search: { keyword, vector } },
+    status: { configPath: config?.path ?? null, indexPath: resolve(index), corpusBackend: resolveCorpusBackend(config?.config), sources, search: { keyword, vector } },
   };
 }
 

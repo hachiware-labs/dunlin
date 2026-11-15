@@ -152,6 +152,14 @@ pub struct Evidence {
     pub source: SourceRef,
     pub range: LineRange,
     pub acquired_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_range: Option<ByteRange>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct ByteRange {
+    pub start: usize,
+    pub end: usize,
 }
 
 #[derive(Debug, Serialize)]

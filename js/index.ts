@@ -4,8 +4,8 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
-  McpOptions, OperationOptions, OptimizationReport, OptimizeOptions, ReadOutcome, RetrievalMethod,
+  CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  McpOptions, OpenOptions, OperationOptions, OptimizationReport, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SyncOutcome, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
 } from './types.js';
@@ -42,8 +42,11 @@ interface NativeDatabase {
 
 interface NativeBinding {
   NativeCancellation: new () => NativeCancellation;
-  openNative(path: string, cancel: NativeCancellation): Promise<NativeDatabase>;
+  openNative(path: string, cancel: NativeCancellation, backend?: CorpusBackend, keywordNgrams?: boolean, keywordBigrams?: boolean,
+    corpusPath?: string): Promise<NativeDatabase>;
   inspectIndex(path: string, cancel: NativeCancellation): Promise<IndexStatus | null>;
+  rankVectors(path: string, request: string, cancel: NativeCancellation): Promise<{ i: number; score: number }[]>;
+  acquireExecutionLock(path: string): { release(): void };
 }
 
 const require = createRequire(import.meta.url);
@@ -76,14 +79,16 @@ async function cancellable<T>(
   try {
     return await run(cancel);
   } catch (error) {
-    const match = error instanceof Error && /^(INVALID_ARGUMENT|IO_ERROR|BUSY|ABORTED|TIMEOUT|NOT_FOUND|STALE_EVIDENCE|INDEX_ERROR|PLAN_NOT_FOUND|PLAN_ERROR|WIKI_NOT_FOUND|WIKI_ERROR)\|(.+)$/u.exec(error.message);
-    if (match) {
-      throw new DunlinError(match[1] as DunlinErrorCode, match[2]);
-    }
-    throw new DunlinError('INDEX_ERROR', 'The native operation failed');
+    throw translateNativeError(error);
   } finally {
     listener?.[Symbol.dispose]();
   }
+}
+
+function translateNativeError(error: unknown): DunlinError {
+  if (error instanceof DunlinError) return error;
+  const match = error instanceof Error && /^(INVALID_ARGUMENT|IO_ERROR|BUSY|ABORTED|TIMEOUT|NOT_FOUND|STALE_EVIDENCE|INDEX_ERROR|PLAN_NOT_FOUND|PLAN_ERROR|WIKI_NOT_FOUND|WIKI_ERROR)\|(.+)$/u.exec(error.message);
+  return match ? new DunlinError(match[1] as DunlinErrorCode, match[2]) : new DunlinError('INDEX_ERROR', 'The native operation failed');
 }
 
 function absolutePath(path: string): string {
@@ -111,7 +116,7 @@ function documentsRequest(sourceId: string, documents: readonly SourceDocument[]
       || typeof format !== 'string' || typeof content !== 'string') {
       throw new DunlinError('INVALID_ARGUMENT', 'Expected document objectId, url, format, and content strings');
     }
-    return { objectId, url, format, content, corpus: input.corpus, modifiedAtMs: input.modifiedAtMs };
+    return { objectId, url, format, content, corpus: input.corpus, modifiedAtMs: input.modifiedAtMs, chunks: input.chunks };
   }));
 }
 
@@ -165,6 +170,11 @@ function evidenceInput(evidence: Evidence): Evidence {
   }
   integer(range.startLine, 1, 2 ** 20, 'startLine');
   integer(range.endLine, range.startLine, 2 ** 20, 'endLine');
+  const bytes = evidence.byteRange;
+  if (bytes !== undefined) {
+    integer(bytes?.start, 0, 2 ** 20 - 1, 'byteRange.start');
+    integer(bytes?.end, bytes.start + 1, 2 ** 20, 'byteRange.end');
+  }
   integer(evidence.acquiredAtMs, 0, Number.MAX_SAFE_INTEGER, 'acquiredAtMs');
   return {
     source: {
@@ -173,6 +183,7 @@ function evidenceInput(evidence: Evidence): Evidence {
     },
     range: { startLine: range.startLine, endLine: range.endLine },
     acquiredAtMs: evidence.acquiredAtMs,
+    ...(bytes && { byteRange: { start: bytes.start, end: bytes.end } }),
   };
 }
 
@@ -232,9 +243,13 @@ export class Dunlin {
     this.#database = database;
   }
 
-  static async open(path: string, { signal }: OperationOptions = {}): Promise<Dunlin> {
+  static async open(path: string, { signal, corpusBackend, corpusDirectory, keywordNgrams, keywordBigrams }: OpenOptions = {}): Promise<Dunlin> {
     const directory = absolutePath(path);
-    const database = await cancellable(signal, (cancel) => native().openNative(directory, cancel));
+    if (corpusBackend !== undefined && corpusBackend !== 'sqlite' && corpusBackend !== 'json') {
+      throw new DunlinError('INVALID_ARGUMENT', 'Expected corpus backend sqlite or json');
+    }
+    const corpusPath = corpusDirectory === undefined ? undefined : absolutePath(corpusDirectory);
+    const database = await cancellable(signal, (cancel) => native().openNative(directory, cancel, corpusBackend, keywordNgrams, keywordBigrams, corpusPath));
     return new Dunlin(database);
   }
 
@@ -242,6 +257,21 @@ export class Dunlin {
   static async inspectIndex(path: string, { signal }: OperationOptions = {}): Promise<IndexStatus | null> {
     const directory = absolutePath(path);
     return cancellable(signal, (cancel) => native().inspectIndex(directory, cancel));
+  }
+
+  /** Score a completed immutable float32 vector artifact. */
+  static async rankVectors(path: string, options: { needle: readonly number[]; positions: readonly number[]; rows: number; limit: number },
+    { signal }: OperationOptions = {}): Promise<{ i: number; score: number }[]> {
+    return cancellable(signal, (cancel) => native().rankVectors(resolve(path), JSON.stringify(options), cancel));
+  }
+
+  /** Acquire a nonblocking process lock. Closing it releases ownership. */
+  static acquireExecutionLock(path: string): { release(): void } {
+    try {
+      return native().acquireExecutionLock(absolutePath(path));
+    } catch (error) {
+      throw translateNativeError(error);
+    }
   }
 
   /** Registers or atomically replaces the indexed snapshot for this source ID. */
@@ -379,7 +409,7 @@ export class Dunlin {
     return this.#run(signal, (database, cancel) => database.read(JSON.stringify(input), cancel));
   }
 
-  async serveMcp({ transport }: McpOptions = { transport: 'stdio' }): Promise<McpHandle> {
+  async serveMcp({ transport, search, read, searchOnly }: McpOptions = { transport: 'stdio' }): Promise<McpHandle> {
     this.#requireDatabase();
     if (transport !== 'stdio') {
       throw new DunlinError('INVALID_ARGUMENT', 'The supported MCP transport is stdio');
@@ -391,7 +421,14 @@ export class Dunlin {
       throw error;
     });
     this.#requireDatabase();
-    return serveStdioMcp(this);
+    return serveStdioMcp(this, search, read, searchOnly);
+  }
+
+  async createMcpHttpHandler(search: NonNullable<McpOptions['search']>, maxRequestBodySize: number): Promise<McpHttpHandle> {
+    this.#requireDatabase();
+    const { serveHttpMcp } = await import('./mcp.js');
+    this.#requireDatabase();
+    return serveHttpMcp(this, search, maxRequestBodySize);
   }
 
   close(): Promise<void> {

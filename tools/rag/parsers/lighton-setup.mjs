@@ -11,6 +11,7 @@ import { downloadVerified } from './download.mjs';
 
 export const lightonServer = fileURLToPath(new URL('./lighton-server.py', import.meta.url));
 const revision = '23d544085c886bbdace647bcfab91203299417e2';
+export const managedOcrVersion = revision;
 const modelFiles = {
   'chat_template.jinja': [720, '0942a43ee0ba48a608814e0b40ac9cb70bcc29ea72f19c84b1bf2597f05aa2bd'],
   'config.json': [2363, '43b62f9ec0a7207f67fd032f7ef9719fa8b6b44d7b3cf20fbc2346329493ff3a'],

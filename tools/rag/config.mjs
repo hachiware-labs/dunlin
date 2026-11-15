@@ -12,7 +12,7 @@ export async function initConfig(directory, preset = 'rag') {
   if (!['rag', 'mcp', 'para', 'llm-wiki'].includes(preset)) throw new Error('Expected --preset rag, mcp, para, or llm-wiki');
   const path = await newConfigPath(directory);
   const root = dirname(path);
-  const config = { version: 1, index: './knowledge', sources: { docs: './docs' } };
+  const config = { version: 1, index: './knowledge', corpus: { backend: 'sqlite' }, sources: { docs: './docs' } };
   if (preset === 'rag') {
     config.rag = {
       generation: defaultGeneration,
@@ -129,6 +129,12 @@ export function resolveConfigPath(config, path) {
   return resolve(dirname(config.path), path);
 }
 
+export function resolveCorpusBackend(config) {
+  const backend = resolveConfigValue(config?.corpus?.backend, 'corpus.backend') ?? 'sqlite';
+  if (backend !== 'sqlite' && backend !== 'json') throw new Error('Expected corpus.backend to be sqlite or json');
+  return backend;
+}
+
 export function resolveConfigValue(value, field, allowMissing = false) {
   if (value === undefined) return;
   let missing;
@@ -193,9 +199,13 @@ function replaceValue(object, [key, ...rest], value) {
 }
 
 function validateConfig(config) {
-  fields(config, 'configuration', ['version', 'index', 'sources', 'keepOriginals', 'rag', 's3Endpoint', 'authoring', 'parsers']);
+  fields(config, 'configuration', ['version', 'index', 'corpus', 'sources', 'keepOriginals', 'rag', 's3Endpoint', 'authoring', 'parsers']);
   if (config.version !== 1) throw new Error('Expected configuration version 1');
   template(config.index, 'index');
+  if (config.corpus !== undefined) {
+    fields(config.corpus, 'corpus', ['backend']);
+    if (config.corpus.backend !== undefined) oneOf(config.corpus.backend, 'corpus.backend', ['sqlite', 'json']);
+  }
   endpoint(config.s3Endpoint, 's3Endpoint', true);
   if (config.sources !== undefined) {
     if (!isObject(config.sources)) throw new Error('Expected sources to be an object');

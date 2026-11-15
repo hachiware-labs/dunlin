@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { Dunlin } from 'dunlin';
 
 const runNode = promisify(execFile);
-const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
+const cli = fileURLToPath(new URL('./fixtures/legacy-cli.mjs', import.meta.url));
 const sourceUrl = 's3://test-bucket/retention.md';
 const fact = 'Backup snapshots expire after 37 days.';
 const question = 'Preservation lifespan?';

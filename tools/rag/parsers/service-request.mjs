@@ -1,8 +1,11 @@
+import { chargeTrialApi } from '../project-trials.mjs';
+
 const unavailableCodes = new Set(['ECONNREFUSED', 'ENETUNREACH', 'EHOSTUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT', 'ETIMEDOUT']);
 
 export class ServiceUnavailable extends Error {}
 
 export async function fetchService(service, baseUrl, route, options, signal) {
+  signal = chargeTrialApi(options.body, signal);
   const timeout = AbortSignal.timeout(options.body ? 180_000 : 10_000);
   try {
     return await fetch(`${baseUrl.replace(/\/+$/u, '')}/${route}`, {

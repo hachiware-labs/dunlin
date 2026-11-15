@@ -21,8 +21,8 @@ use tantivy::{
 use url::Url;
 
 use crate::{
-    Cancellation, DocumentFormat, Error, Evidence, IndexChanges, IndexStatus, LineRange,
-    ReadOutcome, Result, RetrievalMethod, SearchHit, SourceRef, SyncOutcome,
+    Cancellation, CorpusBackend, DocumentFormat, Error, Evidence, IndexChanges, IndexStatus,
+    LineRange, ReadOutcome, Result, RetrievalMethod, SearchHit, SourceRef, SyncOutcome,
     corpus::Corpus,
     legacy_delete::LegacyDeleteQuery,
     source::{self, SourceInput, SourceObject},
@@ -41,6 +41,8 @@ pub(crate) struct KeywordIndex {
     body_terms: Field,
     evidence: Field,
     content: Field,
+    ngrams: bool,
+    bigrams: bool,
 }
 
 impl KeywordIndex {
@@ -80,7 +82,14 @@ impl KeywordIndex {
         }))
     }
 
-    pub fn open(path: &Path, corpus_path: &Path) -> Result<Self> {
+    pub fn open(
+        path: &Path,
+        corpus_path: &Path,
+        backend: CorpusBackend,
+        ngrams: bool,
+        bigrams: bool,
+        cancel: &Cancellation,
+    ) -> Result<Self> {
         let mut schema = Schema::builder();
         let terms = TextOptions::default().set_indexing_options(
             TextFieldIndexing::default()
@@ -116,7 +125,7 @@ impl KeywordIndex {
             .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()?;
         Ok(Self {
-            corpus: Corpus::open(corpus_path)?,
+            corpus: Corpus::open(corpus_path, backend, cancel)?,
             index,
             reader,
             source_id,
@@ -126,6 +135,8 @@ impl KeywordIndex {
             body_terms,
             evidence,
             content,
+            ngrams,
+            bigrams,
         })
     }
 
@@ -183,7 +194,7 @@ impl KeywordIndex {
             .ingest(id, cancel, |object| {
                 let object_id = &object.source.object_id;
                 match previous.remove(object_id) {
-                    Some(old) if old.matches(&object, legacy_layouts.get(object_id)) => {
+                    Some(old) if old.matches(&object, legacy_layouts.get(object_id))? => {
                         changes.unchanged += 1;
                         return Ok(0);
                     }
@@ -260,7 +271,7 @@ impl KeywordIndex {
         let key = membership_key(id, &object.source.object_id);
         let mut units = 0;
         let mut end_line = 0;
-        for (heading, text, range) in object.units() {
+        for (heading, text, range, byte_range) in object.units() {
             cancel.check()?;
             end_line = range.end_line;
             let title = unit_title(&object.source.object_id, heading);
@@ -269,9 +280,9 @@ impl KeywordIndex {
                 self.object_key => key.as_str(),
                 self.object_key => MEMBERSHIP_MARKER,
                 self.title => title.as_str(),
-                self.title_terms => indexed_terms(&title),
-                self.body_terms => indexed_terms(text),
-                self.evidence => encode(&object.evidence(range))?,
+                self.title_terms => indexed_terms(&title, self.ngrams, self.bigrams),
+                self.body_terms => indexed_terms(text, self.ngrams, self.bigrams),
+                self.evidence => encode(&Evidence { byte_range, ..object.evidence(range) })?,
             ))?;
             units += 1;
         }
@@ -281,6 +292,7 @@ impl KeywordIndex {
                 end_line,
             }),
             format: Some(object.format()),
+            chunk_layout: object.chunk_layout()?,
         };
         self.corpus.save(&object, end_line)?;
         writer.add_document(doc!(
@@ -527,10 +539,10 @@ impl KeywordSnapshot<'_> {
     fn term_queries(&self, word: &str, cjk: bool) -> [Box<dyn Query>; 2] {
         [
             Box::new(BoostQuery::new(
-                field_query(self.index.title_terms, word, cjk),
+                field_query(self.index.title_terms, word, cjk, self.index.ngrams),
                 2.0,
             )),
-            field_query(self.index.body_terms, word, cjk),
+            field_query(self.index.body_terms, word, cjk, self.index.ngrams),
         ]
     }
 
@@ -578,7 +590,7 @@ impl KeywordSnapshot<'_> {
         let clauses: Vec<_> = word_groups(name)
             .filter(|(word, _)| word.len() <= 240)
             .take(64)
-            .map(|(word, cjk)| field_query(self.index.title_terms, word, cjk))
+            .map(|(word, cjk)| field_query(self.index.title_terms, word, cjk, self.index.ngrams))
             .collect();
         if clauses.is_empty() {
             return Ok(None);
@@ -648,8 +660,32 @@ impl KeywordSnapshot<'_> {
                 "Evidence range is outside the source object",
             ));
         }
-        let content = source::select_lines(stored(&document, self.index.content)?, range);
+        let full = stored(&document, self.index.content)?;
+        let content = if let Some(bytes) = evidence.byte_range {
+            let excerpt = full
+                .get(bytes.start..bytes.end)
+                .filter(|text| !text.is_empty())
+                .ok_or(Error::Invalid(
+                    "Evidence byte range is outside the source object",
+                ))?;
+            let start_line = full.as_bytes()[..bytes.start]
+                .iter()
+                .filter(|&&b| b == b'\n')
+                .count()
+                + 1;
+            if start_line != range.start_line
+                || start_line + excerpt.split_inclusive('\n').count() - 1 != range.end_line
+            {
+                return Err(Error::Invalid(
+                    "Evidence byte range does not match source lines",
+                ));
+            }
+            excerpt.to_owned()
+        } else {
+            source::select_lines(full, range)
+        };
         current.range = range;
+        current.byte_range = evidence.byte_range;
         Ok(ReadOutcome {
             evidence: current,
             content,
@@ -733,6 +769,8 @@ struct StoredObject {
     #[serde(flatten)]
     evidence: Evidence,
     format: Option<DocumentFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chunk_layout: Option<String>,
 }
 
 impl StoredObject {
@@ -745,20 +783,25 @@ impl StoredObject {
         })
     }
 
-    fn matches(&self, object: &SourceObject, legacy_layout: Option<&UnitLayout>) -> bool {
+    fn matches(&self, object: &SourceObject, legacy_layout: Option<&UnitLayout>) -> Result<bool> {
         let old = &self.evidence.source;
         if old.version != object.source.version || old.url != object.source.url {
-            return false;
+            return Ok(false);
         }
-        match self.known_format() {
+        if self.chunk_layout != object.chunk_layout()? {
+            return Ok(false);
+        }
+        Ok(match self.known_format() {
             Some(format) => format == object.format(),
             // Imported objects from older versions did not store their format. Compare the
             // indexing effect of the format using the existing titles and line ranges.
             None => object
                 .units()
-                .map(|(heading, _, range)| unit_shape(&unit_title(&old.object_id, heading), range))
+                .map(|(heading, _, range, _)| {
+                    unit_shape(&unit_title(&old.object_id, heading), range)
+                })
                 .eq(legacy_layout.into_iter().flatten().copied()),
-        }
+        })
     }
 }
 
@@ -807,9 +850,22 @@ fn url_key(url: &str) -> String {
     format!("@url:{}", blake3::hash(url.as_bytes()))
 }
 
-fn field_query(field: Field, word: &str, cjk: bool) -> Box<dyn Query> {
+fn field_query(field: Field, word: &str, cjk: bool, ngrams: bool) -> Box<dyn Query> {
     let lower = word.to_lowercase();
-    if cjk && lower.chars().count() > 1 {
+    let length = lower.chars().count();
+    if cjk && ngrams && length > 1 {
+        let terms = character_grams(&lower, length.min(3))
+            .into_iter()
+            .map(|gram| Term::from_field_text(field, &format!("@{gram}")))
+            .collect::<Vec<_>>();
+        if terms.len() == 1 {
+            return Box::new(TermQuery::new(
+                terms[0].clone(),
+                IndexRecordOption::WithFreqs,
+            ));
+        }
+        Box::new(PhraseQuery::new(terms))
+    } else if cjk && !ngrams && length > 1 {
         let terms = lower
             .chars()
             .map(|ch| Term::from_field_text(field, ch.encode_utf8(&mut [0; 4])));
@@ -822,13 +878,35 @@ fn field_query(field: Field, word: &str, cjk: bool) -> Box<dyn Query> {
     }
 }
 
-fn indexed_terms(text: &str) -> String {
+fn character_grams(word: &str, n: usize) -> Vec<String> {
+    word.chars()
+        .collect::<Vec<_>>()
+        .windows(n)
+        .map(|chars| chars.iter().collect())
+        .collect()
+}
+
+fn indexed_terms(text: &str, ngrams: bool, bigrams: bool) -> String {
     let mut terms = String::with_capacity(text.len());
     for (word, cjk) in word_groups(text) {
         if cjk {
             for ch in word.chars() {
                 terms.extend(ch.to_lowercase());
                 terms.push(' ');
+            }
+            if ngrams {
+                let lower = word.to_lowercase();
+                for n in [2, 3] {
+                    if n == 2 && !bigrams {
+                        continue;
+                    }
+                    terms.push_str("! ");
+                    for gram in character_grams(&lower, n) {
+                        terms.push('@');
+                        terms.push_str(&gram);
+                        terms.push(' ');
+                    }
+                }
             }
         } else if word.len() <= 240 {
             terms.push_str(&word.to_lowercase());

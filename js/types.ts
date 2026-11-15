@@ -2,6 +2,15 @@ export interface OperationOptions {
   signal?: AbortSignal | undefined;
 }
 
+export type CorpusBackend = 'sqlite' | 'json';
+
+export interface OpenOptions extends OperationOptions {
+  corpusBackend?: CorpusBackend;
+  corpusDirectory?: string;
+  keywordNgrams?: boolean;
+  keywordBigrams?: boolean;
+}
+
 export type RetrievalMethod = 'keyword' | 'coverage';
 
 export interface SearchOptions extends OperationOptions {
@@ -28,6 +37,15 @@ export interface SourceDocument {
   content: string;
   modifiedAtMs?: number;
   corpus?: CorpusMetadata;
+  /** Precomputed, consecutive ranges covering the document, including optional headings. */
+  chunks?: readonly DocumentChunk[];
+}
+
+export interface DocumentChunk {
+  heading: string;
+  range: LineRange;
+  byteRange?: { start: number; end: number };
+  searchText?: string;
 }
 
 export interface SourceLocation {
@@ -66,6 +84,7 @@ export interface Evidence {
   source: SourceRef;
   range: LineRange;
   acquiredAtMs: number;
+  byteRange?: { start: number; end: number } | undefined;
 }
 
 export interface SearchHit {
@@ -264,10 +283,17 @@ export interface DeltaSyncOutcome {
 
 export interface McpOptions {
   transport: 'stdio';
+  searchOnly?: boolean;
+  search?: (query: string, options: SearchOptions & { budgetChars?: number | undefined }) => Promise<Record<string, unknown>>;
+  read?: (evidence: Evidence, options: OperationOptions) => Promise<ReadOutcome>;
 }
 
 export interface McpHandle {
   close(): Promise<void>;
+}
+
+export interface McpHttpHandle extends McpHandle {
+  fetch(request: Request): Promise<Response>;
 }
 
 export type DunlinErrorCode =

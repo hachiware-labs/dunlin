@@ -79,7 +79,7 @@ export async function localDocling(modelDir, reusePipeline = false) {
   };
 }
 
-async function pdfText(bytes, signal) {
+export async function pdfText(bytes, signal) {
   return withPdf(bytes, async (document) => {
     const pages = [];
     const locations = [];

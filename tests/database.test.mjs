@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { setImmediate } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +55,81 @@ test('keeps full corpus revisions when location metadata or the original changes
     assert.notEqual(first.parsedVersion, second.parsedVersion);
     assert.equal(second.parsedVersion, third.parsedVersion);
     assert.equal(third.originalSha256, 'b'.repeat(64));
+  } finally {
+    await reopened.close();
+  }
+});
+
+test('migrates legacy JSON revisions atomically and reads history across corpus backends', async (t) => {
+  const { store } = await fixture(t);
+  const folder = join(store, '.dunlin-corpus-v1');
+  const sqliteFile = join(folder, 'corpus.sqlite');
+  const ref = { sourceId: 'parsed', objectId: 'manual.pdf' };
+  async function save(database, page) {
+    await database.syncDocuments(ref.sourceId, [{ objectId: ref.objectId, url: 'https://example.test/manual.pdf',
+      format: 'text', content: `運用手順\n保管方針 ${page}`,
+      corpus: { originalSha256: 'a'.repeat(64), parser: { tool: 'lightonocr' },
+        locations: [{ range: { startLine: 2, endLine: 2 }, page, bbox: [10, 20, 300, 100] }] },
+    }]);
+    const { evidence } = await database.getDocument(ref);
+    return database.getCorpusDocument(ref, evidence.source.version);
+  }
+
+  const legacy = await Dunlin.open(store, { corpusBackend: 'json' });
+  const old = [];
+  try {
+    old.push(await save(legacy, 2), await save(legacy, 3));
+  } finally {
+    await legacy.close();
+  }
+  await assert.rejects(access(sqliteFile), { code: 'ENOENT' });
+  const files = (await readdir(folder)).filter((file) => /^[a-f0-9]{64}\.json$/u.test(file));
+  assert.equal(files.length, old.length);
+  const broken = join(folder, files[1]);
+  const original = await readFile(broken);
+  await writeFile(broken, '{');
+  await assert.rejects(Dunlin.open(store), (error) => errorCode('IO_ERROR')(error) && /Invalid legacy corpus revision/u.test(error.message));
+  const unfinished = new DatabaseSync(sqliteFile, { readOnly: true });
+  try {
+    assert.equal(unfinished.prepare('PRAGMA user_version').get().user_version, 0);
+    assert.equal(unfinished.prepare("SELECT name FROM sqlite_schema WHERE name = 'revisions'").get(), undefined);
+  } finally {
+    unfinished.close();
+  }
+  await writeFile(broken, original);
+
+  const migrated = await Dunlin.open(store);
+  let latest;
+  try {
+    const sql = new DatabaseSync(sqliteFile, { readOnly: true });
+    try {
+      assert.equal(sql.prepare('PRAGMA user_version').get().user_version, 1);
+      const row = sql.prepare('SELECT record FROM revisions WHERE source_id = ? AND object_id = ? AND version = ?');
+      for (const record of old) {
+        const version = record.evidence.source.version;
+        assert.deepEqual(JSON.parse(Buffer.from(row.get(ref.sourceId, ref.objectId, version).record)), record);
+        assert.deepEqual(await migrated.getCorpusDocument(ref, version), record);
+      }
+    } finally {
+      sql.close();
+    }
+    latest = await save(migrated, 4);
+  } finally {
+    await migrated.close();
+  }
+  assert.deepEqual(await readFile(broken), original);
+  const json = await Dunlin.open(store, { corpusBackend: 'json' });
+  let jsonRevision;
+  try {
+    assert.deepEqual(await json.getCorpusDocument(ref, latest.evidence.source.version), latest);
+    jsonRevision = await save(json, 5);
+  } finally {
+    await json.close();
+  }
+  assert.equal((await readdir(folder)).filter((file) => /^[a-f0-9]{64}\.json$/u.test(file)).length, 3);
+  const reopened = await Dunlin.open(store);
+  try {
+    assert.deepEqual(await reopened.getCorpusDocument(ref, jsonRevision.evidence.source.version), jsonRevision);
   } finally {
     await reopened.close();
   }

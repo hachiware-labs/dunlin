@@ -1,75 +1,252 @@
-# MCP サーバーを作る
+# MCP と RAG の起動
 
-ローカル資料の検索と根拠取得を、stdio 対応の MCP クライアントに公開します。以下は検索専用の構成です。PARA や LLM Wiki を使う場合も、同じ方法で各プロジェクトの `dunlin.json` をクライアントに指定します。
+MCP は検索結果と出典をエージェントに渡します。RAG は同じ検索結果を使い、設定したモデルで出典付きの回答を生成します。[生成される Dunlinfile.yaml](#初期化で生成される-dunlinfileyaml)
 
-## 1. 検索する資料を登録する
+## MCP で検索を提供する
 
-[CLI のセットアップ](../README.md#cli-のセットアップ)を済ませ、リポジトリのルートで実行します。
-
-```sh
-dunlin init ./mcp-work --preset mcp
-```
-
-`init` が作成した `mcp-work/docs/` に UTF-8 の `policy.md` を置きます。
-
-```markdown
-# バックアップ方針
-
-バックアップの保管期間は30日です。
-```
+[CLI のセットアップ](../README.md#cli-のセットアップ)を済ませ、`./manuals` に Markdown または UTF-8 テキストの資料を置きます。
 
 ```sh
-dunlin ingest --config ./mcp-work/dunlin.json
+dunlin init mcp ./mcp --source ./manuals
+cd mcp
+dunlin build
+dunlin search "手順" --json
+dunlin serve --print-config
 ```
 
-`ingest` の出力で `sourceId` が `docs`、`files` が `1` であることを確認します。`ingest` はパース後の全文をコーパスに保存し、チャンクからキーワード索引を作ります。`dunlin corpus show --config ./mcp-work/dunlin.json` でも、参照先と文書数、キーワード索引の状態を確認できます。
+最後のコマンドが出力する `command` と `args` を MCP クライアントに登録します。クライアントが `dunlin serve` を起動し、`knowledge.search` と `knowledge.read` が使えます。検索には回答モデル、埋め込みモデル、評価データの設定は不要です。
 
-## 2. MCP クライアントに登録する
+資料を更新したら `dunlin build` を再実行します。実行中の MCP は次の要求から完成した索引を使います。未対応のファイルは `source.filesystem` の `with.exclude` に除外パターンを指定するか、`dunlin build --skip-unsupported` で飛ばせます。
 
-クライアントの stdio サーバー設定で、実行コマンドを `dunlin`、引数を「`serve`」「`--stdio`」「`--config`」「設定ファイルの絶対パス」の順で指定します。`mcpServers` 形式のクライアントでは次のように設定できます。パスは自分の環境に置き換えます。
+`build` は `source → transform → index` を実行します。各段階は同名のコマンドでも実行できます。チャンクの長さを変更するには `chunk.length` の `with.size` と `with.overlap` を編集します。`dunlin build --from transform` で保存済みの抽出結果から再開できます。[Dunlinfile の構成](dunlin-spec.md#55-設定ファイルの例)
 
-```json
-{
-  "mcpServers": {
-    "dunlin": {
-      "command": "dunlin",
-      "args": [
-        "serve",
-        "--stdio",
-        "--config",
-        "C:/workspace/dunlin/mcp-work/dunlin.json"
-      ]
-    }
-  }
-}
-```
+`dunlin build --dry-run` で変更された文書を確認できます。候補設定の試行は `dunlin build --from transform --config candidate.yaml --tag trial` で作り、`dunlin search "手順" --build trial` で確認できます。採用には `dunlin use trial` を実行して MCP を再起動します。入力の版を試行間でそろえる場合は `--input <build>` を指定します。[試行と採用](dunlin-spec.md#11-試行採用外部エージェントによる最適化)
 
-クライアントがサーバープロセスを起動します。`dunlin` が見つからない場合は、クライアントが npm の実行ファイル用フォルダを `PATH` に含めているかを確認します。Windows で npm のコマンドを直接起動できないクライアントでは、`command` に `node.exe` の絶対パスを指定し、`args` の先頭に `tools/rag/cli.mjs` の絶対パスを追加します。検索専用サーバーに回答モデルや埋め込みモデルの設定は不要です。
+以前の `init rag` が生成した stdio 専用プロジェクトは、`init.type` を `mcp` に変更すると移行できます。`ask` の区切りがなく、`serve` が `transport: stdio` のみの旧設定は、移行前も MCP として動作します。
 
-## 3. 接続と検索を確認する
+## RAG で回答と検索を提供する
 
-1. クライアントのツール一覧で `knowledge.search` と `knowledge.read` が表示されることを確認します。
-2. `knowledge.search` を `{"query":"バックアップ","sourceIds":["docs"]}` で呼び出します。
-3. `hits` の該当項目から `evidence` を取り出し、`knowledge.read` の `evidence` 引数に渡します。`policy.md` の URL、行範囲、保管期間の本文を確認します。
-
-検索専用の構成では、Markdown のリンクをたどる `knowledge.explore` と、Node.js API で作った抜粋型 Wiki を読む `knowledge.wiki_get` も使えます。取り込み元の文書を変更したら同じ設定で `ingest` を再実行します。検索と本文取得の間にキーワード索引が更新された場合は、検索し直して現在の版の `evidence` を取得します。[Node.js の MCP API](../README.md#mcp)
-
-## コーパスと索引を複数の用途で使う
-
-同じ `index` を参照する設定間では、文書と索引に加え、コーパスの名称やメタデータも共有されます。[コーパスの名称とメタデータ](../tools/rag/README.md#コーパスの名称とメタデータ)
-
-[RAG の手順](rag.md)で作った `rag-work` に PARA と LLM Wiki の保存先を追加できます。`authoring.sourceRoot` に指定する `rag-work/docs/` は先に作成しておきます。
+`./manuals` のあるディレクトリで初期化します。
 
 ```sh
-dunlin config set --config ./rag-work/dunlin.json authoring.para ./para
-dunlin config set --config ./rag-work/dunlin.json authoring.wiki ./wiki
-dunlin config set --config ./rag-work/dunlin.json authoring.sourceRoot ./docs
+dunlin init rag ./rag --source ./manuals
+cd rag
 ```
 
-MCP クライアントには `rag-work/dunlin.json` を指定します。`authoring.para` または `authoring.wiki` があると、CLI は編集用 MCP を起動し、設定した保存先に応じて `para.*` と `wiki.*` を公開します。検索専用のツールセットも使う場合は、同じ `index` ディレクトリを参照し、`authoring` を省いた別の設定ファイルをクライアントに登録します。
+`Dunlinfile.yaml` の `models.answerer.model` に、ローカル Ollama で利用できるモデル名を設定します。既定の接続先は `http://localhost:11434` です。モデルへ送るリクエストの大きさはモデル定義の `max_input_bytes` で制限できます。
 
-すでに `ingest` した文書は、編集用 MCP からそのまま検索して引用できます。`knowledge.search` の結果から `evidence.source` の `sourceId`、`objectId`、`version` と `evidence.range` の `startLine` を取り出し、`source.read` に渡すと、コーパスに保存した本文を該当箇所から読めます。公開した HTML ページの本文も検索に含めたい場合は、ファイルを `source.upload` で取り込めます。RAG でベクトル検索を使う場合は、取り込み後に `embed` でベクトル索引を更新します。
+```sh
+dunlin build
+dunlin search "交換周期" --json
+dunlin ask "交換周期は？" --json
+dunlin serve
+```
 
-MCP クライアントは接続先の索引全体を検索できます。共有範囲を分けるときは索引と設定を分けます。`authoring.sourceRoot` は `source.ingest` で読めるローカルファイルの範囲を指定します。編集用 MCP はノートの保存や資料の取り込みも行えるため、信頼できるクライアントに接続します。
+既定では `127.0.0.1:4318` の1ポートで提供します。
 
-編集用 MCP の `source.read` は、`version` を指定するとコーパスに保存したその版の本文を読みます。原本が保存されていれば、`evidence.original.uri` を `resources/read` に渡すと原本のバイト列を取得できます。[コーパスと原本の設定](../tools/rag/README.md#文書コーパスと原本の設定)
+| 接続先 | リクエスト |
+| --- | --- |
+| `POST /v1/responses` | `{"input":"交換周期は？"}`。OpenAI SDK の `baseURL` は `http://127.0.0.1:4318/v1`。 |
+| `POST /v1/search` | `{"query":"交換周期"}`。必要に応じて `limit`、`budget_chars`、`source_ids` を指定。 |
+| `/mcp` | Streamable HTTP の `knowledge.search`。別のターミナルで `dunlin serve --print-config` を実行すると登録用 URL を取得できます。 |
+
+HTTP の登録用 URL を出力するには、`mcp` エンドポイントと固定ポートが必要です。クライアントは起動済みの `dunlin serve` に接続します。
+
+回答モデルの準備前でも `build`、`search`、`serve` を実行でき、HTTP 検索と MCP を利用できます。`/v1/responses` はモデルを設定して `serve` を再起動するまで `503 MODEL_REQUIRED` を返します。`serve` の `endpoints` を `[search, mcp]` にすると、検索を提供する2つのエンドポイントが有効になります。stdio を使う場合は `dunlin serve --transport stdio` を指定します。
+
+## 検索と回答の JSON
+
+`search --json` の `data`、MCP の `structuredContent`、`POST /v1/search` の応答は共通形式です。`build_id` と `search_config_id` で実行時の構成を確認できます。`results` に検索結果、`context` に組み立てた文脈と文字数・出典範囲・停止理由が入ります。
+
+件数、文脈予算、対象ソースの上書きはその要求にだけ適用されます。CLI では `--limit`、`--budget-chars`、`--source-id`、HTTP と MCP では `limit`、`budget_chars`、`source_ids` を指定します。応答の `search_config_id` は実効設定を表し、`warnings` に上書きが記録されます。
+
+`ask --json` の `data` と `POST /v1/responses` は Responses API 形式です。HTTP の `input` は質問文字列、または最後のユーザーメッセージを含むメッセージ配列を受け付けます。回答の引用は `output[].content[].annotations`、引用した版と原文上の範囲は `dunlin_citations`、ビルドと検索設定の ID は `metadata` に入ります。設定と異なる `model`、ストリーミング、ツール呼び出し、過去の応答の引き継ぎなどを指定した要求は HTTP 400 を返します。[応答形式](dunlin-spec.md#27-search-と-ask-の返却形式種別-rag-の-serve)
+
+## HTTP の接続制限
+
+`serve.access.allowed_hosts` と `serve.access.allowed_origins` で宛先とブラウザの送信元を制限します。ループバックの外で待ち受けるには `serve.access.auth.type` を `token` にし、`token_env` に指定した環境変数へトークンを入れます。クライアントは `Authorization: Bearer <token>` を送ります。Wiki/PARA の画面は Basic 認証にも対応し、ユーザー名は `dunlin`、パスワードは同じトークンです。
+
+`serve.limits` の既定は、リクエスト本文 1 MiB、タイムアウト 120 秒、同時要求 8 件です。`--host` と `--port` は起動時だけ上書きできます。ポートが使用中の場合は終了コード 1 を返します。`serve` の設定変更によってビルド ID や検索設定 ID は変わりません。[接続制限の仕様](dunlin-spec.md#275-serve-の設定項目)
+
+## 初期化で生成される Dunlinfile.yaml
+
+`--source` を省略すると、両種別とも `./docs` を入力にします。`--source` を渡すと、そのディレクトリへのパスが `source.filesystem` の `with.path` に入ります。
+
+### `dunlin init mcp ./mcp`
+
+```yaml
+init:
+  version: 1
+  type: mcp
+# Additional parser: loader.ocr (requires dunlin add ocr).
+# Scan and extract documents. Optional OCR requires a loader.ocr module.
+source:
+  modules:
+    - use: source.filesystem
+      with:
+        path: ./docs
+        exclude: []
+    - use: loader.auto
+      with:
+        unsupported: error
+        ocr: none
+# Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.
+# Normalize and split text. Additional chunking modules can replace chunk.length.
+transform:
+  modules:
+    - use: text.normalize
+      with:
+        unicode: nfkc
+    - use: chunk.length
+      with:
+        unit: characters
+        size: 800
+        overlap: 100
+# Additional index: use: index.vector, with: { model: local-embed }.
+# Build the keyword index. An optional vector index uses index.vector.
+index:
+  modules:
+    - use: index.keyword
+      with:
+        tokenizer: trigram
+        short_query: bigram
+# For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.
+# Retrieve candidates and assemble source context.
+search:
+  modules:
+    - use: query.normalize
+      with:
+        unicode: nfkc
+    - use: retrieval.keyword
+      with:
+        top_k: 10
+    - use: context.assemble
+      with:
+        budget_chars: 4000
+        retrieval: fill_budget
+        max_candidates: 100
+        merge_overlaps: true
+        truncate_last: true
+        include_headings: true
+# Expose the project through its configured transport.
+serve:
+  transport: stdio
+```
+
+### `dunlin init rag ./rag`
+
+```yaml
+init:
+  version: 1
+  type: rag
+# Additional parser: loader.ocr (requires dunlin add ocr).
+# Scan and extract documents. Optional OCR requires a loader.ocr module.
+source:
+  modules:
+    - use: source.filesystem
+      with:
+        path: ./docs
+        exclude: []
+    - use: loader.auto
+      with:
+        unsupported: error
+        ocr: none
+# Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.
+# Normalize and split text. Additional chunking modules can replace chunk.length.
+transform:
+  modules:
+    - use: text.normalize
+      with:
+        unicode: nfkc
+    - use: chunk.length
+      with:
+        unit: characters
+        size: 800
+        overlap: 100
+# Additional index: use: index.vector, with: { model: local-embed }.
+# Build the keyword index. An optional vector index uses index.vector.
+index:
+  modules:
+    - use: index.keyword
+      with:
+        tokenizer: trigram
+        short_query: bigram
+# For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.
+# Retrieve candidates and assemble source context.
+search:
+  modules:
+    - use: query.normalize
+      with:
+        unicode: nfkc
+    - use: retrieval.keyword
+      with:
+        top_k: 10
+    - use: context.assemble
+      with:
+        budget_chars: 4000
+        retrieval: fill_budget
+        max_candidates: 100
+        merge_overlaps: true
+        truncate_last: true
+        include_headings: true
+# Generate a sourced answer from the search context.
+ask:
+  modules:
+    - use: answer.generate
+      with:
+        model: answerer
+        cite: true
+        on_no_evidence: decline
+models:
+  answerer:
+    provider: ollama
+    kind: chat
+    base_url: http://localhost:11434
+    model: null
+# Expose the project through its configured transport.
+serve:
+  transport: http
+  host: 127.0.0.1
+  port: 4318
+  endpoints:
+    - responses
+    - search
+    - mcp
+  access:
+    allowed_hosts:
+      - localhost
+      - 127.0.0.1
+    allowed_origins: []
+    auth:
+      type: none
+      token_env: null
+  limits:
+    max_request_bytes: 1048576
+    request_timeout_seconds: 120
+    max_concurrent: 8
+```
+
+## ベクトル索引を切り替える
+
+埋め込みモデルを `models` に設定し、`dunlin add hannoy --json` が返す設定例を使います。`index.vector` を `hannoy.index` に、`retrieval.vector` を `hannoy.search` に置き換え、両方に同じ埋め込みモデル名を指定します。キーワードとの併用では `fusion.rrf` を残します。
+
+```sh
+dunlin validate
+dunlin build --from index --tag ann
+dunlin search "手順" --build ann
+dunlin use ann
+```
+
+`dunlin add` は配布物に含まれるバイナリの版と SHA-256 を検証し、プロジェクトに配置します。既存の抽出、チャンク、埋め込みを使って索引を構築できます。`dunlin remove hannoy` の前には現行構成から hannoy モジュールを外します。過去のビルドやタグを読み直せるよう、追加済みバイナリと過去の索引は保持します。
+
+## 試行に上限を設定する
+
+```yaml
+trial_limits:
+  max_runs: 20
+  max_elapsed_ms: 300000
+  max_api_requests: 100
+  max_api_input_bytes: 5000000
+```
+
+タグまたは候補設定を指定した構築と、ビルドまたは候補設定を指定した評価を、同じプロジェクトで累計します。失敗した試行と送信したリクエストも計上します。設定の候補で上限を引き下げられます。上限に達すると `TRIAL_LIMIT_REACHED` を返します。`dunlin status --json` の `trials` で使用量と上限を確認できます。

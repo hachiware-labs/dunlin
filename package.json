@@ -5,6 +5,9 @@
   "description": "Local knowledge search with source evidence, powered by Rust",
   "license": "UNLICENSED",
   "type": "module",
+  "bin": {
+    "dunlin": "./tools/rag/cli.mjs"
+  },
   "engines": {
     "node": "^22.13.0 || >=24"
   },
@@ -22,7 +25,14 @@
     "dist/mcp.d.ts",
     "dist/native.cjs",
     "dist/*.node",
-    "examples/*.mjs"
+    "dist/tools/*",
+    "examples/*.mjs",
+    "tools/rag/*.mjs",
+    "tools/rag/authoring/*.mjs",
+    "tools/rag/parsers/*",
+    "docs/acceptance.md",
+    "docs/dunlin-spec.md",
+    "docs/mcp.md"
   ],
   "napi": {
     "binaryName": "dunlin",
@@ -34,27 +44,30 @@
     ]
   },
   "scripts": {
-    "build": "npm run build:native && npm run build:js",
+    "build": "npm run build:native && npm run build:js && npm run build:hannoy",
+    "build:hannoy": "node scripts/build-hannoy.mjs",
     "build:native": "napi build --platform --output-dir dist --js native.cjs --dts native.d.cts --release --features node",
     "build:js": "tsc -p tsconfig.json",
     "test": "tsc -p tests/tsconfig.json && node --test tests/*.test.mjs",
     "test:package": "napi create-npm-dirs && node scripts/test-package.mjs",
     "bench": "node benches/keyword.mjs"
   },
-  "peerDependencies": {
-    "@modelcontextprotocol/server": "^2.4.0",
-    "zod": "^4.0.0"
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "cheerio": "1.2.0",
+    "markdown-it": "15.0.3",
+    "yaml": "2.9.0",
+    "zod": "4.6.7"
   },
-  "peerDependenciesMeta": {
-    "@modelcontextprotocol/server": { "optional": true },
-    "zod": { "optional": true }
+  "optionalDependencies": {
+    "@napi-rs/canvas": "1.1.0",
+    "docling.rs": "2.67.1",
+    "pdfjs-dist": "6.5.438"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
-    "@modelcontextprotocol/server": "2.4.0",
     "@napi-rs/cli": "3.10.12",
     "@types/node": "^22.0.0",
-    "typescript": "5.9.3",
-    "zod": "4.6.7"
+    "typescript": "5.9.3"
   }
 }

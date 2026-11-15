@@ -3,6 +3,7 @@ import { basename, extname, join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { prepareDocument } from './authoring/uploads.mjs';
+import { revision } from './authoring/files.mjs';
 import { parseConfigured, parserCategory } from './parsers/parse.mjs';
 
 const textLimit = 1024 * 1024;
@@ -10,6 +11,10 @@ export const convertedLimit = 16 * textLimit;
 const textExtensions = new Set(['.md', '.markdown', '.txt', '.rs', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx',
   '.py', '.go', '.java', '.cs', '.json', '.toml', '.yaml', '.yml', '.sql']);
 const htmlExtensions = new Set(['.html', '.htm']);
+
+export function isPlainDocument(path) {
+  return textExtensions.has(extname(path).toLowerCase());
+}
 
 export async function ingestFiles(database, { sourceId, uploadRoot, parsers, keepOriginal }, location) {
   const path = await realpath(location);
@@ -39,19 +44,19 @@ export async function ingestFiles(database, { sourceId, uploadRoot, parsers, kee
   return database.replaceDocuments(sourceId, documents);
 }
 
-export async function prepareLocalFile(uploadRoot, sourceId, path, objectId, parsers, keepOriginal, signal) {
+export async function prepareLocalFile(uploadRoot, sourceId, path, objectId, parsers, keepOriginal, signal, decode, cache, originalOptions) {
   const name = basename(path);
   const extension = extname(name).toLowerCase();
   const category = parserCategory(parsers, name);
   const html = htmlExtensions.has(extension);
-  if (!category && !html && !textExtensions.has(extension)) throw new Error('Expected a supported UTF-8 file or a configured parser');
+  if (!decode && !category && !html && !textExtensions.has(extension)) throw new Error('Expected a supported UTF-8 file or a configured parser');
   const file = await open(path, 'r');
   let bytes;
   let modifiedAtMs;
   try {
     const before = await file.stat();
     if (!before.isFile()) throw new Error('Expected a local file');
-    const limit = category ? convertedLimit : html ? 4 * textLimit : textLimit;
+    const limit = category || decode ? convertedLimit : html ? 4 * textLimit : textLimit;
     bytes = await readBounded(file.createReadStream({ autoClose: false }), limit, signal);
     const after = await stat(path);
     if (before.mtimeMs !== after.mtimeMs || before.size !== after.size) throw new Error('A source file changed while it was being indexed');
@@ -59,15 +64,22 @@ export async function prepareLocalFile(uploadRoot, sourceId, path, objectId, par
   } finally {
     await file.close();
   }
-  let parsed;
-  if (category || html) {
+  const hash = cache && revision(bytes);
+  let parsed = hash && cache.read(hash);
+  if (parsed) return { input: { ...parsed, objectId, url: pathToFileURL(path).href, modifiedAtMs } };
+  if (decode) {
+    parsed = await decode(bytes, name);
+  } else if (category || html) {
     parsed = await decodeRemote([bytes], undefined, name, { parsers, keepOriginal, signal });
   } else {
     const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     parsed = { content, format: ['.md', '.markdown'].includes(extension) ? 'markdown' : 'text', ...(keepOriginal && { bytes }) };
   }
+  if (Buffer.byteLength(parsed.content) > textLimit) throw new Error('Extracted text exceeds 1 MiB');
   signal?.throwIfAborted();
-  return prepareDocument(uploadRoot, sourceId, { objectId, url: pathToFileURL(path).href, modifiedAtMs }, parsed);
+  const prepared = await prepareDocument(uploadRoot, sourceId, { objectId, url: pathToFileURL(path).href, modifiedAtMs }, parsed, originalOptions);
+  if (hash) cache.write(hash, prepared.input);
+  return prepared;
 }
 
 export async function decodeRemote(body, type, name, { parsers, keepOriginal, signal } = {}) {
@@ -94,7 +106,7 @@ export async function readBounded(body, limit, signal) {
   return Buffer.concat(chunks, length);
 }
 
-async function* listFiles(path) {
+export async function* listFiles(path) {
   const directory = await opendir(path);
   for await (const entry of directory) {
     if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.isSymbolicLink()) continue;

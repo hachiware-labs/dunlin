@@ -14,10 +14,10 @@ import { deflateSync } from 'node:zlib';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
-const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
+const cli = fileURLToPath(new URL('./fixtures/legacy-cli.mjs', import.meta.url));
 const runNode = promisify(execFile);
 
-async function fixture(t, preset, { wiki = false, web = false, ocrUrl, managedOcr = false } = {}) {
+async function fixture(t, preset, { wiki = false, web = false, ocrUrl, managedOcr = false, corpusBackend } = {}) {
   const temp = await mkdtemp(join(tmpdir(), `dunlin-${preset}-`));
   const root = join(temp, 'project');
   const config = join(root, 'dunlin.json');
@@ -28,6 +28,7 @@ async function fixture(t, preset, { wiki = false, web = false, ocrUrl, managedOc
     await rm(temp, { recursive: true, force: true, maxRetries: 5 });
   });
   await runNode(process.execPath, [cli, 'init', root, '--preset', preset]);
+  if (corpusBackend) await runNode(process.execPath, [cli, 'config', 'set', 'corpus.backend', corpusBackend, '--config', config]);
   if (wiki) await runNode(process.execPath, [cli, 'config', 'set', 'authoring.wiki', './wiki', '--config', config]);
   if (ocrUrl) await runNode(process.execPath, [cli, 'setup', 'ocr', '--base-url', ocrUrl, '--config', config]);
   if (managedOcr) await runNode(process.execPath, [cli, 'config', 'set', 'parsers.ocr', '{"tool":"lightonocr"}', '--config', config]);
@@ -58,7 +59,7 @@ async function fixture(t, preset, { wiki = false, web = false, ocrUrl, managedOc
     assert.equal(result.isError, true);
     assert.match(JSON.stringify(result.content), message);
   }
-  return { temp, root, call, reject, restart, webUrl, readResource: (uri) => client.readResource({ uri }) };
+  return { temp, root, call, reject, restart, get webUrl() { return webUrl; }, readResource: (uri) => client.readResource({ uri }) };
 }
 
 test('creates a PARA note through stdio from a URL and local source', { timeout: 30_000 }, async (t) => {
@@ -313,9 +314,10 @@ test('publishes a client attachment to PARA and Wiki and retrieves it from the s
   }
 });
 
-test('serves MCP publications as HTML with versioned citations and original downloads', { timeout: 30_000 }, async (t) => {
-  const { call, webUrl } = await fixture(t, 'para', { wiki: true, web: true });
-  const request = (path, options) => fetch(new URL(path, webUrl), options);
+test('serves MCP publications and original downloads across JSON to SQLite migration', { timeout: 30_000 }, async (t) => {
+  const project = await fixture(t, 'para', { wiki: true, web: true, corpusBackend: 'json' });
+  const { call, root, restart } = project;
+  const request = (path, options) => fetch(new URL(path, project.webUrl), options);
   async function html(path, status = 200) {
     const response = await request(path);
     assert.equal(response.status, status, path);
@@ -362,6 +364,9 @@ test('serves MCP publications as HTML with versioned citations and original down
   }
 
   const second = await call('source.upload', { name: 'policy.md', uploadId: first.uploadId, content: '# Policy\nUpdated.\nKeep snapshots for 52 days.' });
+  await runNode(process.execPath, [cli, 'config', 'set', 'corpus.backend', 'sqlite', '--config', join(root, 'dunlin.json')]);
+  await restart();
+  assert.match(await html(citationPath(notePath, note.revision)), /<pre>Keep snapshots for 30 days\./u);
   assert.match(await html(citationPath(wikiPath, published.revision)), /<pre>Keep snapshots for 30 days\./u);
   const replacement = await call('source.read', { ...second.document, startLine: 3, maxLines: 1 });
   const update = { ...draft, markdown: '**52日間**保存します。', citations: [replacement.evidence] };

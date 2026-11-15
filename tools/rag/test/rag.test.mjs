@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 const runNode = promisify(execFile);
-const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
+const cli = fileURLToPath(new URL('./fixtures/legacy-cli.mjs', import.meta.url));
 const retention = 'バックアップの保管期間は30日です。';
 const recovery = 'バックアップの復旧時間は4時間です。';
 

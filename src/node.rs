@@ -129,6 +129,7 @@ pub fn rank_vectors(
 ) -> AsyncTask<Job<Json>> {
     let cancel = cancel.0.clone();
     task(move || {
+        cancel.check()?;
         let search = serde_json::from_str(&request)
             .map_err(|_| crate::Error::Invalid("Invalid vector ranking options"))?;
         json(crate::vector::rank(Path::new(&path), search, &cancel)?)

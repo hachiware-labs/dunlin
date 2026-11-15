@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -287,6 +287,53 @@ test('rejects invalid inputs and propagates abort and close to native work', asy
   } finally {
     await database.close();
   }
+});
+
+test('preserves vector scores and row ordering across f32 rounding and overflow', async (t) => {
+  const { root } = await fixture(t);
+  const path = join(root, 'vectors.f32');
+  async function writeVectors(vectors) {
+    const components = vectors.flat();
+    const bytes = Buffer.alloc(components.length * 4);
+    for (const [index, component] of components.entries()) bytes.writeFloatLE(component, index * 4);
+    await writeFile(path, bytes);
+  }
+
+  const tail = Array(7).fill(0);
+  const gap = 2 ** -25;
+  await writeVectors([[1, ...tail, 0], [1, ...tail, gap], [1, ...tail, gap], [0.5, ...tail, 0]]);
+  const request = { needle: [1, ...tail, 1], rows: 4, limit: 2 };
+  assert.deepEqual(await Dunlin.rankVectors(path, request), [{ i: 1, score: 1 + gap }, { i: 2, score: 1 + gap }]);
+  assert.deepEqual(await Dunlin.rankVectors(path, { ...request, positions: [2, 0, 1] }),
+    [{ i: 1, score: 1 + gap }, { i: 2, score: 1 + gap }]);
+
+  const max = Buffer.from('ffff7f7f', 'hex').readFloatLE();
+  await writeVectors([[max, max], [max, -max], [1, 0]]);
+  for (const value of [2, 1e100, 2 ** -153]) {
+    assert.deepEqual(await Dunlin.rankVectors(path, { needle: [value, value], rows: 3, limit: 2 }),
+      [{ i: 0, score: 2 * (max * value) }, { i: 2, score: value }]);
+  }
+  await writeVectors([[1, 0], [Infinity, 1]]);
+  await assert.rejects(Dunlin.rankVectors(path, { needle: [1, 1], rows: 2, limit: 1 }), errorCode('INVALID_ARGUMENT'));
+});
+
+test('interrupts an in-flight vector scan and accepts new searches afterward', async (t) => {
+  const { root } = await fixture(t);
+  const path = join(root, 'vectors.f32');
+  const rows = 32_768;
+  const needle = Array(2048).fill(1);
+  const file = await open(path, 'w');
+  try { await file.truncate(rows * needle.length * 4); }
+  finally { await file.close(); }
+
+  const request = { needle, rows, limit: 1 };
+  await assert.rejects(Dunlin.rankVectors(path, request, { signal: AbortSignal.abort() }), errorCode('ABORTED'));
+  const controller = new AbortController();
+  const rejected = assert.rejects(Dunlin.rankVectors(path, request, { signal: controller.signal }), errorCode('ABORTED'));
+  await setImmediate();
+  controller.abort();
+  await rejected;
+  assert.deepEqual(await Dunlin.rankVectors(path, { ...request, positions: [2, 1] }), [{ i: 1, score: 0 }]);
 });
 
 test('search deadline includes time spent in the native work queue', async (t) => {

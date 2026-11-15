@@ -122,6 +122,44 @@ pub fn inspect_index(path: String, cancel: &NativeCancellation) -> AsyncTask<Job
 }
 
 #[napi]
+pub fn analyze_japanese(
+    texts: Vec<String>,
+    dictionary: Option<String>,
+    cancel: &NativeCancellation,
+) -> AsyncTask<Job<Json>> {
+    let cancel = cancel.0.clone();
+    task(move || {
+        cancel.check()?;
+        let tokenizer =
+            crate::japanese::JapaneseTokenizer::open(dictionary.as_deref().map(Path::new))?;
+        let tokens = texts
+            .iter()
+            .map(|text| {
+                cancel.check()?;
+                tokenizer.analyze(text)
+            })
+            .collect::<crate::Result<Vec<_>>>()?;
+        json(tokens)
+    })
+}
+
+#[napi]
+pub fn merge_user_dictionary(
+    existing: Option<String>,
+    selected: String,
+    cancel: &NativeCancellation,
+) -> AsyncTask<Job<String>> {
+    let cancel = cancel.0.clone();
+    task(move || {
+        cancel.check()?;
+        crate::japanese::merge_user_records(
+            existing.as_deref().map(Path::new),
+            Path::new(&selected),
+        )
+    })
+}
+
+#[napi]
 pub fn rank_vectors(
     path: String,
     request: String,

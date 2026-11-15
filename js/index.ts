@@ -16,6 +16,13 @@ interface NativeCancellation {
   abort(): void;
 }
 
+interface JapaneseToken {
+  start: number;
+  end: number;
+  term: string | null;
+  reading: string | null;
+}
+
 interface NativeDatabase {
   addSource(id: string, path: string, cancel: NativeCancellation): Promise<SyncOutcome>;
   replaceDocuments(id: string, request: string, cancel: NativeCancellation): Promise<SyncOutcome>;
@@ -45,6 +52,8 @@ interface NativeBinding {
   openNative(path: string, cancel: NativeCancellation, backend?: CorpusBackend, keywordNgrams?: boolean, keywordBigrams?: boolean,
     corpusPath?: string, keywordJapanese?: OpenOptions['keywordJapanese']): Promise<NativeDatabase>;
   inspectIndex(path: string, cancel: NativeCancellation): Promise<IndexStatus | null>;
+  analyzeJapanese(texts: readonly string[], dictionary: string | undefined, cancel: NativeCancellation): Promise<JapaneseToken[][]>;
+  mergeUserDictionary(existing: string | undefined, selected: string, cancel: NativeCancellation): Promise<string>;
   rankVectors(path: string, request: string, cancel: NativeCancellation): Promise<{ i: number; score: number }[]>;
   acquireExecutionLock(path: string): { release(): void };
 }
@@ -262,6 +271,20 @@ export class Dunlin {
   static async inspectIndex(path: string, { signal }: OperationOptions = {}): Promise<IndexStatus | null> {
     const directory = absolutePath(path);
     return cancellable(signal, (cancel) => native().inspectIndex(directory, cancel));
+  }
+
+  /** Inspect search terms and their UTF-8 byte ranges using the Lindera keyword tokenizer. */
+  static async analyzeJapanese(texts: readonly string[], dictionary?: string,
+    { signal }: OperationOptions = {}): Promise<JapaneseToken[][]> {
+    const path = dictionary === undefined ? undefined : absolutePath(dictionary);
+    return cancellable(signal, (cancel) => native().analyzeJapanese(texts, path, cancel));
+  }
+
+  /** Validate and combine two Lindera CSVs while keeping the input files intact. */
+  static async mergeUserDictionary(existing: string | undefined, selected: string,
+    { signal }: OperationOptions = {}): Promise<string> {
+    const path = existing === undefined ? undefined : absolutePath(existing);
+    return cancellable(signal, (cancel) => native().mergeUserDictionary(path, absolutePath(selected), cancel));
   }
 
   /** Score a completed immutable float32 vector artifact. Omit positions to search all rows. */

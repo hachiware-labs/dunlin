@@ -15,7 +15,8 @@ import { atomicWrite, categories, revision, withWriteLock } from './authoring/fi
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { createGenerator } from './models.mjs';
 import { chunkCorpus, inventory, loadCorpus, scanFolder, unsupportedFiles } from './project-content.mjs';
-import { ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
+import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
+import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
 import { buildVectorIndex, fuseResults, releaseVectorMetadata, semanticChunks, vectorBackend, vectorModel, vectorSearch } from './project-vectors.mjs';
@@ -54,6 +55,7 @@ export const projectCommands = {
   'eval-data': 'dunlin eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]',
   eval: 'dunlin eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]',
   report: 'dunlin report <show|list|compare> [--project <directory>] [--json]',
+  dictionary: 'dunlin dictionary suggest [--report <ref>] | dunlin dictionary add <file> --config <candidate> [--project <directory>] [--json]',
   'evidence-map': 'dunlin evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]',
   ingress: 'dunlin ingress <path...> | dunlin ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]',
   query: 'dunlin query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]',
@@ -1213,7 +1215,8 @@ export async function runProjectCommand(command, args, explicitProject) {
       options.tag = { type: 'string' };
       options.input = { type: 'string' };
     }
-    if (['validate', 'search', 'ask', 'build', 'eval', ...stages].includes(command)) options.config = { type: 'string' };
+    if (['validate', 'search', 'ask', 'build', 'eval', 'dictionary', ...stages].includes(command)) options.config = { type: 'string' };
+    if (command === 'dictionary') options.report = { type: 'string' };
     if (['search', 'ask', 'eval', 'evidence-map'].includes(command)) options.build = { type: 'string' };
     if (command === 'search') {
       options.limit = { type: 'string' };
@@ -1263,6 +1266,7 @@ export async function runProjectCommand(command, args, explicitProject) {
       : command === 'eval-data' ? { add: 1, import: 2, export: 2, list: 1, show: 2, split: 1,
       generate: 1, review: 2, sync: 2, diff: 3, tag: 3, use: 2 }
       : command === 'report' ? { show: 2, list: 1, compare: 3 }
+      : command === 'dictionary' ? { suggest: 1, add: 2 }
       : command === 'evidence-map' ? { create: 1, list: 1, show: 2, export: 2, import: 2, confirm: 2 } : null;
     const count = actions ? (Object.hasOwn(actions, positionals[0]) ? actions[positionals[0]] : -1)
       : ['init', 'cite', 'issue', 'tag'].includes(command) || command === 'instruct' && !values.persistent
@@ -1279,7 +1283,8 @@ export async function runProjectCommand(command, args, explicitProject) {
     if ((command === 'modules' && !['list', 'describe'].includes(type))
       || (values.tag !== undefined && (!/^[\p{L}\p{N}_.-]{1,100}$/u.test(values.tag) || (values.until && values.until !== 'index')))
       || (values.split !== undefined && !['dev', 'test'].includes(values.split))
-      || [values.config, values.build].some((value) => value !== undefined && !value.trim())
+      || [values.config, values.build, values.report].some((value) => value !== undefined && !value.trim())
+      || command === 'dictionary' && (type === 'add' ? !values.config || values.report !== undefined : values.config !== undefined)
       || command === 'tag' && !/^[\p{L}\p{N}_.-]{1,100}$/u.test(type)) {
       throw new ProjectError(2, 'INVALID_ARGUMENT', projectCommands[command]);
     }
@@ -1393,6 +1398,26 @@ export async function runProjectCommand(command, args, explicitProject) {
       } else if (command === 'tag') {
         runId = `run-${randomUUID()}`;
         data = await tagBuild(project, type, directory, values.move);
+      } else if (command === 'dictionary') {
+        if (type === 'add') {
+          runId = `run-${randomUUID()}`;
+          data = await withExecutionLock(project.paths, () => addDictionary(project, resolve(values.config), directory));
+        } else {
+          const db = openState(project.paths, true);
+          let database;
+          try {
+            const { report, data: dataset } = dictionaryEvaluation(db, project, values.report);
+            const build = currentBuild(project.paths, true, report.build_id);
+            if (build.keyword?.tokenizer !== 'lindera') {
+              throw new ProjectError(2, 'LINDERA_REQUIRED', 'Choose an evaluation report for a Lindera build.');
+            }
+            database = await openBuild(project.paths, build);
+            data = await suggestDictionary(report, dictionaryMisses(db, report, dataset, database), keywordOptions(build.keyword, project.paths).keywordJapanese.userDictionary);
+          } finally {
+            await database?.close();
+            db.close();
+          }
+        }
       } else if (command === 'evidence-map') {
         const mutates = ['create', 'import', 'confirm'].includes(type);
         const db = openState(project.paths, !mutates);
@@ -1501,6 +1526,7 @@ export async function runProjectCommand(command, args, explicitProject) {
     }), 'ocr  ' + (data.ocr?.tool ?? 'unset')].join('\n'));
     else if (command === 'search') console.log(`${data.build_id} ${data.search_config_id}\n${data.context.text || 'No matches.'}`);
     else if (command === 'ask') console.log(answerText(data));
+    else if (command === 'dictionary') console.log(type === 'suggest' ? dictionaryText(data) : data.user_dictionary);
     else if (command === 'status' && data.build_id) {
       console.log(`${data.build_id} ${data.search_config_id} ${data.evaluation_status}${data.evaluation_report ? ' ' + JSON.stringify(data.evaluation_report.scores) : ''}\n${JSON.stringify(data, null, 2)}`);
     }

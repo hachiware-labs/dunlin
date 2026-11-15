@@ -431,11 +431,20 @@ function mean(values) {
   return values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : null;
 }
 
+function evaluationCases(data, split, includeGenerated) {
+  const included = includeGenerated ? ['provided', 'reviewed', 'generated'] : ['provided', 'reviewed'];
+  return data.cases.filter((item) => item.split === split && included.includes(item.state));
+}
+
+function primaryRecall(names) {
+  return names.includes('evidence_recall@context') ? 'evidence_recall@context'
+    : 'evidence_recall@' + Math.max(...names.map((name) => Number(name.slice('evidence_recall@'.length))));
+}
+
 export async function evaluate(db, project, build, settings, values, runId, database, search) {
   const data = dataset(db, project.config['eval-data']?.use);
   const split = values.split ?? 'dev';
-  const included = settings.includeGenerated ? ['provided', 'reviewed', 'generated'] : ['provided', 'reviewed'];
-  const cases = data.cases.filter((item) => item.split === split && included.includes(item.state));
+  const cases = evaluationCases(data, split, settings.includeGenerated);
   if (!cases.length) throw missing('No evaluation cases in split ' + split + '.');
   if (values.tag && db.prepare('SELECT id FROM evaluation_reports WHERE tag = ?').get(values.tag)) throw invalid('Report tag already exists.');
   const positions = {};
@@ -468,16 +477,25 @@ export async function evaluate(db, project, build, settings, values, runId, data
       if (!previous) savePosition.run(key, JSON.stringify(match));
       positions[key] = { key, doc: evidence.doc, quote: evidence.quote, version: document.evidence.source.version,
         content_hash: revision(document.content), ...match };
-      matches.push({ ...match, document });
+      matches.push({ ...match, document, position_key: key });
     }
-    const scores = Object.fromEntries(settings.recall.at.map((at) => {
-      const hits = at === 'context' ? result.context.map(({ evidence }) => evidence) : result.hits.slice(0, at).map(({ evidence }) => evidence);
-      return ['evidence_recall@' + at, mean(matches.map(({ range, document }) =>
-        Number(Boolean(range && covered(range, hits, document.content, document.evidence.source, settings.recall)))))];
+    const ranked = result.hits.map(({ evidence }) => evidence);
+    const recovered = Object.fromEntries(settings.recall.at.map((at) => {
+      const hits = at === 'context' ? result.context.map(({ evidence }) => evidence) : ranked.slice(0, at);
+      return ['evidence_recall@' + at, matches.map(({ range, document }) => Boolean(range
+        && covered(range, hits, document.content, document.evidence.source, settings.recall)))];
     }));
+    const scores = Object.fromEntries(Object.entries(recovered).map(([name, flags]) => [name, mean(flags.map(Number))]));
+    const primary = recovered[primaryRecall(Object.keys(recovered))];
+    const rankedMetric = settings.recall.at.find((at) => typeof at === 'number' && at >= ranked.length);
+    const knownRanked = recovered['evidence_recall@' + rankedMetric];
+    const evidence = split === 'dev' ? matches.map(({ position_key, range, reason, document }, i) => primary[i] ? { recovered: true }
+      : { recovered: false, position_key, reason, ...(range && {
+        in_results: knownRanked?.[i] ?? covered(range, ranked, document.content, document.evidence.source, settings.recall),
+      }) }) : undefined;
     rows.push({ id: item.id, group: item.group, scores, complete: matches.every(({ range }) => range),
       unresolved: matches.filter(({ range }) => !range).map(({ reason }) => reason), latency_ms: ms, context_chars: result.context_chars,
-      context_stop: result.context_stop });
+      context_stop: result.context_stop, evidence });
   }
   const names = Object.keys(rows[0].scores);
   const latency = rows.map(({ latency_ms }) => latency_ms).sort((a, b) => a - b);
@@ -611,6 +629,70 @@ function reportByRef(db, ref) {
   return JSON.parse(row.data);
 }
 
+export function dictionaryEvaluation(db, project, ref) {
+  const addHint = 'Add a development evaluation question with dunlin eval-data add --question <text> --doc <path> --quote <text>.';
+  let data;
+  let report;
+  if (ref !== undefined) {
+    report = reportByRef(db, ref);
+    if (report.split !== 'dev') throw invalid('Dictionary suggestions require a development report.');
+    data = dataset(db, report.dataset_id);
+  } else {
+    const selected = project.config['eval-data']?.use;
+    if (!selected) throw missing(addHint);
+    data = dataset(db, selected);
+    if (!evaluationCases(data, 'dev', project.evalSettings?.includeGenerated).length) throw missing(addHint);
+    const row = db.prepare(`SELECT data FROM evaluation_reports WHERE json_extract(data, '$.dataset_id') = ?
+      AND json_extract(data, '$.split') = 'dev' ORDER BY rowid DESC LIMIT 1`).get(data.id);
+    if (!row) throw new EvaluationError(3, 'REPORT_REQUIRED', 'Run dunlin eval to create a development report first.');
+    report = JSON.parse(row.data);
+  }
+  return { report, data };
+}
+
+export async function* dictionaryMisses(db, report, data, database) {
+  const row = db.prepare('SELECT data FROM evidence_maps WHERE id = ?').get(report.evidence_map_id);
+  if (!row) throw new EvaluationError(3, 'MAP_REQUIRED', 'Run dunlin eval to record the evidence positions first.');
+  const { positions } = JSON.parse(row.data);
+  const cases = new Map(data.cases.map((item) => [item.id, item]));
+  const primary = primaryRecall(Object.keys(report.scores));
+  const documents = new Map();
+  for (const result of report.rows) {
+    if (result.scores[primary] === 1) continue;
+    const { id, question, evidence } = cases.get(result.id);
+    for (const [i, item] of evidence.entries()) {
+      const saved = result.evidence?.[i];
+      if (saved?.recovered) continue;
+      const finding = { case_id: id, question, doc: item.doc, quote: item.quote };
+      if (!saved && result.scores[primary] > 0) {
+        yield { ...finding, reason: 'legacy_mixed_recovery' };
+        break;
+      }
+      if (saved?.reason) {
+        yield { ...finding, reason: saved.reason };
+        continue;
+      }
+      const separator = item.doc.indexOf(':');
+      if (!documents.has(item.doc)) documents.set(item.doc,
+        await database.getDocument({ sourceId: item.doc.slice(0, separator), objectId: item.doc.slice(separator + 1) }));
+      const document = documents.get(item.doc);
+      const positionDocument = document && !saved && item.page ? await loadEvidenceMetadata(database, document) : document;
+      const position = positionDocument && positions[saved?.position_key ?? positionKey(item, positionDocument)];
+      if (!position?.range) {
+        yield { ...finding, reason: position?.reason ?? 'source_missing' };
+        continue;
+      }
+      const { start, end } = position.range;
+      const bytes = Buffer.from(document.content);
+      const lineStart = start === 0 ? 0 : bytes.lastIndexOf(10, start - 1) + 1;
+      const lineEnd = bytes.indexOf(10, end);
+      yield { ...finding, url: document.evidence.source.url, in_results: saved?.in_results,
+        before: bytes.subarray(lineStart, start).toString(), text: bytes.subarray(start, end).toString(),
+        after: bytes.subarray(end, lineEnd < 0 ? bytes.length : lineEnd).toString() };
+    }
+  }
+}
+
 export function reports(db, action, refs, split) {
   if (action === 'show') return reportByRef(db, refs[0]);
   if (action === 'list') {
@@ -658,8 +740,19 @@ export function reports(db, action, refs, split) {
   }));
   const comparable = paired.length === a.rows.length && paired.length === b.rows.length
     && !['dataset_id', 'method_id', 'split', 'budget_chars'].some((key) => key in differences);
-  return { a: a.id, b: b.id, differences, common_cases: paired.length, comparable, provisional: 'source_id' in differences,
-    scores: comparable ? scores : {}, ...(comparable ? {} : { common_case_scores: scores }) };
+  const comparison = { a: a.id, b: b.id, differences, common_cases: paired.length, comparable, provisional: 'source_id' in differences };
+  if (!comparable) return { ...comparison, scores: {}, common_case_scores: scores };
+  if (a.split !== 'dev') return { ...comparison, scores };
+  const primary = primaryRecall(scoreNames);
+  const questions = new Map(dataset(db, a.dataset_id).cases.map(({ id, question }) => [id, question]));
+  const cases = paired.flatMap(([before, after]) => {
+    const baseline = before.scores[primary];
+    const trial = after.scores[primary];
+    if (baseline === undefined || trial === undefined || baseline === 1 && trial === 1) return [];
+    return [{ id: before.id, question: questions.get(before.id), before: baseline, after: trial, delta: trial - baseline,
+      status: trial < baseline ? 'worse' : trial === 1 ? 'recovered' : 'still_missing' }];
+  });
+  return { ...comparison, scores, case_metric: primary, cases };
 }
 
 function flatten(value, prefix = '') {

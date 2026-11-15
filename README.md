@@ -50,7 +50,7 @@ npm install /path/to/dunlin-0.5.0.tgz
 
 `dunlin` は仮のパッケージ名です。npm レジストリへの公開とライセンスの決定は未実施です。GitHub Actions は、単独でインストールできる OS 別のバンドル版と、ルートパッケージの `optionalDependencies` からバイナリを解決する分割版を生成します。[NAPI-RS の配布方式](https://napi.rs/docs/deep-dive/release)
 
-push・PR では Windows x64 と Ubuntu x64 のビルド・配布を検証します。macOS の arm64・x64 を検証するときは、GitHub Actions の **Verify Dunlin** で **Run only the macOS ARM and Intel checks** を選んで実行します。GitHub CLI では `gh workflow run ci.yml -f macos=true` で実行できます。
+CI は手動で実行します。GitHub Actions の **Verify Dunlin** を起動すると、Windows x64 と Ubuntu x64 のビルド・配布を検証します。macOS の arm64・x64 を検証するには **Run only the macOS ARM and Intel checks** を選びます。GitHub CLI では `gh workflow run ci.yml -f macos=true` で macOS の検証を実行できます。
 
 ## 検索と根拠取得
 

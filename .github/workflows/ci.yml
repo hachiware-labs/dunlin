@@ -1,8 +1,6 @@
 name: Verify Dunlin
 
 on:
-  push:
-  pull_request:
   workflow_dispatch:
     inputs:
       macos:
@@ -23,7 +21,7 @@ jobs:
       matrix:
         include: >-
           ${{ fromJSON(
-            (github.event_name == 'workflow_dispatch' && inputs.macos)
+            inputs.macos
             && '[
               {"runner":"macos-15","node":"22","target":"darwin-arm64"},
               {"runner":"macos-15-intel","node":"22","target":"darwin-x64"}

@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
+import { Dunlin } from 'dunlin';
+
 import { atomicWrite, revision, withWriteLock } from './authoring/files.mjs';
 import { lightonModel } from './parsers/catalog.mjs';
 import { managedOcrVersion, setupManagedOcr } from './parsers/lighton-setup.mjs';
@@ -11,19 +13,11 @@ export const toolsCatalog = new Map([
   ['hannoy', hannoy],
 ]);
 
+/** Checks the tools list in Rust against the bundled catalog. */
 export function checkTools(config, issue) {
   if (config.tools === undefined) return;
-  if (!Array.isArray(config.tools)) {
-    issue('ARG_TYPE', ['tools'], 'A list of tool names and versions', 'Use dunlin add --list.');
-    return;
-  }
-  const names = new Set();
-  for (const [i, entry] of config.tools.entries()) {
-    const tool = toolsCatalog.get(entry?.name);
-    if (!tool || tool.version !== entry.version || Object.keys(entry).some((key) => !['name', 'version'].includes(key)) || names.has(entry.name)) {
-      issue('REQUIREMENT_MISSING', ['tools', i], 'A unique tool and version from the bundled catalog', 'Use dunlin add --list.');
-    } else names.add(entry.name);
-  }
+  const catalog = [...toolsCatalog.values()].map(({ name, version }) => [name, version]);
+  for (const { code, path, expected, hint } of Dunlin.checkTools(config.tools, catalog)) issue(code, path, expected, hint);
 }
 
 export async function changeTool(project, name, remove, writeTemplate) {

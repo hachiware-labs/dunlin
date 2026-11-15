@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -59,6 +59,10 @@ interface NativeBinding {
   chunkDocuments(request: string): string;
   describeModules(): string;
   parseConfig(text: string): string;
+  validateConfig(config: string, options: string): string;
+  validateServe(type: string, input: string): string;
+  checkTools(tools: string, catalog: string): string;
+  trialLimitsValid(limits: string): boolean;
   readModuleArgs(name: string, args: string): string;
   readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
   storeOriginals(directory: string, files: { sha256: string; bytes: Uint8Array }[], cancel: NativeCancellation): Promise<(string | null)[]>;
@@ -105,6 +109,21 @@ function translateNativeError(error: unknown): DunlinError {
   if (error instanceof DunlinError) return error;
   const match = error instanceof Error && /^(INVALID_ARGUMENT|IO_ERROR|BUSY|ABORTED|TIMEOUT|NOT_FOUND|STALE_EVIDENCE|INDEX_ERROR|PLAN_NOT_FOUND|PLAN_ERROR|WIKI_NOT_FOUND|WIKI_ERROR)\|(.+)$/u.exec(error.message);
   return match ? new DunlinError(match[1] as DunlinErrorCode, match[2]) : new DunlinError('INDEX_ERROR', 'The native operation failed');
+}
+
+/** JSON for configuration values. NaN and infinities, which JSON lacks, travel as markers. */
+function configJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    typeof item === 'number' && !Number.isFinite(item) ? { $dunlin_nonfinite: String(item) } : item) ?? 'null';
+}
+
+function nativeJson(run: () => string): unknown {
+  try {
+    return JSON.parse(run(), (_key, value: unknown) =>
+      value && typeof value === 'object' && '$dunlin_nonfinite' in value ? Number((value as { $dunlin_nonfinite: string }).$dunlin_nonfinite) : value);
+  } catch (error) {
+    throw translateNativeError(error);
+  }
 }
 
 function absolutePath(path: string): string {
@@ -309,6 +328,33 @@ export class Dunlin {
     try {
       return JSON.parse(native().parseConfig(text), (_key, value: unknown) =>
         value && typeof value === 'object' && '$dunlin_nonfinite' in value ? Number((value as { $dunlin_nonfinite: string }).$dunlin_nonfinite) : value) as ParsedConfig;
+    } catch (error) {
+      throw translateNativeError(error);
+    }
+  }
+
+  /**
+   * Validate an MCP or RAG configuration with the module registry (spec 26.8). `lines` lists the
+   * line of each value as Dunlin.parseConfig returns them; `tools` lists the bundled tool versions.
+   */
+  static validateConfig(config: unknown, options: { file: string; lines?: [(string | number)[], number][]; tools?: [string, string][]; cwd?: string }): ConfigValidation {
+    return nativeJson(() => native().validateConfig(configJson(config), JSON.stringify({ cwd: process.cwd(), ...options }))) as ConfigValidation;
+  }
+
+  /** Validate a serve section for a project type. Returns the settings with defaults, or null. */
+  static validateServe(type: string, input: unknown): { settings: unknown; issues: ConfigIssue[] } {
+    return nativeJson(() => native().validateServe(type, input === undefined ? '' : configJson(input))) as { settings: unknown; issues: ConfigIssue[] };
+  }
+
+  /** Check a tools list against the bundled catalog of name and version pairs. */
+  static checkTools(tools: unknown, catalog: [string, string][]): ConfigIssue[] {
+    return nativeJson(() => native().checkTools(configJson(tools), JSON.stringify(catalog))) as ConfigIssue[];
+  }
+
+  /** Whether trial_limits holds only nonnegative integer limits. */
+  static trialLimitsValid(limits: unknown): boolean {
+    try {
+      return native().trialLimitsValid(configJson(limits));
     } catch (error) {
       throw translateNativeError(error);
     }

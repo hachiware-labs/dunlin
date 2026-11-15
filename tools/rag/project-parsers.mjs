@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
-import { accessSync, constants, statSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, delimiter, dirname, extname, isAbsolute, join, matchesGlob, resolve } from 'node:path';
+import { basename, extname, join, matchesGlob } from 'node:path';
 import { z } from 'zod';
 
 import { resolveConfigValue } from './config.mjs';
@@ -12,7 +11,6 @@ export const officeExtensions = new Set(['.docx', '.xlsx', '.pptx']);
 export const htmlExtensions = new Set(['.html', '.htm']);
 export const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
 const placeholder = /\{\{|\}\}|\{([^{}]*)\}/gu;
-const placeholders = new Set(['input', 'name', 'ext']);
 const stdoutLimit = 16 * 1024 * 1024;
 const textLimit = 1024 * 1024;
 const stderrTail = 2048;
@@ -60,70 +58,6 @@ export function parserKind(route, file) {
   if (htmlExtensions.has(extension)) return 'html';
   if (officeExtensions.has(extension)) return 'office';
   return 'text';
-}
-
-/** Checks loader.command arguments that the argument schema cannot express. */
-export function checkCommand(values, configFile) {
-  const issues = [];
-  const add = (field, expected, hint) => issues.push({ field, expected, hint });
-  for (const [field, list] of [['command', values.command], ['version_command', values.version_command]]) {
-    if (!list) continue;
-    for (const [index, part] of list.entries()) {
-      for (const [, name] of part.matchAll(placeholder)) {
-        if (name === undefined) continue;
-        if (field === 'version_command' || index === 0 || !placeholders.has(name)) {
-          add([field, index], field === 'command' ? '{input}, {name} or {ext}' : 'No placeholders', 'Write a literal brace as {{ or }}.');
-        }
-      }
-    }
-  }
-  const usesInput = values.command?.some((part) => [...part.matchAll(placeholder)].some(([, name]) => name === 'input'));
-  if (values.input === 'file' && !usesInput) add(['command'], '{input} with input: file', 'Pass the file path with {input}, or set input: stdin.');
-  if (values.input === 'stdin' && usesInput) add(['command'], 'No {input} with input: stdin', 'Remove {input}, or set input: file.');
-  if (values.version !== undefined && values.version_command !== undefined) {
-    add(['version_command'], 'Either version or version_command', 'Remove one of them.');
-  }
-  for (const [key, value] of Object.entries(values.env ?? {})) {
-    try { resolveConfigValue(value, 'loader.command.with.env.' + key, true); }
-    catch (failure) { add(['env', key], 'A resolvable environment value', failure.message); }
-  }
-  for (const [field, list] of [['command', values.command], ['version_command', values.version_command]]) {
-    if (!list?.length) continue;
-    const executable = findExecutable(list[0], configFile);
-    if (executable.error) add([field, 0], 'An executable file', executable.error);
-    else list[0] = executable.path;
-  }
-  if (values.version === undefined && values.version_command === undefined) {
-    return { issues, warning: { field: ['version'], expected: 'version or version_command',
-      hint: 'Without a version, Dunlin cannot detect tool updates. Run dunlin build --force after updating the tool.' } };
-  }
-  return { issues };
-}
-
-function findExecutable(command, configFile) {
-  const windows = process.platform === 'win32';
-  const pathLike = isAbsolute(command) || /[\\/]/u.test(command);
-  const candidates = pathLike ? [resolve(configFile ? dirname(configFile) : process.cwd(), command)]
-    : (process.env.PATH ?? process.env.Path ?? '').split(delimiter).filter(Boolean).map((part) => join(part, command));
-  const extensions = windows && !extname(command)
-    ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map((part) => part.toLowerCase()) : [''];
-  let batch;
-  for (const candidate of candidates) {
-    for (const extension of extensions) {
-      const path = candidate + extension;
-      try {
-        accessSync(path, windows ? constants.F_OK : constants.X_OK);
-        if (!statSync(path).isFile()) continue;
-      } catch { continue; }
-      if (windows && ['.bat', '.cmd'].includes(extname(path).toLowerCase())) {
-        batch ??= path;
-        continue;
-      }
-      return { path };
-    }
-  }
-  if (batch) return { error: batch + ' is a batch file, which needs a shell. Call its interpreter directly, for example ["node", "tool.mjs", "{input}"].' };
-  return { error: (pathLike ? candidates[0] : command + ' on PATH') + ' was not found.' };
 }
 
 /** Runs version_command once per build and returns the version text. */

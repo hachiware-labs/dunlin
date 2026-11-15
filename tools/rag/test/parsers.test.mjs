@@ -9,7 +9,8 @@ import { promisify } from 'node:util';
 
 import { parse, stringify } from 'yaml';
 
-import { checkCommand, commandVersion, parseWithCommand, parserKind, parserRoutes, resolveParser } from '../project-parsers.mjs';
+import { ragTemplate, validateRag } from '../project-modules.mjs';
+import { commandVersion, parseWithCommand, parserKind, parserRoutes, resolveParser } from '../project-parsers.mjs';
 
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const fixture = fileURLToPath(new URL('./fixtures/parser.mjs', import.meta.url));
@@ -50,29 +51,38 @@ test('routes each file to the first claiming parser and matches loader.auto last
 });
 
 test('checks loader.command placeholders, executables and versions', async (t) => {
-  const check = (values) => checkCommand({ input: 'file', env: {}, ...values });
-  const fields = (result) => result.issues.map(({ field }) => field.join('.'));
+  // The checks run in the Rust validator; read back the loader.command diagnostics.
+  const check = (values) => {
+    const config = ragTemplate('mcp', './docs');
+    config.source.modules.push({ use: 'loader.command', with: { match: ['*.x'], input: 'file', env: {}, ...values } });
+    const result = validateRag(config, join(tmpdir(), 'Dunlinfile.yaml'), () => null);
+    const ours = (list) => list.filter(({ module, code }) => module === 'loader.command' && code !== 'ARG_DEFAULT');
+    return { errors: ours(result.errors), warnings: ours(result.warnings), entry: result.plan.source.at(-1) };
+  };
+  const summary = (result) => result.errors.map(({ arg, expected }) => arg + ': ' + expected);
   const ok = check({ command: [process.execPath, fixture, '{input}', '{{literal}}'], version: '1' });
-  assert.deepEqual(ok.issues, []);
-  assert.equal(ok.warning, undefined);
-  assert.deepEqual(fields(check({ command: [process.execPath, '{input}', '{bogus}'], version: '1' })), ['command.2']);
-  assert.deepEqual(fields(check({ command: [process.execPath, fixture], version: '1' })), ['command']);
-  assert.deepEqual(fields(check({ command: [process.execPath, '{input}'], input: 'stdin', version: '1' })), ['command']);
-  assert.deepEqual(fields(check({ command: [process.execPath, '{input}'], version: '1', version_command: [process.execPath, '--version'] })),
-    ['version_command']);
-  assert.deepEqual(fields(check({ command: [process.execPath, '{input}'], version_command: [process.execPath, '{input}'] })),
-    ['version_command.1']);
+  assert.deepEqual(ok.errors, []);
+  assert.deepEqual(ok.warnings, []);
+  assert.equal(ok.entry.args.command[0], process.execPath);
+  assert.deepEqual(summary(check({ command: [process.execPath, '{input}', '{bogus}'], version: '1' })), ['command: {input}, {name} or {ext}']);
+  assert.deepEqual(summary(check({ command: [process.execPath, fixture], version: '1' })), ['command: {input} with input: file']);
+  assert.deepEqual(summary(check({ command: [process.execPath, '{input}'], input: 'stdin', version: '1' })), ['command: No {input} with input: stdin']);
+  assert.deepEqual(summary(check({ command: [process.execPath, '{input}'], version: '1', version_command: [process.execPath, '--version'] })),
+    ['version_command: Either version or version_command']);
+  assert.deepEqual(summary(check({ command: [process.execPath, '{input}'], version_command: [process.execPath, '{input}'] })),
+    ['version_command: No placeholders']);
   const missing = check({ command: ['dunlin-no-such-parser', '{input}'], version: '1' });
-  assert.deepEqual(fields(missing), ['command.0']);
-  assert.match(missing.issues[0].hint, /was not found/u);
-  assert.equal(check({ command: [process.execPath, '{input}'] }).warning.field[0], 'version');
+  assert.deepEqual(summary(missing), ['command: An executable file']);
+  assert.match(missing.errors[0].hint, /dunlin-no-such-parser on PATH was not found/u);
+  const unversioned = check({ command: [process.execPath, '{input}'] });
+  assert.deepEqual(unversioned.warnings.map(({ code, arg }) => code + ' ' + arg), ['ARG_RECOMMENDED version']);
 
   if (process.platform === 'win32') {
     const root = await mkdtemp(join(tmpdir(), 'dunlin-batch-'));
     t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
     await writeFile(join(root, 'tool.cmd'), '@echo off\r\n');
     const batch = check({ command: [join(root, 'tool.cmd'), '{input}'], version: '1' });
-    assert.match(batch.issues[0].hint, /batch file/u);
+    assert.match(batch.errors[0].hint, /batch file/u);
   }
 });
 

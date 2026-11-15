@@ -335,6 +335,194 @@ pub fn parse_config(text: String) -> Result<String> {
         .map_err(|_| native_error(crate::Error::Index))
 }
 
+#[derive(serde::Deserialize)]
+struct ValidateOptions {
+    file: String,
+    #[serde(default)]
+    lines: Vec<(Vec<crate::config_value::ConfigValue>, usize)>,
+    #[serde(default)]
+    tools: Vec<(String, String)>,
+    #[serde(default)]
+    cwd: String,
+}
+
+fn config_input(text: &str) -> Result<crate::config_value::ConfigValue> {
+    serde_json::from_str(text)
+        .map_err(|_| native_error(crate::Error::Invalid("Invalid configuration")))
+}
+
+fn line_index(
+    lines: Vec<(Vec<crate::config_value::ConfigValue>, usize)>,
+) -> crate::config_check::Lines {
+    use crate::config_value::ConfigValue;
+    crate::config_check::Lines::new(
+        lines
+            .into_iter()
+            .map(|(path, line)| {
+                let text = path
+                    .into_iter()
+                    .map(|part| match part {
+                        ConfigValue::String(text) => text,
+                        ConfigValue::Number(number) => (number as u64).to_string(),
+                        _ => String::new(),
+                    })
+                    .collect();
+                (text, line)
+            })
+            .collect(),
+    )
+}
+
+/// Diagnostics without a file, for callers that report them through their own helper.
+struct Issues<'a>(&'a [crate::config_check::Diagnostic]);
+
+impl Serialize for Issues<'_> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::{SerializeMap, SerializeSeq};
+        struct Item<'a>(&'a crate::config_check::Diagnostic);
+        impl Serialize for Item<'_> {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                let mut map = serializer.serialize_map(Some(4))?;
+                map.serialize_entry("code", self.0.code)?;
+                map.serialize_entry("path", &self.0.path)?;
+                map.serialize_entry("expected", &self.0.expected)?;
+                map.serialize_entry("hint", &self.0.hint)?;
+                map.end()
+            }
+        }
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for item in self.0 {
+            seq.serialize_element(&Item(item))?;
+        }
+        seq.end()
+    }
+}
+
+/// Validates an MCP or RAG configuration (JSON). Returns `{ errors, warnings, plan, serveSettings,
+/// evalSettings }`; the plan maps each stage to `{ use, name, args }` entries.
+#[napi]
+pub fn validate_config(config: String, options: String) -> Result<String> {
+    use crate::config_check::{Environment, FileDiagnostic, Report, validate_rag};
+    use serde::ser::{SerializeMap, Serializer};
+
+    let config = config_input(&config)?;
+    let options: ValidateOptions = serde_json::from_str(&options)
+        .map_err(|_| native_error(crate::Error::Invalid("Invalid validation options")))?;
+    let lines = line_index(options.lines);
+    let mut report = Report::new(&lines);
+    let environment = Environment {
+        file: &options.file,
+        tools: &options.tools,
+        cwd: options.cwd,
+    };
+    let validation = validate_rag(&config, &environment, &mut report);
+
+    struct Output<'a> {
+        file: &'a str,
+        report: &'a Report<'a>,
+        validation: &'a crate::config_check::Validation,
+    }
+    impl Serialize for Output<'_> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+            struct Diagnostics<'a>(&'a str, &'a [crate::config_check::Diagnostic]);
+            impl Serialize for Diagnostics<'_> {
+                fn serialize<S: Serializer>(
+                    &self,
+                    serializer: S,
+                ) -> std::result::Result<S::Ok, S::Error> {
+                    use serde::ser::SerializeSeq;
+                    let mut seq = serializer.serialize_seq(Some(self.1.len()))?;
+                    for diagnostic in self.1 {
+                        seq.serialize_element(&FileDiagnostic {
+                            file: self.0,
+                            diagnostic,
+                        })?;
+                    }
+                    seq.end()
+                }
+            }
+            struct Plan<'a>(&'a [(&'static str, Vec<crate::config_check::PlanEntry>)]);
+            impl Serialize for Plan<'_> {
+                fn serialize<S: Serializer>(
+                    &self,
+                    serializer: S,
+                ) -> std::result::Result<S::Ok, S::Error> {
+                    let mut map = serializer.serialize_map(Some(self.0.len()))?;
+                    for (stage, entries) in self.0 {
+                        map.serialize_entry(stage, entries)?;
+                    }
+                    map.end()
+                }
+            }
+            let mut map = serializer.serialize_map(Some(5))?;
+            map.serialize_entry("errors", &Diagnostics(self.file, &self.report.errors))?;
+            map.serialize_entry("warnings", &Diagnostics(self.file, &self.report.warnings))?;
+            map.serialize_entry("plan", &Plan(&self.validation.plan))?;
+            map.serialize_entry("serveSettings", &self.validation.serve)?;
+            map.serialize_entry("evalSettings", &self.validation.eval)?;
+            map.end()
+        }
+    }
+    serde_json::to_string(&Output {
+        file: &options.file,
+        report: &report,
+        validation: &validation,
+    })
+    .map_err(|_| native_error(crate::Error::Index))
+}
+
+/// Validates a serve section (JSON or `undefined` as an empty string). Returns
+/// `{ settings, issues }` where each issue has `code`, `path`, `expected` and `hint`.
+#[napi]
+pub fn validate_serve(project_type: String, input: String) -> Result<String> {
+    use crate::config_check::{Lines, Report};
+    let input = if input.is_empty() {
+        None
+    } else {
+        Some(config_input(&input)?)
+    };
+    let lines = Lines::new(Vec::new());
+    let mut report = Report::new(&lines);
+    let settings = crate::config_check::validate_serve(&project_type, input.as_ref(), &mut report);
+    #[derive(Serialize)]
+    struct Output<'a> {
+        settings: Option<crate::config_value::ConfigValue>,
+        issues: Issues<'a>,
+    }
+    serde_json::to_string(&Output {
+        settings,
+        issues: Issues(&report.errors),
+    })
+    .map_err(|_| native_error(crate::Error::Index))
+}
+
+/// Checks a `tools` list (JSON) against the bundled catalog of `[name, version]` pairs.
+#[napi]
+pub fn check_tools(tools: String, catalog: String) -> Result<String> {
+    use crate::config_check::{Lines, Report};
+    let tools = config_input(&tools)?;
+    let catalog: Vec<(String, String)> = serde_json::from_str(&catalog)
+        .map_err(|_| native_error(crate::Error::Invalid("Invalid tool catalog")))?;
+    let lines = Lines::new(Vec::new());
+    let mut report = Report::new(&lines);
+    crate::config_check::check_tools(Some(&tools), &catalog, &mut report);
+    serde_json::to_string(&Issues(&report.errors)).map_err(|_| native_error(crate::Error::Index))
+}
+
+/// Whether `trial_limits` (JSON) holds only nonnegative integer limits.
+#[napi]
+pub fn trial_limits_valid(limits: String) -> Result<bool> {
+    Ok(crate::config_check::trial_limits_valid(&config_input(
+        &limits,
+    )?))
+}
+
 /// Describes every registered module as JSON, in registration order.
 #[napi]
 pub fn describe_modules() -> Result<String> {

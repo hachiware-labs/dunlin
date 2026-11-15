@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { performance } from 'node:perf_hooks';
-import { z } from 'zod';
+
+import { Dunlin } from 'dunlin';
 
 const usage = new AsyncLocalStorage();
 const fields = {
@@ -9,13 +10,11 @@ const fields = {
   max_api_requests: 'api_requests',
   max_api_input_bytes: 'api_input_bytes',
 };
-const settings = z.strictObject(Object.fromEntries(Object.keys(fields).map((key) => [key, z.number().int().min(0).optional()])));
 
 export function checkTrialLimits(config, issue) {
   const limits = config.trial_limits;
   if (limits === undefined) return;
-  const checked = settings.safeParse(limits);
-  if (!checked.success) issue('ARG_TYPE', ['trial_limits'], Object.keys(fields), 'Set nonnegative integer limits for experimental runs.');
+  if (!Dunlin.trialLimitsValid(limits)) issue('ARG_TYPE', ['trial_limits'], Object.keys(fields), 'Set nonnegative integer limits for experimental runs.');
 }
 
 export function trialLimits(active, candidate) {

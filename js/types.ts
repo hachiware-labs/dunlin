@@ -81,6 +81,37 @@ export interface LineRange {
   endLine: number;
 }
 
+/** A configuration diagnostic (spec 26.8). */
+export interface ConfigDiagnostic {
+  code: string;
+  file: string;
+  line: number | null;
+  section: string | null;
+  module: string | null;
+  arg: string | null;
+  received: unknown;
+  expected: unknown;
+  suggestions: string[];
+  hint: string;
+}
+
+/** A configuration problem reported without its file. */
+export interface ConfigIssue {
+  code: string;
+  path: (string | number)[];
+  expected: unknown;
+  hint: string;
+}
+
+/** Dunlin.validateConfig: diagnostics, and the module plan for each stage. */
+export interface ConfigValidation {
+  errors: ConfigDiagnostic[];
+  warnings: ConfigDiagnostic[];
+  plan: Record<string, { use: string; name: unknown; args: Record<string, unknown> }[]>;
+  serveSettings: unknown;
+  evalSettings: unknown;
+}
+
 /** Dunlin.parseConfig: the configuration and value lines, or a syntax error. */
 export type ParsedConfig =
   | { config: unknown; lines: [(string | number)[], number][]; syntaxError?: undefined }

@@ -81,6 +81,45 @@ export interface LineRange {
   endLine: number;
 }
 
+/** How dunlin modules describe prints one module argument. */
+export interface ModuleArgInfo {
+  type?: string;
+  default?: unknown;
+  choices?: string[];
+  min?: number;
+  max?: number;
+  optional?: true;
+  effect: 'output' | 'speed';
+}
+
+/** A registered module (spec 26.1). */
+export interface ModuleDescription {
+  name: string;
+  version: number;
+  stage: string;
+  role: string;
+  input: string;
+  output: string;
+  description: string;
+  deterministic: boolean;
+  external: boolean;
+  unit: 'document' | 'collection';
+  requires: string[];
+  tool?: string;
+  args: Record<string, ModuleArgInfo>;
+}
+
+/** One argument read by Dunlin.readModuleArgs. */
+export interface ModuleArgResult {
+  key: string;
+  /** Absent for an optional argument that was not given, and for invalid values. */
+  value?: unknown;
+  defaulted?: boolean;
+  code?: 'ARG_MISSING' | 'ARG_TYPE' | 'ARG_RANGE';
+  /** The argument description used in diagnostics. */
+  expected: ModuleArgInfo;
+}
+
 /** A file read by Dunlin.readSourceFiles: its bytes, or why it could not be read. */
 export interface SourceFileRead {
   bytes?: Buffer | null;

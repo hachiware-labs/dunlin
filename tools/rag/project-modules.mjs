@@ -1,6 +1,9 @@
 import { LineCounter, parseDocument, stringify } from 'yaml';
 import { z } from 'zod';
 import { resolve, dirname } from 'node:path';
+
+import { Dunlin } from 'dunlin';
+
 import { resolveConfigValue } from './config.mjs';
 import { checkTools } from './project-tools.mjs';
 import { checkTrialLimits, trialCheckpoint } from './project-trials.mjs';
@@ -8,117 +11,35 @@ import { isSearchProject, serveTemplate, validateServe } from './project-serving
 import { projectModel } from './project-global.mjs';
 import { checkCommand } from './project-parsers.mjs';
 
-const integer = (min, max, value) => z.number().int().min(min).max(max).default(value);
-const choice = (values, value) => z.enum(values).default(value);
-
-const modules = new Map();
-function register(name, stage, role, input, output, args, description, run, options = {}) {
-  modules.set(name, { name, version: 1, stage, role, input, output, args, description, run,
-    deterministic: true, external: false, unit: ['parser', 'preprocess', 'chunk'].includes(role) && stage !== 'search' ? 'document' : 'collection',
-    requires: [], ...options });
-}
-
-register('source.filesystem', 'source', 'source', 'project', 'files', {
-  path: z.string().min(1).default('./docs'), exclude: z.array(z.string()).default([]),
-}, 'Scan a local folder.', (input, args, ctx) => ctx.scan(input, args, ctx));
-// Parsers are matched in the written order. loader.auto is the fallback and is matched last.
-const match = z.array(z.string().min(1)).min(1).optional();
-register('loader.auto', 'source', 'parser', 'files', 'corpus', {
-  unsupported: choice(['error', 'skip'], 'error'), ocr: choice(['none', 'loader.ocr'], 'none'),
-}, 'Route files that no other parser claimed by format, and extract the text and source positions.',
-(input, args, ctx) => ctx.load(input, { ...args, category: 'auto' }, ctx));
-for (const [category, description] of Object.entries({
-  text: 'Read UTF-8 text, Markdown and HTML, preserving headings.',
-  office: 'Read Word, Excel and PowerPoint documents as structured text.',
-  pdf: 'Extract the existing text layer and page positions from PDFs.',
-})) {
-  register('loader.' + category, 'source', 'parser', 'files', 'corpus', {
-    unsupported: choice(['error', 'skip'], 'error'), match,
-  }, description, (input, args, ctx) => ctx.load(input, { ...args, category }, ctx));
-}
-register('loader.ocr', 'source', 'parser', 'files', 'corpus', {
-  unsupported: choice(['error', 'skip'], 'error'), match,
-}, 'Extract text and original page positions with the installed OCR model.',
-(input, args, ctx) => ctx.load(input, { ...args, ocr: 'loader.ocr', category: 'ocr' }, ctx), { requires: ['ocr tool'] });
-const argv = z.array(z.string().min(1)).min(1);
-register('loader.command', 'source', 'parser', 'files', 'corpus', {
-  match: z.array(z.string().min(1)).min(1),
-  command: argv,
-  input: choice(['file', 'stdin'], 'file'),
-  output: choice(['markdown', 'text', 'json'], 'markdown'),
-  version: z.string().min(1).optional(),
-  version_command: argv.optional(),
-  env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u), z.string()).default({}),
-  timeout_ms: integer(1000, 3_600_000, 120_000),
-  concurrency: integer(1, 4, 2),
-}, 'Extract matching files with an external command that prints Markdown, text or JSON.',
-(input, args, ctx) => ctx.load(input, { ...args, category: 'command' }, ctx),
-{ external: true, deterministic: false, requires: ['external command'], speedArgs: ['timeout_ms', 'concurrency'] });
-register('text.normalize', 'transform', 'preprocess', 'corpus', 'corpus', {
-  unicode: choice(['nfkc', 'none'], 'nfkc'),
-}, 'Normalize text while preserving original positions.', (input, args) => ({ ...input, unicode: args.unicode }));
-register('chunk.length', 'transform', 'chunk', 'corpus', 'chunks', {
-  unit: choice(['characters'], 'characters'), size: integer(1, 1048576, 800), overlap: integer(0, 1048575, 100),
-}, 'Split into overlapping character windows.', (input, args, ctx) => ctx.chunk(input, args));
-register('chunk.structure', 'transform', 'chunk', 'corpus', 'chunks', {
-  max_chars: integer(1, 1048576, 1600),
-}, 'Split at headings and page boundaries, with a length cap.',
-(input, args, ctx) => ctx.chunk(input, { size: args.max_chars, overlap: 0, structure: true }));
-register('chunk.semantic', 'transform', 'chunk', 'corpus', 'chunks', {
-  model: z.string().min(1), max_chars: integer(1, 1048576, 1200), sentence_chars: integer(1, 16384, 250),
-  similarity: z.number().min(-1).max(1).default(0.55),
-}, 'Split text at low-similarity boundaries between adjacent passages.',
-(input, args, ctx) => ctx.chunkSemantic(input, args), { external: true, deterministic: false, requires: ['embedding model'] });
-register('index.keyword', 'index', 'index', 'chunks', 'index', {
-  tokenizer: choice(['lindera', 'trigram', 'word'], 'lindera'),
-  user_dictionary: z.string().trim().min(1).nullable().optional(),
-  short_query: z.enum(['bigram', 'none']).optional(),
-}, 'Build the BM25 keyword index.', (input, args, ctx) => ctx.index(input, args));
-register('index.vector', 'index', 'index', 'chunks', 'index', {
-  model: z.string().min(1),
-}, 'Build an exact vector index from the configured chunks.', (input, args, ctx) => ctx.indexVector(input, args),
-{ external: true, deterministic: false, requires: ['embedding model'] });
-register('hannoy.index', 'index', 'index', 'chunks', 'index', {
-  model: z.string().min(1), ef_construction: integer(32, 10000, 100),
-}, 'Build an incremental HNSW index using the installed hannoy tool.',
-(input, args, ctx) => ctx.indexVector(input, args, 'hannoy'),
-{ tool: 'hannoy', external: true, deterministic: false, requires: ['hannoy tool', 'embedding model'] });
-register('query.normalize', 'search', 'preprocess', 'query', 'query', {
-  unicode: choice(['nfkc', 'none'], 'nfkc'),
-}, 'Normalize the query.', (input, args) => ({ ...input,
-  query: args.unicode === 'nfkc' ? input.query.trim().normalize('NFKC') : input.query.trim() }));
-register('retrieval.keyword', 'search', 'retrieval', 'query', 'candidates', {
-  top_k: integer(1, 100, 10),
-}, 'Retrieve ranked keyword matches.', (input, args, ctx) => ctx.retrieve(input, args), { requires: ['index.keyword'] });
-register('retrieval.vector', 'search', 'retrieval', 'query', 'candidates', {
-  model: z.string().min(1), top_k: integer(1, 100, 10),
-}, 'Rank chunks by cosine similarity to the query embedding.', (input, args, ctx) => ctx.retrieveVector(input, args),
-{ external: true, deterministic: false, requires: ['index.vector', 'embedding model'] });
-register('hannoy.search', 'search', 'retrieval', 'query', 'candidates', {
-  model: z.string().min(1), top_k: integer(1, 100, 10), ef_search: integer(1, 100000, 100),
-}, 'Retrieve candidates from the hannoy HNSW index.',
-(input, args, ctx) => ctx.retrieveVector(input, args, 'hannoy'),
-{ tool: 'hannoy', external: true, deterministic: false, requires: ['hannoy.index', 'embedding model'] });
-register('fusion.rrf', 'search', 'fusion', 'candidates', 'candidates', {
-  k: integer(1, 1000, 60),
-}, 'Combine ranked candidate lists using reciprocal rank fusion.', (input, args, ctx) => ctx.fuse(input, args));
-register('rerank.model', 'search', 'rerank', 'candidates', 'candidates', {
-  model: z.string().min(1), candidates: integer(1, 32, 10),
-}, 'Reorder the top candidates with a chat model while keeping their original ranges.',
-(input, args, ctx) => ctx.rerank(input, args), { external: true, deterministic: false, requires: ['chat model'] });
-register('context.assemble', 'search', 'context', 'candidates', 'context', {
-  budget_chars: integer(1, 1000000, 4000),
-  retrieval: choice(['fill_budget', 'top_k'], 'fill_budget'),
-  max_candidates: integer(1, 100, 100),
-  merge_overlaps: z.boolean().default(true),
-  truncate_last: z.boolean().default(true),
-  include_headings: z.boolean().default(true),
-}, 'Assemble source excerpts within the character budget.', (input, args, ctx) => ctx.assemble(input, args));
-register('answer.generate', 'ask', 'answer', 'context', 'response', {
-  model: z.string().min(1).default('answerer'), cite: z.boolean().default(true),
-  on_no_evidence: choice(['decline'], 'decline'),
-}, 'Generate an answer grounded in the supplied context.', (input, args, ctx) => ctx.answer(input, args),
-{ external: true, deterministic: false, requires: ['chat model'] });
+// The module registry (names, roles, argument definitions and descriptions) is in Rust (spec 26.5).
+// JavaScript keeps only how each module runs, until execution moves to Rust (spec 28.6).
+const runners = {
+  'source.filesystem': (input, args, ctx) => ctx.scan(input, args, ctx),
+  'loader.auto': (input, args, ctx) => ctx.load(input, { ...args, category: 'auto' }, ctx),
+  'loader.text': (input, args, ctx) => ctx.load(input, { ...args, category: 'text' }, ctx),
+  'loader.office': (input, args, ctx) => ctx.load(input, { ...args, category: 'office' }, ctx),
+  'loader.pdf': (input, args, ctx) => ctx.load(input, { ...args, category: 'pdf' }, ctx),
+  'loader.ocr': (input, args, ctx) => ctx.load(input, { ...args, ocr: 'loader.ocr', category: 'ocr' }, ctx),
+  'loader.command': (input, args, ctx) => ctx.load(input, { ...args, category: 'command' }, ctx),
+  'text.normalize': (input, args) => ({ ...input, unicode: args.unicode }),
+  'chunk.length': (input, args, ctx) => ctx.chunk(input, args),
+  'chunk.structure': (input, args, ctx) => ctx.chunk(input, { size: args.max_chars, overlap: 0, structure: true }),
+  'chunk.semantic': (input, args, ctx) => ctx.chunkSemantic(input, args),
+  'index.keyword': (input, args, ctx) => ctx.index(input, args),
+  'index.vector': (input, args, ctx) => ctx.indexVector(input, args),
+  'hannoy.index': (input, args, ctx) => ctx.indexVector(input, args, 'hannoy'),
+  'query.normalize': (input, args) => ({ ...input,
+    query: args.unicode === 'nfkc' ? input.query.trim().normalize('NFKC') : input.query.trim() }),
+  'retrieval.keyword': (input, args, ctx) => ctx.retrieve(input, args),
+  'retrieval.vector': (input, args, ctx) => ctx.retrieveVector(input, args),
+  'hannoy.search': (input, args, ctx) => ctx.retrieveVector(input, args, 'hannoy'),
+  'fusion.rrf': (input, args, ctx) => ctx.fuse(input, args),
+  'rerank.model': (input, args, ctx) => ctx.rerank(input, args),
+  'context.assemble': (input, args, ctx) => ctx.assemble(input, args),
+  'answer.generate': (input, args, ctx) => ctx.answer(input, args),
+};
+const descriptions = Dunlin.describeModules();
+const modules = new Map(descriptions.map((info) => [info.name, { ...info, run: runners[info.name] }]));
 
 export const constructionStages = ['source', 'transform', 'index'];
 const sequences = {
@@ -151,8 +72,12 @@ const sectionComments = {
 };
 
 function defaultEntry(name, overrides = {}) {
-  const { args } = modules.get(name);
-  return { use: name, with: z.object(args).parse(overrides) };
+  const values = {};
+  for (const { key, value, code } of Dunlin.readModuleArgs(name, overrides)) {
+    if (code) throw new Error(`Invalid default ${key} for ${name}`);
+    if (value !== undefined) values[key] = value;
+  }
+  return { use: name, with: values };
 }
 
 export function ragTemplate(type, path, { embedding, llm } = {}) {
@@ -258,28 +183,10 @@ function safeValue(value) {
   return value === null || ['string', 'number', 'boolean'].includes(typeof value) ? value : null;
 }
 
-const argumentTypes = { ZodNumber: 'integer', ZodString: 'string', ZodArray: 'array', ZodBoolean: 'boolean', ZodEnum: 'one of the listed values',
-  ZodRecord: 'mapping' };
-function argumentInfo(schema, effect = 'output') {
-  const inner = schema instanceof z.ZodDefault || schema instanceof z.ZodOptional ? schema.unwrap() : schema;
-  const fallback = schema.safeParse(undefined);
-  return { type: inner instanceof z.ZodNumber && !inner.isInt ? 'number' : argumentTypes[inner.constructor.name],
-    ...(fallback.success && fallback.data !== undefined && { default: fallback.data }),
-    ...(inner.options && { choices: inner.options }),
-    ...(inner.minValue !== undefined && { min: inner.minValue, max: inner.maxValue }),
-    ...(schema instanceof z.ZodOptional && { optional: true }),
-    effect };
-}
-
 export function describeModules(name) {
-  const describe = ({ args, run, speedArgs = [], ...info }) => ({ ...info, args: Object.fromEntries(
-    Object.entries(args).map(([key, schema]) => [key, argumentInfo(schema, speedArgs.includes(key) ? 'speed' : 'output')]),
-  ) });
-  if (name !== undefined) {
-    const module = modules.get(name);
-    return module && describe(module);
-  }
-  return [...modules.values()].map(describe);
+  if (name === undefined) return structuredClone(descriptions);
+  const info = descriptions.find((item) => item.name === name);
+  return info && structuredClone(info);
 }
 
 export function validateRag(config, file, line) {
@@ -391,16 +298,13 @@ export function validateRag(config, file, line) {
           'Use an argument listed by dunlin modules describe ' + name + '.', { ...details, received: key, suggestions: nearby(key, Object.keys(module.args)) });
       }
       const values = {};
-      for (const [key, schema] of Object.entries(module.args)) {
-        const checked = schema.safeParse(args[key]);
+      for (const { key, value, defaulted, code, expected } of Dunlin.readModuleArgs(name, args)) {
         const argPath = [...path, 'with', key];
-        if (!checked.success) {
-          const typeError = checked.error.issues[0].code === 'invalid_type';
-          issue(args[key] === undefined ? 'ARG_MISSING' : typeError ? 'ARG_TYPE' : 'ARG_RANGE', argPath, argumentInfo(schema),
-            'Use a value allowed by the module argument definition.', { ...details, received: args[key] });
+        if (code) {
+          issue(code, argPath, expected, 'Use a value allowed by the module argument definition.', { ...details, received: args[key] });
         } else {
-          values[key] = checked.data;
-          if (checked.data !== undefined && !Object.hasOwn(args, key)) diagnostic(warnings, 'ARG_DEFAULT', argPath, argumentInfo(schema),
+          values[key] = value;
+          if (value !== undefined && defaulted) diagnostic(warnings, 'ARG_DEFAULT', argPath, expected,
             'Write the default value explicitly to make the configuration reproducible.', details);
         }
       }

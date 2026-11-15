@@ -1,6 +1,7 @@
 //! Local, single-tenant knowledge indexing and evidence retrieval.
 
 pub mod chunk;
+pub mod config_value;
 mod corpus;
 mod engine;
 mod evaluate;
@@ -10,6 +11,7 @@ mod japanese;
 mod legacy_delete;
 mod model;
 mod plans;
+pub mod registry;
 mod source;
 mod storage;
 mod sync;

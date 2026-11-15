@@ -276,6 +276,66 @@ pub fn store_originals(
     })
 }
 
+/// Describes every registered module as JSON, in registration order.
+#[napi]
+pub fn describe_modules() -> Result<String> {
+    serde_json::to_string(crate::registry::modules()).map_err(|_| native_error(crate::Error::Index))
+}
+
+/// Reads a module's arguments. Returns, for each defined argument in order, its value after
+/// defaults and trimming, or the diagnostic code. `args` is a JSON object.
+#[napi]
+pub fn read_module_args(name: String, args: String) -> Result<String> {
+    use crate::config_value::ConfigValue;
+    use crate::registry::ArgResult;
+    use serde::ser::{SerializeMap, SerializeSeq, Serializer};
+
+    struct Results(Vec<(&'static crate::registry::Arg, ArgResult)>);
+    impl Serialize for Results {
+        fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+            let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+            for (arg, result) in &self.0 {
+                struct Entry<'a>(&'a crate::registry::Arg, &'a ArgResult);
+                impl Serialize for Entry<'_> {
+                    fn serialize<S: Serializer>(
+                        &self,
+                        serializer: S,
+                    ) -> std::result::Result<S::Ok, S::Error> {
+                        let mut map = serializer.serialize_map(None)?;
+                        map.serialize_entry("key", self.0.name)?;
+                        match self.1 {
+                            ArgResult::Value { value, defaulted } => {
+                                if let Some(value) = value {
+                                    map.serialize_entry("value", value)?;
+                                }
+                                map.serialize_entry("defaulted", defaulted)?;
+                            }
+                            ArgResult::Invalid(code) => map.serialize_entry("code", code)?,
+                        }
+                        map.serialize_entry(
+                            "expected",
+                            &crate::registry::ArgInfo {
+                                arg: self.0,
+                                speed: false,
+                            },
+                        )?;
+                        map.end()
+                    }
+                }
+                seq.serialize_element(&Entry(arg, result))?;
+            }
+            seq.end()
+        }
+    }
+
+    let module = crate::registry::module(&name)
+        .ok_or_else(|| native_error(crate::Error::Invalid("Unknown module")))?;
+    let args: ConfigValue = serde_json::from_str(&args)
+        .map_err(|_| native_error(crate::Error::Invalid("Invalid module arguments")))?;
+    serde_json::to_string(&Results(crate::registry::read_args(module, &args)))
+        .map_err(|_| native_error(crate::Error::Index))
+}
+
 /// Chunks documents synchronously. The request and result are JSON; see `chunk::ChunkRequest`.
 #[napi]
 pub fn chunk_documents(request: String) -> Result<String> {

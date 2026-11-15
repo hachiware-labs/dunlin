@@ -8,6 +8,7 @@ mod engine;
 mod evaluate;
 mod excerpt;
 mod explore;
+pub mod glob;
 mod japanese;
 mod legacy_delete;
 mod model;
@@ -20,12 +21,16 @@ mod sync;
 mod wiki;
 pub mod yaml_config;
 
+#[cfg(any(feature = "node", test))]
+mod command_parser;
 #[cfg(all(feature = "node", not(test)))]
 mod node;
 #[cfg(any(feature = "node", test))]
 mod source_files;
 #[cfg(any(feature = "node", test))]
 mod source_load;
+#[cfg(any(feature = "node", test))]
+mod source_scan;
 #[cfg(all(feature = "node", not(test)))]
 mod vector;
 

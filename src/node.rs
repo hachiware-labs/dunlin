@@ -664,6 +664,36 @@ pub fn load_corpus<'env>(
     Ok(promise)
 }
 
+/// Scans a source folder (see `source_scan`). Resolves to `{ id, files: [{ file, objectId }] }`
+/// as JSON, unsorted, or `{ error }` with a message.
+#[napi]
+pub fn scan_source(request: String, cancel: &NativeCancellation) -> AsyncTask<Job<String>> {
+    let cancel = cancel.0.clone();
+    task(move || {
+        let request: crate::source_scan::ScanRequest = serde_json::from_str(&request)
+            .map_err(|_| crate::Error::Invalid("Invalid scan request"))?;
+        match crate::source_scan::scan(&request, &cancel) {
+            Ok(scanned) => serde_json::to_string(&scanned).map_err(|_| crate::Error::Index),
+            Err(message) => Ok(serde_json::json!({ "error": message }).to_string()),
+        }
+    })
+}
+
+/// Routes files to parser modules. Returns `[{ route, kind }]` as JSON, in input order.
+#[napi]
+pub fn route_files(request: String) -> Result<String> {
+    let request: crate::source_scan::RouteRequest = serde_json::from_str(&request)
+        .map_err(|_| native_error(crate::Error::Invalid("Invalid routing request")))?;
+    serde_json::to_string(&crate::source_scan::route(&request))
+        .map_err(|_| native_error(crate::Error::Index))
+}
+
+/// `path.matchesGlob(path, pattern)` as Node.js computes it.
+#[napi]
+pub fn matches_glob(path: String, pattern: String) -> bool {
+    crate::glob::matches(&path, &pattern)
+}
+
 /// Describes every registered module as JSON, in registration order.
 #[napi]
 pub fn describe_modules() -> Result<String> {

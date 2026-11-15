@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { Dunlin } from 'dunlin';
 import { parse, stringify } from 'yaml';
 
 import { ragTemplate, validateRag } from '../project-modules.mjs';
-import { commandVersion, parseWithCommand, parserKind, parserRoutes, resolveParser } from '../project-parsers.mjs';
+import { parserRoutes, routeFiles } from '../project-parsers.mjs';
 
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const fixture = fileURLToPath(new URL('./fixtures/parser.mjs', import.meta.url));
@@ -29,7 +31,9 @@ test('routes each file to the first claiming parser and matches loader.auto last
     { name: 'drawings', category: 'command', args: { match: ['drawings/**/*.vsdx', 'drawings/**/*.md'] } },
     { name: 'loader.ocr', category: 'ocr', args: { match: ['scans/**/*.pdf'] } },
   ]);
-  const route = (path) => resolveParser(routes, '/root/' + path, path)?.name ?? null;
+  const routed = (list, path) => routeFiles(list, [{ file: '/root/' + path, objectId: path }])[0];
+  const route = (path) => routed(routes, path)?.route.name ?? null;
+  const kind = (list, path) => routed(list, path)?.kind;
   assert.deepEqual(routes.map(({ name }) => name), ['drawings', 'loader.ocr', 'loader.auto']);
   assert.equal(route('drawings/pump.vsdx'), 'drawings');
   assert.equal(route('drawings/notes.md'), 'drawings');
@@ -38,16 +42,16 @@ test('routes each file to the first claiming parser and matches loader.auto last
   assert.equal(route('scans/photo.png'), null);
   assert.equal(route('manual.pdf'), 'loader.auto');
   assert.equal(route('data.bin'), null);
-  assert.equal(parserKind(routes[1], '/root/scans/old.pdf'), 'ocr');
-  assert.equal(parserKind(routes[2], '/root/manual.pdf'), 'pdf');
-  assert.equal(parserKind(routes[2], '/root/page.html'), 'html');
-  assert.equal(parserKind(routes[0], '/root/drawings/notes.md'), 'command');
+  assert.equal(kind(routes, 'scans/old.pdf'), 'ocr');
+  assert.equal(kind(routes, 'manual.pdf'), 'pdf');
+  assert.equal(kind(routes, 'page.html'), 'html');
+  assert.equal(kind(routes, 'drawings/notes.md'), 'command');
 
   const scanning = parserRoutes([{ name: 'loader.auto', category: 'auto', args: { ocr: 'loader.ocr' } }]);
-  assert.equal(resolveParser(scanning, '/root/photo.png', 'photo.png').name, 'loader.auto');
-  assert.equal(parserKind(scanning[0], '/root/photo.png'), 'ocr');
+  assert.equal(routed(scanning, 'photo.png').route.name, 'loader.auto');
+  assert.equal(kind(scanning, 'photo.png'), 'ocr');
   const narrowed = parserRoutes([{ name: 'loader.pdf', category: 'pdf', args: { match: ['manuals/**'] } }]);
-  assert.equal(resolveParser(narrowed, '/root/manuals/a.docx', 'manuals/a.docx'), null);
+  assert.equal(routed(narrowed, 'manuals/a.docx'), null);
 });
 
 test('checks loader.command placeholders, executables and versions', async (t) => {
@@ -86,38 +90,49 @@ test('checks loader.command placeholders, executables and versions', async (t) =
   }
 });
 
-test('runs external parsers and validates their output', async () => {
+test('runs external parsers and validates their output', async (t) => {
+  // loader.command runs in Rust; load one file through Dunlin.loadCorpus and read the document back.
+  const root = await mkdtemp(join(tmpdir(), 'dunlin-command-'));
+  const state = join(root, 'state.sqlite');
+  const db = new DatabaseSync(state);
+  db.exec('CREATE TABLE loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL)');
+  db.close();
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const bytes = Buffer.from('ポンプの点検箇所\n');
-  const json = await parseWithCommand(commandRoute({ output: 'json', env: { PARSER_MODE: 'json' } }), bytes, 'pump.vsdx', { version: '1' });
+  await writeFile(join(root, 'pump.vsdx'), bytes);
+  let run = 0;
+  const parse = async (args, options = {}) => {
+    const route = commandRoute(args);
+    const request = { state, originals: join(root, 'originals'), force: true, ocrVersion: 'v', root,
+      files: [{ id: 'docs', file: join(root, 'pump.vsdx'), objectId: 'pump.vsdx', kind: 'command', route: route.name + run++,
+        command: { module: route.name, args: route.args } }] };
+    const { documents } = await Dunlin.loadCorpus(request, { parse: () => { throw new Error('unexpected host parse'); } }, options);
+    return documents[0];
+  };
+  const json = await parse({ output: 'json', env: { PARSER_MODE: 'json' }, version: '1' });
   assert.equal(json.content, '# 図面\nポンプの点検箇所\n');
   assert.equal(json.format, 'markdown');
-  assert.deepEqual(json.locations, [{ page: 1, range: { startLine: 1, endLine: 2 } }]);
-  assert.deepEqual(json.parser, { tool: 'node', module: 'loader.command', version: '1' });
-  assert.ok(json.bytes.equals(bytes));
+  assert.deepEqual(json.corpus.locations, [{ range: { startLine: 1, endLine: 2 }, page: 1 }]);
+  assert.deepEqual(json.corpus.parser, { tool: 'node', module: 'loader.command', version: '1' });
+  assert.equal(await readFile(join(root, 'originals', json.corpus.originalSha256 + '.bin'), 'utf8'), bytes.toString());
 
-  const stdin = await parseWithCommand(commandRoute({ command: [process.execPath, fixture], input: 'stdin', output: 'text' }),
-    bytes, 'pump.vsdx', { version: null });
+  const stdin = await parse({ command: [process.execPath, fixture], input: 'stdin', output: 'text' });
   assert.equal(stdin.content, '# 図面\nポンプの点検箇所\n');
   assert.equal(stdin.format, 'text');
-  assert.deepEqual(stdin.parser, { tool: 'node', module: 'loader.command' });
+  assert.deepEqual(stdin.corpus.parser, { tool: 'node', module: 'loader.command' });
 
-  await assert.rejects(parseWithCommand(commandRoute({ env: { PARSER_MODE: 'fail' } }), bytes, 'pump.vsdx', { version: null }),
-    /exited with 3: fixture could not read the drawing/u);
-  await assert.rejects(parseWithCommand(commandRoute({ output: 'json', env: { PARSER_MODE: 'bad-json' } }), bytes, 'pump.vsdx', { version: null }),
-    /does not match the JSON format/u);
-  await assert.rejects(parseWithCommand(commandRoute({ output: 'json', env: { PARSER_MODE: 'markdown' } }), bytes, 'pump.vsdx', { version: null }),
-    /not valid JSON/u);
-  await assert.rejects(parseWithCommand(commandRoute({ timeout_ms: 1000, env: { PARSER_MODE: 'sleep' } }), bytes, 'pump.vsdx', { version: null }),
-    /timed out after 1000 ms/u);
+  await assert.rejects(parse({ env: { PARSER_MODE: 'fail' } }), /Could not load docs:pump\.vsdx\. Parser exited with 3: fixture could not read the drawing/u);
+  await assert.rejects(parse({ output: 'json', env: { PARSER_MODE: 'bad-json' } }), /does not match the JSON format/u);
+  await assert.rejects(parse({ output: 'json', env: { PARSER_MODE: 'markdown' } }), /not valid JSON/u);
+  await assert.rejects(parse({ timeout_ms: 1000, env: { PARSER_MODE: 'sleep' } }), /timed out after 1000 ms/u);
   const controller = new AbortController();
-  const cancelled = parseWithCommand(commandRoute({ env: { PARSER_MODE: 'sleep' } }), bytes, 'pump.vsdx', { version: null, signal: controller.signal });
-  setTimeout(() => controller.abort(new Error('stopped by test')), 200);
-  await assert.rejects(cancelled, /stopped by test/u);
+  const cancelled = parse({ env: { PARSER_MODE: 'sleep' } }, { signal: controller.signal });
+  setTimeout(() => controller.abort(), 300);
+  await assert.rejects(cancelled, { code: 'ABORTED' });
 
-  const versioned = commandRoute({ version_command: [process.execPath, fixture], env: { PARSER_MODE: 'version', PARSER_VERSION: '2.5' } });
-  assert.equal(await commandVersion(versioned, process.cwd()), 'fixture-parser 2.5');
-  assert.equal(await commandVersion(commandRoute({ version: '7' })), '7');
-  assert.equal(await commandVersion(commandRoute()), null);
+  const versioned = await parse({ version_command: [process.execPath, fixture], env: { PARSER_MODE: 'version', PARSER_VERSION: '2.5' } });
+  assert.equal(versioned.corpus.parser.version, 'fixture-parser 2.5');
+  await assert.rejects(parse({ version_command: [process.execPath, fixture], env: { PARSER_MODE: 'fail' } }), /Parser exited with 3/u);
 });
 
 test('builds with loader.command, reuses its output and reports parser assignments', { timeout: 60_000 }, async (t) => {

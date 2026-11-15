@@ -11,7 +11,7 @@ import { revision } from '../../../authoring/files.mjs';
 import { decodeRemote, listFiles } from '../../../ingest-files.mjs';
 import { lightonModel } from '../../../parsers/catalog.mjs';
 import { managedOcrVersion } from '../../../parsers/lighton-setup.mjs';
-import { commandIdentity, commandVersion, defaultRoutes, parserKind, parseWithCommand, resolveParser } from '../../../project-parsers.mjs';
+import { commandIdentity, commandVersion, defaultRoutes, parserKind, parseWithCommand, resolveParser } from './project-parsers.mjs';
 import { trialCheckpoint, trialSignal } from '../../../project-trials.mjs';
 
 const fileConcurrency = 4;

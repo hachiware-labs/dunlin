@@ -1,14 +1,14 @@
 
-import { join, matchesGlob, relative, sep } from 'node:path';
-import { open, realpath, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { open } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
 import { Dunlin } from 'dunlin';
 
-import { decodeRemote, listFiles } from './ingest-files.mjs';
+import { decodeRemote } from './ingest-files.mjs';
 import { lightonModel } from './parsers/catalog.mjs';
 import { managedOcrVersion } from './parsers/lighton-setup.mjs';
-import { commandIdentity, commandVersion, defaultRoutes, parserKind, parseWithCommand, resolveParser } from './project-parsers.mjs';
+import { defaultRoutes, routeFiles } from './project-parsers.mjs';
 import { trialCheckpoint, trialSignal } from './project-trials.mjs';
 
 const fileConcurrency = 4;
@@ -45,38 +45,30 @@ async function processFiles(files, prepare, record, limit = fileConcurrency) {
   if (failure) throw failure.error;
 }
 
+/** Scans a folder in Rust. Files are ordered here, by locale, until identifiers change (spec 28.9). */
 export async function scanFolder(sources, { path, exclude }, { name, projectRoot }) {
-  const root = await realpath(path);
-  if (!(await stat(root)).isDirectory()) throw new Error('Expected a directory for ' + name);
-  const id = name === 'source.filesystem' ? 'docs' : name;
-  const files = [];
-  for await (const file of listFiles(root)) {
-    trialCheckpoint();
-    const objectId = relative(root, file).split(sep).join('/');
-    if (projectRoot && file === join(projectRoot, 'Dunlinfile.yaml')) continue;
-    if (!exclude.some((pattern) => matchesGlob(objectId, pattern))) files.push({ file, objectId });
-  }
+  const { id, files } = await Dunlin.scanSource({ path, exclude, name, ...(projectRoot && { projectRoot }) }, { signal: trialSignal() });
   files.sort((a, b) => a.objectId.localeCompare(b.objectId));
   return [...sources, { id, files }];
 }
 
+/** Routes every scanned file once: `{ route, kind }` or null, keyed by source and object ID. */
+function routeSources(sources, routes) {
+  const all = sources.flatMap(({ id, files }) => files.map((file) => ({ id, ...file })));
+  const routed = routeFiles(routes, all);
+  return new Map(all.map(({ id, objectId }, index) => [JSON.stringify([id, objectId]), routed[index]]));
+}
+
 /** Returns the files that no parser claims. routes come from parserRoutes or defaultRoutes. */
 export function unsupportedFiles(sources, routes = defaultRoutes()) {
-  const skipped = [];
-  for (const { id, files } of sources) {
-    for (const { file, objectId } of files) {
-      if (!resolveParser(routes, file, objectId)) {
-        skipped.push({ source_id: id, path: objectId, reason: 'No configured loader for this file format' });
-      }
-    }
-  }
-  return skipped;
+  const routed = routeSources(sources, routes);
+  return sources.flatMap(({ id, files }) => files.filter(({ objectId }) => !routed.get(JSON.stringify([id, objectId])))
+    .map(({ objectId }) => ({ source_id: id, path: objectId, reason: 'No configured loader for this file format' })));
 }
 
 /** Names the parser module for each scanned file, or null when none claims it. */
 export function parserAssignments(sources, routes) {
-  return new Map(sources.flatMap(({ id, files }) => files.map(({ file, objectId }) =>
-    [JSON.stringify([id, objectId]), resolveParser(routes, file, objectId)?.name ?? null])));
+  return new Map([...routeSources(sources, routes)].map(([key, routed]) => [key, routed?.route.name ?? null]));
 }
 
 export async function inventory(sources, previous) {
@@ -108,29 +100,24 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   const excluded = new Set(skipped.map(({ source_id, path }) => JSON.stringify([source_id, path])));
   const groups = [];
   const pending = [];
+  const routed = routeSources(sources, routes);
   for (const { id, files } of sources) {
     const documents = [];
     groups.push([id, documents]);
     for (const { file, objectId } of files) {
-      if (excluded.has(JSON.stringify([id, objectId]))) continue;
-      const route = resolveParser(routes, file, objectId);
-      pending.push({ id, file, objectId, documents, route, kind: parserKind(route, file) });
+      const key = JSON.stringify([id, objectId]);
+      if (excluded.has(key)) continue;
+      const { route, kind } = routed.get(key);
+      pending.push({ id, file, objectId, documents, route, kind });
     }
   }
-  // Resolve each command parser's version once, before any file is parsed with it.
-  const versions = new Map();
-  for (const route of new Set(pending.filter(({ kind }) => kind === 'command').map(({ route }) => route))) {
-    versions.set(route, await commandVersion(route, root, trialSignal()));
-  }
-  // Rust reads, hashes, caches and stores. It calls back here for the parsers that are still in JavaScript.
-  const byFile = new Map(pending.map((item) => [JSON.stringify([item.id, item.objectId]), item]));
+  // Rust reads, hashes, caches, runs loader.command and stores. It calls back here for the parsers
+  // that are still in JavaScript.
   const host = {
     progress,
-    async parse({ id, objectId, kind, name }, bytes) {
-      const { route } = byFile.get(JSON.stringify([id, objectId]));
+    async parse({ kind, name }, bytes) {
       const signal = trialSignal();
-      const parsed = kind === 'command' ? await parseWithCommand(route, bytes, name, { root, version: versions.get(route), signal })
-        : kind === 'ocr' ? await loadOcr(bytes)
+      const parsed = kind === 'ocr' ? await loadOcr(bytes)
         : kind === 'pdf' ? await loadPdf(bytes)
         : kind === 'html' ? await loadHtml(bytes)
         : await decodeRemote([bytes], undefined, name, { parsers: { documents: { tool: 'docling-rs' } }, keepOriginal: true, signal });
@@ -139,8 +126,9 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   };
   const request = {
     state: paths.state, originals: join(paths.artifacts, 'originals', 'shared'), force: Boolean(force), ocrVersion: managedOcrVersion,
+    root: root ?? process.cwd(),
     files: pending.map(({ id, file, objectId, kind, route }) => ({ id, file, objectId, kind, route: route.name,
-      ...(kind === 'command' && { command: commandIdentity(route, versions.get(route)) }) })),
+      ...(kind === 'command' && { command: { module: route.name, args: route.args } }) })),
   };
   progress(0);
   let loaded;

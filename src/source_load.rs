@@ -12,7 +12,10 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+use std::collections::HashMap;
+
 use crate::Cancellation;
+use crate::command_parser::{CommandRoute, Slots, command_version};
 use crate::config_value::ConfigValue;
 use crate::source_files::{ReadFailure, read_source_file, store_original};
 
@@ -33,6 +36,9 @@ pub struct LoadRequest {
     pub force: bool,
     /// Version of the managed OCR, part of cache keys for OCR files.
     pub ocr_version: String,
+    /// The project root, where external commands run.
+    #[serde(default)]
+    pub root: String,
     pub files: Vec<LoadFile>,
 }
 
@@ -46,7 +52,7 @@ pub struct LoadFile {
     pub kind: String,
     /// The parser module instance, reported in warnings.
     pub route: String,
-    /// `{ module, command, input, output, env, version }` for `command` files.
+    /// `{ module, args }` of the `loader.command` instance for `command` files.
     #[serde(default)]
     pub command: Option<ConfigValue>,
 }
@@ -238,6 +244,9 @@ impl Writer {
     }
 }
 
+/// Each `loader.command` instance by module name, with its resolved version.
+type Commands = HashMap<String, (CommandRoute, Option<String>)>;
+
 /// An error message for the first file that failed, in input order.
 pub struct LoadError {
     pub message: String,
@@ -267,6 +276,18 @@ pub fn load(
             flushed: Instant::now(),
         }),
     };
+    // Each loader.command instance resolves its version once, before any file is parsed with it.
+    let mut commands: Commands = HashMap::new();
+    for file in &request.files {
+        let Some(value) = &file.command else { continue };
+        let route = CommandRoute::from_value(value)
+            .ok_or_else(|| fail("Invalid loader.command settings".into()))?;
+        if !commands.contains_key(&route.module) {
+            let version = command_version(&route, &request.root, cancel).map_err(fail)?;
+            commands.insert(route.module.clone(), (route, version));
+        }
+    }
+    let slots = Slots::default();
     let ocr = request.files.iter().any(|file| file.kind == "ocr");
     let workers = if ocr { 1 } else { FILE_CONCURRENCY }.min(request.files.len().max(1));
     let next = AtomicUsize::new(0);
@@ -288,14 +309,27 @@ pub fn load(
                             aborted: true,
                         })
                     } else {
-                        load_one(request, file, &writer, host).map_err(|message| LoadError {
-                            message: if message.starts_with("Could not load ") {
-                                message
-                            } else {
-                                format!("Could not load {}:{}. {message}", file.id, file.object_id)
+                        load_one(request, file, &writer, host, &commands, &slots, cancel).map_err(
+                            |message| LoadError {
+                                message: if message.starts_with("Could not load ") {
+                                    message
+                                } else {
+                                    format!(
+                                        "Could not load {}:{}. {message}",
+                                        file.id, file.object_id
+                                    )
+                                },
+                                aborted: false,
                             },
-                            aborted: false,
-                        })
+                        )
+                    };
+                    // A parser that stopped because of cancellation reports the cancellation.
+                    let result = match result {
+                        Err(error) if cancel.check().is_err() => Err(LoadError {
+                            message: error.message,
+                            aborted: true,
+                        }),
+                        other => other,
                     };
                     if result.is_err() {
                         stop.store(true, Ordering::SeqCst);
@@ -355,7 +389,24 @@ fn load_one(
     file: &LoadFile,
     writer: &Writer,
     host: &dyn Host,
+    commands: &Commands,
+    slots: &Slots,
+    cancel: &Cancellation,
 ) -> Result<ConfigValue, String> {
+    let command = match &file.command {
+        Some(value) => {
+            let module = value
+                .get("module")
+                .and_then(ConfigValue::as_str)
+                .unwrap_or_default();
+            Some(
+                commands
+                    .get(module)
+                    .ok_or("Unknown loader.command instance")?,
+            )
+        }
+        None => None,
+    };
     let limit = if file.kind == "text" {
         TEXT_LIMIT
     } else {
@@ -372,13 +423,13 @@ fn load_one(
         )?;
     let extension = extension(&file.file);
     let hash = sha256_hex(&read.bytes);
-    let key = match &file.command {
-        Some(identity) => json(&ConfigValue::Array(vec![
+    let key = match command {
+        Some((route, version)) => json(&ConfigValue::Array(vec![
             string("loader.command-v1"),
             string(&file.id),
             string(&file.object_id),
             string(&hash),
-            identity.clone(),
+            route.identity(version.as_deref()),
         ])),
         None => {
             let mut parts = vec![
@@ -428,6 +479,17 @@ fn load_one(
             ("content".into(), string(content)),
             ("format".into(), string(format)),
         ])
+    } else if let Some((route, version)) = command {
+        let name = base_name(&file.file);
+        crate::command_parser::parse(
+            route,
+            &read.bytes,
+            name,
+            &request.root,
+            version.as_deref(),
+            slots,
+            cancel,
+        )?
     } else {
         host.parse(file, &read.bytes)?
     };
@@ -464,7 +526,6 @@ fn load_one(
         json(&input),
         Some((hash, read.bytes, format!("{}:{}", file.id, file.object_id))),
     )?;
-    let _ = base_name;
     Ok(input)
 }
 
@@ -522,6 +583,7 @@ mod tests {
             originals: root.path().join("originals").to_string_lossy().into_owned(),
             force: false,
             ocr_version: "v1".into(),
+            root: root.path().to_string_lossy().into_owned(),
             files,
         };
         let cancel = Cancellation::default();

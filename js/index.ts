@@ -65,6 +65,9 @@ interface NativeBinding {
   trialLimitsValid(limits: string): boolean;
   loadCorpus(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   completeHostCall(id: number, result: string | null, error: string | null): void;
+  scanSource(request: string, cancel: NativeCancellation): Promise<string>;
+  routeFiles(request: string): string;
+  matchesGlob(path: string, pattern: string): boolean;
   readModuleArgs(name: string, args: string): string;
   readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
   storeOriginals(directory: string, files: { sha256: string; bytes: Uint8Array }[], cancel: NativeCancellation): Promise<(string | null)[]>;
@@ -382,6 +385,32 @@ export class Dunlin {
     };
     const text = await cancellable(signal, (cancel) => native().loadCorpus(JSON.stringify(request), callback, cancel));
     return JSON.parse(text) as LoadedCorpus;
+  }
+
+  /**
+   * Scan a source folder: its files, skipping names that start with a dot, node_modules, links and
+   * paths that match an exclude pattern. Files come back unsorted.
+   */
+  static async scanSource(request: { path: string; exclude?: readonly string[]; name: string; projectRoot?: string },
+    { signal }: OperationOptions = {}): Promise<{ id: string; files: { file: string; objectId: string }[] }> {
+    const text = await cancellable(signal, (cancel) => native().scanSource(JSON.stringify(request), cancel));
+    const result = JSON.parse(text) as { id: string; files: { file: string; objectId: string }[]; error?: string };
+    if (result.error !== undefined) throw new Error(result.error);
+    return result;
+  }
+
+  /**
+   * Route files to parser modules (spec 6.7): the first route whose patterns and formats claim the
+   * file, with loader.auto last. Returns the route name and decoding kind, or nulls, for each file.
+   */
+  static routeFiles(routes: readonly { name: string; category: string; match?: readonly string[]; ocr?: boolean }[],
+    files: readonly { file: string; objectId: string }[]): { route: string | null; kind: string | null }[] {
+    return nativeJson(() => native().routeFiles(JSON.stringify({ routes, files }))) as { route: string | null; kind: string | null }[];
+  }
+
+  /** `path.matchesGlob` as Node.js computes it, for the current platform. */
+  static matchesGlob(path: string, pattern: string): boolean {
+    return native().matchesGlob(path, pattern);
   }
 
   /** Describe every registered module, in registration order. */

@@ -42,7 +42,7 @@ const torchPackages = ['torch==2.9.1', 'torchvision==0.24.1'];
 const rocmWindows = 'https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1';
 const rocmLinux = 'https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1';
 
-function dataRoot() {
+export function dataRoot() {
   const override = process.env.DUNLIN_OCR_HOME;
   if (override !== undefined) {
     if (!isAbsolute(override)) throw new Error('DUNLIN_OCR_HOME must be an absolute path');

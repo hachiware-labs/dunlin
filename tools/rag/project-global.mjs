@@ -10,7 +10,8 @@ import { isSearchProject } from './project-serving.mjs';
 const providers = { embedding: ['ollama', 'openai'], llm: ['ollama', 'openai', 'strata'] };
 const modelName = z.string().trim().min(1).refine((name) => !/[\u0000-\u001f\u007f]/u.test(name));
 const selectionSchema = (role) => z.strictObject({ model: modelName, provider: z.enum(providers[role]) });
-const ocrSchema = z.strictObject({ tool: z.literal('lightonocr') });
+export const ocrToolNames = ['oar-ocr', 'lightonocr'];
+const ocrSchema = z.strictObject({ tool: z.enum(ocrToolNames) });
 const globalSchema = z.strictObject({
   version: z.literal(1),
   embedding: selectionSchema('embedding').optional(),
@@ -44,7 +45,7 @@ async function readGlobal(path) {
   } catch {
     // Report the allowed settings without disclosing values from the file.
   }
-  throw fail('INVALID_GLOBAL_CONFIG', 'Check ' + path + '. Expected version: 1, optional embedding and llm entries with provider and model, and optional ocr with tool: lightonocr.');
+  throw fail('INVALID_GLOBAL_CONFIG', 'Check ' + path + '. Expected version: 1, optional embedding and llm entries with provider and model, and optional ocr with tool: oar-ocr or lightonocr.');
 }
 
 export async function configureGlobal(action, role, { provider, model, tool }) {
@@ -54,13 +55,13 @@ export async function configureGlobal(action, role, { provider, model, tool }) {
   const ocr = role === 'ocr';
   if (action === 'list' && !options) return { path, ...await readGlobal(path) };
   if ((!ocr && !Object.hasOwn(providers, role)) || (action === 'unset' && options)) {
-    throw fail('INVALID_ARGUMENT', 'Use config list, config set <embedding|llm> --model <name> [--provider <name>], config set ocr [--tool lightonocr], or config unset <embedding|llm|ocr>.');
+    throw fail('INVALID_ARGUMENT', 'Use config list, config set <embedding|llm> --model <name> [--provider <name>], config set ocr [--tool oar-ocr|lightonocr], or config unset <embedding|llm|ocr>.');
   }
   let selection;
   if (action === 'set') {
     if (ocr) {
-      const checked = ocrSchema.safeParse({ tool: tool ?? 'lightonocr' });
-      if (modelOptions || !checked.success) throw fail('INVALID_ARGUMENT', 'Use config set ocr [--tool lightonocr].');
+      const checked = ocrSchema.safeParse({ tool: tool ?? 'oar-ocr' });
+      if (modelOptions || !checked.success) throw fail('INVALID_ARGUMENT', 'Use config set ocr [--tool oar-ocr|lightonocr].');
       selection = checked.data;
     } else {
       const checked = selectionSchema(role).safeParse({ provider: provider ?? 'ollama', model });
@@ -88,8 +89,12 @@ export function projectModel(kind, { provider = 'ollama', model = null } = {}) {
 export async function initialSettings(type, values) {
   const current = await readGlobal(globalPath());
   const enabled = { embedding: isSearchProject(type), llm: type !== 'mcp' };
-  if (values.ocr && values['no-ocr']) throw fail('INVALID_ARGUMENT', 'Use either --ocr or --no-ocr.');
-  const selections = { ocr: !values['no-ocr'] && (values.ocr || type !== 'mcp' && current.ocr !== undefined) };
+  const tool = values['ocr-tool'];
+  if (values['no-ocr'] && (values.ocr || tool !== undefined)) throw fail('INVALID_ARGUMENT', 'Use either --ocr or --no-ocr.');
+  if (tool !== undefined && !ocrToolNames.includes(tool)) throw fail('INVALID_ARGUMENT', 'Use --ocr-tool with ' + ocrToolNames.join(' or ') + '.');
+  // --ocr-tool turns OCR on. The tool comes from --ocr-tool, the user settings, then oar-ocr.
+  const ocr = !values['no-ocr'] && (values.ocr || tool !== undefined || type !== 'mcp' && current.ocr !== undefined);
+  const selections = { ocr: ocr ? tool ?? current.ocr?.tool ?? 'oar-ocr' : null };
   for (const role of ['embedding', 'llm']) {
     const model = values[role + '-model'];
     const provider = values[role + '-provider'];

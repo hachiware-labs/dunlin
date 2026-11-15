@@ -31,6 +31,12 @@ pub struct SourceRequest {
     #[serde(default)]
     pub reject: bool,
     pub ocr_version: String,
+    #[serde(default = "lightonocr")]
+    pub ocr_tool: String,
+    #[serde(default)]
+    pub ocr_home: Option<String>,
+    #[serde(default)]
+    pub lighton: Option<crate::lighton::Lighton>,
     pub sources: Vec<StageSource>,
     pub routes: Vec<Route>,
     /// The `loader.command` instances by name, as `{ module, args }`.
@@ -48,6 +54,10 @@ pub enum SourceOutcome {
     },
     /// Unsupported files stopped the stage: `{ files, skipped }`.
     Unsupported(ConfigValue),
+}
+
+fn lightonocr() -> String {
+    "lightonocr".into()
 }
 
 fn text(value: &str) -> ConfigValue {
@@ -137,6 +147,9 @@ pub fn run(
             originals: request.originals.clone(),
             force: request.force,
             ocr_version: request.ocr_version.clone(),
+            ocr_tool: request.ocr_tool.clone(),
+            ocr_home: request.ocr_home.clone(),
+            lighton: request.lighton.clone(),
             root: request.root.clone(),
             files: load_files,
         },
@@ -354,6 +367,9 @@ mod tests {
             skip_unsupported,
             reject,
             ocr_version: "1".into(),
+            ocr_tool: "lightonocr".into(),
+            ocr_home: None,
+            lighton: None,
             sources: vec![StageSource {
                 id: "docs".into(),
                 files: vec![file("a.md"), file("b.bin")],

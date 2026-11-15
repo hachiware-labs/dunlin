@@ -21,7 +21,7 @@ import { addDictionary, dictionaryText, suggestDictionary } from './project-dict
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
 import { buildVectorIndex, fuseResults, releaseVectorMetadata, semanticChunks, vectorBackend, vectorModel, vectorSearch } from './project-vectors.mjs';
-import { changeTool, toolsCatalog } from './project-tools.mjs';
+import { changeTool, listedTools, projectOcr, toolsCatalog } from './project-tools.mjs';
 import { checkIndexTool, hannoy } from './project-index-tool.mjs';
 import { checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage } from './project-trials.mjs';
 import { answerModel, answerQuestion, answerText } from './project-answer.mjs';
@@ -36,8 +36,8 @@ const configName = 'Dunlinfile.yaml';
 let DatabaseSync;
 const projectTypes = ['mcp', 'rag', 'wiki', 'para'];
 export const projectCommands = {
-  init: 'dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--json]',
-  config: 'dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config set ocr [--tool lightonocr] | dunlin config unset <embedding|llm|ocr> [--json]',
+  init: 'dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]',
+  config: 'dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config set ocr [--tool oar-ocr|lightonocr] | dunlin config unset <embedding|llm|ocr> [--json]',
   build: 'dunlin build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]',
   source: 'dunlin source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]',
   transform: 'dunlin transform [--project <directory>] [--config <file>] [--dry-run] [--json]',
@@ -164,7 +164,7 @@ async function initialize(type, directory, values) {
   if (ocr) {
     const loader = (config.source ?? config.ingress).modules.find(({ use }) => use === 'loader.auto');
     loader.with.ocr = 'loader.ocr';
-    const { name, version } = toolsCatalog.get('ocr');
+    const { name, version } = toolsCatalog.get(ocr);
     config.tools = [{ name, version }];
   }
   await mkdir(root, { recursive: true });
@@ -203,7 +203,7 @@ async function initialize(type, directory, values) {
     const missing = [!models.llm?.model && 'models.writer.model', !purpose && 'about.purpose'].filter(Boolean);
     next = missing.length ? 'Set ' + missing.join(' and ') + ', then run dunlin ingress.' : 'Run dunlin ingress <path>.';
   }
-  return { config: configPath, type, next: ocr ? next + ' To prepare local GPU OCR, run dunlin add ocr.' : next };
+  return { config: configPath, type, next: ocr ? next + ' To prepare ' + ocr + ', run dunlin add ocr.' : next };
 }
 
 function normalizeProjectType(config, warnings) {
@@ -379,7 +379,8 @@ async function runSource(db, project, plan, { force, skipUnsupported, warnings }
   });
   const { sources, reject } = parsed;
   // Rust routes, loads, computes the stage ID and records the stage (spec 28.9 step 2a).
-  const result = await runSourceStage({ sources, routes: parserRoutes(parsed.parsers), reject, skipUnsupported, force, modules: moduleSettings(plan) },
+  const result = await runSourceStage({ sources, routes: parserRoutes(parsed.parsers), reject, skipUnsupported, force, modules: moduleSettings(plan),
+    ocr: projectOcr(project.config.tools) },
     paths, project.root);
   if (result.unsupported) {
     throw new ProjectError(2, 'UNSUPPORTED_FILES', 'Unsupported files found. Set source.filesystem with.exclude or use --skip-unsupported.', result.unsupported);
@@ -1206,7 +1207,7 @@ export async function runProjectCommand(command, args, explicitProject) {
     const options = { help: { type: 'boolean', short: 'h' } };
     options.json = { type: 'boolean' };
     if (command === 'init') {
-      for (const key of ['source', 'purpose', 'embedding-model', 'embedding-provider', 'llm-model', 'llm-provider']) options[key] = { type: 'string' };
+      for (const key of ['source', 'purpose', 'embedding-model', 'embedding-provider', 'llm-model', 'llm-provider', 'ocr-tool']) options[key] = { type: 'string' };
       for (const key of ['no-embedding', 'no-llm', 'ocr', 'no-ocr']) options[key] = { type: 'boolean' };
     } else if (command === 'config') {
       options.provider = { type: 'string' };
@@ -1325,11 +1326,11 @@ export async function runProjectCommand(command, args, explicitProject) {
       const path = await findProject(values.project ?? explicitProject);
       const active = path && parseConfig(await readFile(path, 'utf8')).config?.tools;
       if (Array.isArray(data)) data = data.filter(({ name, tool }) => {
-        const required = tool ?? (name === 'loader.ocr' ? 'ocr' : null);
-        return !required || active?.some?.((entry) => entry?.name === required);
+        if (name === 'loader.ocr') return Boolean(projectOcr(active));
+        return !tool || active?.some?.((entry) => entry?.name === tool);
       });
     } else if (command === 'add' && values.list) {
-      data = [...toolsCatalog.values()];
+      data = listedTools();
     } else if (command === 'config') {
       if (type !== 'list') runId = `run-${randomUUID()}`;
       data = await configureGlobal(type, directory, values);

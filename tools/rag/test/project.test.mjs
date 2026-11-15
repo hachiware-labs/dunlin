@@ -143,7 +143,10 @@ test('copies the global OCR selection into each project type and accepts init ov
   assert.deepEqual(selected.data, { path, version: 1, llm: { provider: 'ollama', model: 'local-writer' }, ocr: { tool: 'lightonocr' } });
   assert.deepEqual((await json('config', 'list')).data, selected.data);
   assert.match((await run('config', 'list')).stdout, /^ocr +lightonocr$/mu);
-  const { name, version } = (await json('add', '--list')).data.find(({ name }) => name === 'ocr');
+  const listed = (await json('add', '--list')).data;
+  assert.equal(listed.some(({ name }) => name === 'ocr'), false);
+  const { name, version } = listed.find(({ name }) => name === 'lightonocr');
+  const oar = listed.find(({ name }) => name === 'oar-ocr');
 
   for (const type of ['rag', 'wiki', 'para']) {
     await run('init', type, type);
@@ -166,6 +169,12 @@ test('copies the global OCR selection into each project type and accepts init ov
   await assert.rejects(run('config', 'list', '--tool', 'lightonocr'), { code: 2 });
   await assert.rejects(run('config', 'unset', 'ocr', '--tool', 'lightonocr'), { code: 2 });
 
+  // --ocr-tool chooses the tool for one project and turns OCR on.
+  await run('init', 'rag', 'chosen', '--ocr-tool', 'oar-ocr');
+  assert.deepEqual((await read('chosen')).tools, [{ name: 'oar-ocr', version: oar.version }]);
+  await assert.rejects(run('init', 'rag', 'bad-tool', '--ocr-tool', 'tesseract-js'), { code: 2 });
+  await assert.rejects(run('init', 'rag', 'off-tool', '--ocr-tool', 'oar-ocr', '--no-ocr'), { code: 2 });
+
   await run('config', 'unset', 'ocr');
   assert.equal((await json('config', 'list')).data.ocr, undefined);
   await run('init', 'rag', 'default');
@@ -173,7 +182,26 @@ test('copies the global OCR selection into each project type and accepts init ov
   assert.equal(loader(await read('default')).with.ocr, 'none');
   assert.equal(loader(await read('enabled')).with.ocr, 'loader.ocr');
   assert.equal(loader(await read('rag')).with.ocr, 'loader.ocr');
-  assert.deepEqual((await read('enabled')).tools, [{ name, version }]);
+  // Without a selection, OCR uses oar-ocr.
+  assert.deepEqual((await read('enabled')).tools, [{ name: 'oar-ocr', version: oar.version }]);
+  assert.deepEqual((await json('config', 'set', 'ocr')).data.ocr, { tool: 'oar-ocr' });
+
+  // The former tool name stays valid, and a project uses one OCR tool.
+  const configPath = join(root, 'enabled', 'Dunlinfile.yaml');
+  const text = await readFile(configPath, 'utf8');
+  await writeFile(configPath, text.replace(/tools:[\s\S]*$/u, `tools:
+  - name: ocr
+    version: ${version}
+`));
+  assert.equal((await json('--project', 'enabled', 'validate')).data.valid, true);
+  await writeFile(configPath, text.replace(/tools:[\s\S]*$/u, `tools:
+  - name: oar-ocr
+    version: ${oar.version}
+  - name: lightonocr
+    version: ${version}
+`));
+  const conflict = await run('--project', 'enabled', 'validate', '--json').then((result) => JSON.parse(result.stdout), (error) => JSON.parse(error.stdout));
+  assert.deepEqual(conflict.errors.map(({ code, section, expected }) => [code, section, expected]), [['ARG_CONFLICT', 'tools', 'One OCR tool']]);
   await assert.rejects(stat(ocrHome), { code: 'ENOENT' });
 });
 

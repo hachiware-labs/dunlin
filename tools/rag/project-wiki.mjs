@@ -13,7 +13,7 @@ import { loadCorpus, unsupportedFiles } from './project-content.mjs';
 import { defaultRoutes } from './project-parsers.mjs';
 import { categories, idParts, readText, revision } from './authoring/files.mjs';
 import { escapeHtml, renderMarkdown, renderPublication, contentSecurityPolicy } from './authoring/html.mjs';
-import { checkTools } from './project-tools.mjs';
+import { checkTools, projectOcr } from './project-tools.mjs';
 import { sharedOriginalForDigest, prepareDocument } from './authoring/uploads.mjs';
 import { ensureWikiInspection, inspectWikiContent } from './project-wiki-inspection.mjs';
 import { ensureWikiWork, latestWork, queueWork, trackWork, workStatus } from './project-wiki-work.mjs';
@@ -106,7 +106,7 @@ export function validateWiki(config, file, line) {
     });
   }
   for (const [stage, sequence] of Object.entries(checks)) plan[stage] = validateSequence(stage, 'modules', sequence);
-  if (plan.ingress[0]?.ocr === 'loader.ocr' && !config.tools?.some?.((tool) => tool?.name === 'ocr')) {
+  if (plan.ingress[0]?.ocr === 'loader.ocr' && !projectOcr(config.tools)) {
     add('REQUIREMENT_MISSING', ['ingress', 'modules', 0, 'with', 'ocr'], 'The ocr tool', 'Run dunlin add ocr.');
   }
   plan.content = validateSequence('verify', 'content', [['check.contradictions',
@@ -638,7 +638,7 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
   if (values['dry-run']) return { files: files.size, pending: pending.length, skipped };
   if (skipped.length && loader.unsupported === 'error') throw new WikiError(2, 'UNSUPPORTED_FILES', JSON.stringify(skipped));
   const groups = await loadCorpus(grouped, paths, skipped, helpers.warnings, db, false, routes,
-    (completed) => progress('extracting_sources', { completed, total: files.size - skipped.length }));
+    (completed) => progress('extracting_sources', { completed, total: files.size - skipped.length }), undefined, projectOcr(project.config.tools));
   await mkdir(databasePath, { recursive: true });
   const database = await helpers.open(databasePath, keyword);
   try {

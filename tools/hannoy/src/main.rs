@@ -136,8 +136,8 @@ fn build(
         }
         file.seek(SeekFrom::Start(*row * width))?;
         file.read_exact(&mut buffer)?;
-        for (value, bytes) in vector.iter_mut().zip(buffer.chunks_exact(4)) {
-            *value = f32::from_le_bytes(bytes.try_into()?);
+        for (value, bytes) in vector.iter_mut().zip(buffer.as_chunks::<4>().0) {
+            *value = f32::from_le_bytes(*bytes);
         }
         writer.add_item(&mut txn, *id, &vector)?;
     }

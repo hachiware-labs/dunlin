@@ -102,8 +102,14 @@ export interface LoadCorpusRequest {
   /** The shared originals directory. */
   originals: string;
   force?: boolean;
-  /** The managed OCR version, part of the cache key for OCR files. */
+  /** The OCR tool version, part of the cache key for OCR files. */
   ocrVersion: string;
+  /** `oar-ocr`, run in Rust, or `lightonocr` (the default), run as a separate process. */
+  ocrTool?: 'oar-ocr' | 'lightonocr';
+  /** The folder `dunlin add oar-ocr` prepared. */
+  ocrHome?: string;
+  /** The runtime `dunlin add lightonocr` prepared. */
+  lighton?: LightonRuntime;
   /** The project root, for `{root}` in loader.command arguments. */
   root: string;
   files: LoadCorpusFile[];
@@ -117,6 +123,14 @@ export interface LoadCorpusHost {
 export interface LoadedCorpus {
   documents: Record<string, unknown>[];
   warnings: { code: string; section: string; module: string; target: string; message: string }[];
+}
+
+/** The managed LightOnOCR runtime: Python, the server script, the model folder and its name. */
+export interface LightonRuntime {
+  python: string;
+  server: string;
+  modelDir: string;
+  model: string;
 }
 
 /** A parser route for `Dunlin.routeFiles` and `Dunlin.runSource`. */
@@ -137,6 +151,9 @@ export interface SourceStageRequest {
   /** A parser module sets `unsupported: error`. */
   reject?: boolean;
   ocrVersion: string;
+  ocrTool?: 'oar-ocr' | 'lightonocr';
+  ocrHome?: string;
+  lighton?: LightonRuntime;
   /** Scanned sources in order, each file as `{ file, objectId }`. */
   sources: { id: string; files: { file: string; objectId: string }[] }[];
   routes: ParserRoute[];

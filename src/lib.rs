@@ -23,8 +23,12 @@ pub mod yaml_config;
 
 #[cfg(any(feature = "node", test))]
 mod command_parser;
+#[cfg(any(feature = "node", test))]
+mod lighton;
 #[cfg(all(feature = "node", not(test)))]
 mod node;
+#[cfg(any(feature = "node", test))]
+mod ocr;
 #[cfg(any(feature = "node", test))]
 mod pdf_text;
 #[cfg(any(feature = "node", test))]

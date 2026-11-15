@@ -34,8 +34,17 @@ pub struct LoadRequest {
     pub originals: String,
     #[serde(default)]
     pub force: bool,
-    /// Version of the managed OCR, part of cache keys for OCR files.
+    /// Version of the OCR tool, part of cache keys for OCR files.
     pub ocr_version: String,
+    /// `oar-ocr`, read here, or `lightonocr`, read by the host.
+    #[serde(default = "lightonocr")]
+    pub ocr_tool: String,
+    /// The folder `dunlin add oar-ocr` prepared.
+    #[serde(default)]
+    pub ocr_home: Option<String>,
+    /// The runtime `dunlin add lightonocr` prepared, or none when it is not prepared.
+    #[serde(default)]
+    pub lighton: Option<crate::lighton::Lighton>,
     /// The project root, where external commands run.
     #[serde(default)]
     pub root: String,
@@ -69,6 +78,10 @@ pub struct Loaded {
     /// One document per file, in input order.
     pub documents: Vec<ConfigValue>,
     pub warnings: Vec<ConfigValue>,
+}
+
+fn lightonocr() -> String {
+    "lightonocr".into()
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -343,6 +356,7 @@ pub fn load(
             });
         }
     });
+    crate::lighton::stop();
     // Keep the files that finished, so a failed or cancelled build can reuse them.
     let flushed = writer.flush();
     let mut documents = Vec::new();
@@ -500,6 +514,20 @@ fn load_one(
         )?
     } else if file.kind == "pdf" {
         crate::pdf_text::parse(&read.bytes, &|| cancel.check().is_ok())?
+    } else if file.kind == "ocr" && request.ocr_tool == "oar-ocr" {
+        let home = request
+            .ocr_home
+            .as_deref()
+            .ok_or("oar-ocr is not prepared. Run dunlin add ocr.")?;
+        let version = request
+            .ocr_version
+            .strip_prefix("oar-ocr@")
+            .unwrap_or(&request.ocr_version);
+        crate::ocr::parse(home, version, &read.bytes, &|| cancel.check().is_ok())?
+    } else if file.kind == "ocr" {
+        crate::lighton::parse(request.lighton.as_ref(), &read.bytes, &|| {
+            cancel.check().is_ok()
+        })?
     } else {
         host.parse(file, &read.bytes)?
     };
@@ -593,6 +621,9 @@ mod tests {
             originals: root.path().join("originals").to_string_lossy().into_owned(),
             force: false,
             ocr_version: "v1".into(),
+            ocr_tool: "lightonocr".into(),
+            ocr_home: None,
+            lighton: None,
             root: root.path().to_string_lossy().into_owned(),
             files,
         };

@@ -852,7 +852,9 @@ fn module_checks(
             Details::module(name).received(ConfigValue::Number(overlap)),
         );
     }
-    if (name == "loader.ocr" || planned.text("ocr") == Some("loader.ocr")) && !has_tool("ocr") {
+    if (name == "loader.ocr" || planned.text("ocr") == Some("loader.ocr"))
+        && !OCR_TOOLS.iter().any(|tool| has_tool(tool))
+    {
         report.issue(
             "REQUIREMENT_MISSING",
             at(path!["use"]),
@@ -1621,6 +1623,9 @@ fn check_models(models: Option<&ConfigValue>, report: &mut Report) {
 }
 
 /// Checks the `tools` list against the bundled catalog.
+/// The OCR tools. `ocr` is the former name of `lightonocr`. A project uses at most one.
+pub const OCR_TOOLS: [&str; 3] = ["oar-ocr", "lightonocr", "ocr"];
+
 pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], report: &mut Report) {
     let Some(tools) = tools else { return };
     let ConfigValue::Array(items) = tools else {
@@ -1634,6 +1639,7 @@ pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], re
         return;
     };
     let mut names: Vec<String> = Vec::new();
+    let mut ocr = false;
     for (i, entry) in items.iter().enumerate() {
         let name = entry.get("name").and_then(ConfigValue::as_str);
         let version = entry.get("version");
@@ -1644,7 +1650,18 @@ pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], re
             .iter()
             .all(|key| key == "name" || key == "version")
             && !names.iter().any(|seen| Some(seen.as_str()) == name);
-        if valid {
+        if valid
+            && name.is_some_and(|name| OCR_TOOLS.contains(&name))
+            && std::mem::replace(&mut ocr, true)
+        {
+            report.issue(
+                "ARG_CONFLICT",
+                path!["tools", i],
+                "One OCR tool",
+                "Remove the other OCR tool with dunlin remove.",
+                Details::none(),
+            );
+        } else if valid {
             names.push(name.unwrap_or_default().to_owned());
         } else {
             report.issue(

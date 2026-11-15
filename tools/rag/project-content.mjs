@@ -7,7 +7,8 @@ import { Dunlin } from 'dunlin';
 
 import { decodeRemote } from './ingest-files.mjs';
 import { lightonModel } from './parsers/catalog.mjs';
-import { managedOcrVersion } from './parsers/lighton-setup.mjs';
+import { lightonServer, managedOcr, managedOcrVersion } from './parsers/lighton-setup.mjs';
+import { oarOcrHome } from './parsers/oar-setup.mjs';
 import { defaultRoutes, routeFiles } from './project-parsers.mjs';
 import { trialCheckpoint, trialSignal } from './project-trials.mjs';
 
@@ -96,7 +97,19 @@ export async function inventory(sources, previous) {
   return files;
 }
 
-export async function loadCorpus(sources, paths, skipped, warnings, db, force, routes = defaultRoutes(), progress = () => {}, root) {
+/**
+ * The OCR fields of a load request. lightonocr keeps its former cache key part, so its results stay
+ * valid; oar-ocr adds its name and version.
+ */
+async function ocrRequest(ocr) {
+  if (ocr?.tool === 'oar-ocr') return { ocrVersion: 'oar-ocr@' + ocr.version, ocrTool: 'oar-ocr', ocrHome: oarOcrHome() };
+  // Rust starts the managed server when a page needs OCR. Without it, those files fail with a hint.
+  const managed = ocr ? await managedOcr({ required: false }) : undefined;
+  return { ocrVersion: managedOcrVersion, ocrTool: 'lightonocr',
+    ...(managed && { lighton: { python: managed.python, server: lightonServer, modelDir: managed.modelDir, model: lightonModel } }) };
+}
+
+export async function loadCorpus(sources, paths, skipped, warnings, db, force, routes = defaultRoutes(), progress = () => {}, root, ocr = null) {
   const excluded = new Set(skipped.map(({ source_id, path }) => JSON.stringify([source_id, path])));
   const groups = [];
   const pending = [];
@@ -113,7 +126,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   }
   const host = parserHost(progress);
   const request = {
-    state: paths.state, originals: join(paths.artifacts, 'originals', 'shared'), force: Boolean(force), ocrVersion: managedOcrVersion,
+    state: paths.state, originals: join(paths.artifacts, 'originals', 'shared'), force: Boolean(force), ...await ocrRequest(ocr),
     root: root ?? process.cwd(),
     files: pending.map(({ id, file, objectId, kind, route }) => ({ id, file, objectId, kind, route: route.name,
       ...(kind === 'command' && { command: { module: route.name, args: route.args } }) })),
@@ -136,10 +149,10 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
  * Runs the `source` stage in Rust: routing, loading, the stage ID and its record in state.sqlite.
  * Returns `{ output, reused, warnings }`, or `{ unsupported: { files, skipped } }`.
  */
-export async function runSourceStage({ sources, routes, reject, skipUnsupported, force, modules }, paths, root) {
+export async function runSourceStage({ sources, routes, reject, skipUnsupported, force, modules, ocr = null }, paths, root) {
   const request = {
     state: paths.state, originals: join(paths.artifacts, 'originals', 'shared'), root, force: Boolean(force),
-    skipUnsupported: Boolean(skipUnsupported), reject: Boolean(reject), ocrVersion: managedOcrVersion, sources,
+    skipUnsupported: Boolean(skipUnsupported), reject: Boolean(reject), ...await ocrRequest(ocr), sources,
     routes: routes.map(({ name, category, match, ocr }) => ({ name, category, ...(match && { match }), ocr })),
     commands: routes.filter(({ category }) => category === 'command').map(({ name, args }) => ({ module: name, args })),
     modules,
@@ -162,23 +175,11 @@ function parserHost(progress = () => {}) {
     progress,
     async parse({ kind, name }, bytes) {
       const signal = trialSignal();
-      const parsed = kind === 'ocr' ? await loadOcr(bytes)
-        : kind === 'html' ? await loadHtml(bytes)
+      const parsed = kind === 'html' ? await loadHtml(bytes)
         : await decodeRemote([bytes], undefined, name, { parsers: { documents: { tool: 'docling-rs' } }, keepOriginal: true, signal });
       return { content: parsed.content, format: parsed.format, locations: parsed.locations, parser: parsed.parser };
     },
   };
-}
-
-async function loadOcr(bytes) {
-  const { parseOcr } = await import('./parsers/ocr.mjs');
-  try {
-    const parsed = await parseOcr(bytes, { tool: 'lightonocr', managed: true, model: lightonModel, lang: 'ja' }, trialSignal());
-    return { ...parsed, bytes, parser: { tool: 'lightonocr', model: lightonModel, lang: 'ja' } };
-  } catch (error) {
-    if (error.code === 'OCR_NOT_PREPARED') throw new Error('Local GPU OCR is not prepared. Run dunlin add ocr.', { cause: error });
-    throw error;
-  }
 }
 
 async function loadHtml(bytes) {

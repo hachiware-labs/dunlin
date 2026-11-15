@@ -151,9 +151,9 @@ OCR の実行方式は次の2つから選ぶ。
 
 `init mcp` は `--ocr` を明示すると OCR を有効にする。ほかの種別は `init` のオプション、ユーザー設定、組み込みの既定値（無効）の順で優先する。`init --ocr-tool <oar-ocr|lightonocr>` で、その初期化に限って方式を選べる。方式は `--ocr-tool`、ユーザー設定、`oar-ocr` の順で決める。
 
-OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に選んだ方式の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `dunlin add ocr` を実行して準備する。`dunlin add ocr` は、`tools` に記録された方式を準備する。
+OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に選んだ方式の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `dunlin add ocr` を実行して準備する。`dunlin add ocr` は、`tools` に記録された方式を準備し、記録がなければ `oar-ocr` を準備して記録する。
 
-- PDF のテキスト層は先に読み、テキスト層のないページと画像だけを OCR にかける。
+- PDF のテキスト層は先に読み、テキスト層のないページと画像だけを OCR にかける。テキスト層は `pdf_oxide` で読み、テキスト層のないページも `pdf_oxide` で長辺 1540 ピクセルの画像にしてから OCR にかける。
 - 1つのプロジェクトで使う OCR は1つとする。`tools` に2つの方式を書いた場合は検証エラーにする。
 - 方式を切り替えるには、`dunlin remove` で今の方式を外し、`dunlin add` で別の方式を足してから `dunlin build` を実行する。抽出結果の再利用のキーには方式と版を含めるので、OCR にかけた文書だけが読み直される。
 - 以前のプロジェクトの `tools` にある `name: ocr` は、`lightonocr` の旧名として読む。

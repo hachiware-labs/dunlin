@@ -21,7 +21,13 @@ memmap2 = { version = "0.9", optional = true }
 napi = { version = "3", default-features = false, features = ["napi8", "serde-json"], optional = true }
 napi-derive = { version = "3", optional = true }
 # Pinned: the version is part of the extraction cache key for PDFs.
-pdf_oxide = { version = "=0.3.78", default-features = false, features = ["legacy-crypto"] }
+pdf_oxide = { version = "=0.3.78", default-features = false, features = ["legacy-crypto", "rendering"] }
+# OCR on CPU. ONNX Runtime is loaded at run time from the files dunlin add oar-ocr prepares.
+oar-ocr = { version = "=0.10.2", default-features = false, features = ["simd"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic", "std"] }
+base64 = "0.23"
+regex = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
 percent-encoding = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
 rayon = { version = "1", optional = true }

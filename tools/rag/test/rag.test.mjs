@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,7 +51,7 @@ test('answers from ingested folders and S3 with verified citations through each 
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-rag-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dunlin-rag-')));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const index = join(root, 'index');
   const folder = join(root, 'docs');

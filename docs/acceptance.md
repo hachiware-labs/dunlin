@@ -12,7 +12,7 @@
 | I1・I2・I3・I4 | [統合テスト](../tools/rag/test/integrated.test.mjs) の試行採用、索引切り替え、上限と競合、Wiki/PARA |
 | A1・A2・A3・A4 | [受け入れテスト](../tools/rag/test/acceptance.test.mjs) の互換性、根拠と分割、失敗と状態、同じ文脈予算での比較 |
 | R1・R2 | [RAG 提供テスト](../tools/rag/test/responses.test.mjs) の CLI・MCP・HTTP の一致、回答生成、接続制限 |
-| npm | [配布テスト](../scripts/test-package.mjs)。バンドル版と分割版の依存を専用キャッシュに取得し、ロックファイルを使ってオフラインで再インストール |
+| npm | [配布テスト](../scripts/test-package.mjs)。バンドル版と分割版の依存を専用キャッシュに取得し、空の別プロジェクトにオフラインでインストール |
 | Chromium | Playwright で資料を追加し、処理中、完了、ページ表示、資料由来のスクリプトの非実行を確認 |
 
 ## 22.1 最速で構築できる

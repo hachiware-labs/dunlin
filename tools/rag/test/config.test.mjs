@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +17,7 @@ const runNode = promisify(execFile);
 const cli = fileURLToPath(new URL('./fixtures/legacy-cli.mjs', import.meta.url));
 
 test('asks for a preset and accepts the default confirmation or cancellation', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-init-prompt-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dunlin-init-prompt-')));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   async function prompt(answers) {
     let transcript = '';
@@ -45,7 +45,7 @@ test('asks for a preset and accepts the default confirmation or cancellation', a
 });
 
 test('initializes the default input folder and prints guidance for each preset', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-init-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dunlin-init-')));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   for (const [preset, next] of [['rag', /dunlin ask/u], ['mcp', /knowledge\.search/u],
     ['para', /para\.save/u], ['llm-wiki', /wiki\.apply/u]]) {
@@ -59,7 +59,7 @@ test('initializes the default input folder and prints guidance for each preset',
 });
 
 test('keeps corpus information with the shared corpus across ingestion and configuration files', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-corpus-info-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dunlin-corpus-info-')));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root });
   const show = async (...args) => JSON.parse((await run('corpus', 'show', ...args)).stdout);
@@ -139,7 +139,7 @@ test('initializes a project and applies configuration edits to the next ingest, 
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-config-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dunlin-config-')));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const project = join(root, 'project');
   const configFile = join(project, 'dunlin.json');

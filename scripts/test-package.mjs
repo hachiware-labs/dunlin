@@ -25,13 +25,16 @@ async function pack(directory, destination) {
 }
 
 async function installAndSearch(name, tarballs) {
+  const preparation = join(stage, name + '-preparation');
   const consumer = join(stage, name);
-  await mkdir(consumer);
-  await writeFile(join(consumer, 'package.json'), '{"private":true,"type":"module"}');
+  for (const directory of [preparation, consumer]) {
+    await mkdir(directory);
+    await writeFile(join(directory, 'package.json'), '{"private":true,"type":"module"}');
+  }
   const options = ['--cache', cache, '--ignore-scripts', '--no-audit', '--no-fund'];
-  // Resolve and cache the consumer's dependencies. npm ci reinstalls from the lockfile and cache.
-  npm(['install', ...options, ...tarballs], consumer);
-  npm(['ci', '--offline', ...options], consumer);
+  // Populate the cache, then install the same tarballs into a fresh offline consumer.
+  npm(['install', ...options, ...tarballs], preparation);
+  npm(['install', '--offline', ...options, ...tarballs], consumer);
   const installed = await readdir(join(consumer, 'node_modules'));
   assert.ok(installed.includes('@modelcontextprotocol'));
   assert.ok(installed.includes('zod'));

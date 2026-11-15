@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -18,7 +18,7 @@ const cli = fileURLToPath(new URL('./fixtures/legacy-cli.mjs', import.meta.url))
 const runNode = promisify(execFile);
 
 async function fixture(t, preset, { wiki = false, web = false, ocrUrl, managedOcr = false, corpusBackend } = {}) {
-  const temp = await mkdtemp(join(tmpdir(), `dunlin-${preset}-`));
+  const temp = await realpath(await mkdtemp(join(tmpdir(), `dunlin-${preset}-`)));
   const root = join(temp, 'project');
   const config = join(root, 'dunlin.json');
   let client;

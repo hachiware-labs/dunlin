@@ -23,7 +23,7 @@ use url::Url;
 use crate::{
     Cancellation, CorpusBackend, DocumentFormat, Error, Evidence, IndexChanges, IndexStatus,
     LineRange, ReadOutcome, Result, RetrievalMethod, SearchHit, SourceRef, SyncOutcome,
-    corpus::Corpus,
+    corpus::{Corpus, CorpusBatch},
     japanese::{GAP, JapaneseTokenizer},
     legacy_delete::LegacyDeleteQuery,
     source::{self, SourceInput, SourceObject},
@@ -197,13 +197,15 @@ impl KeywordIndex {
             .index
             .writer_with_num_threads::<TantivyDocument>(1, 32_000_000)?;
         writer.delete_term(Term::from_field_text(self.source_id, id));
+        let mut corpus = self.corpus.batch();
         let result = input.ingest(id, cancel, |object| {
-            self.index_object(&writer, object, cancel)
+            self.index_object(&writer, object, &mut corpus, cancel)
         });
         let report = finish_or_rollback(
             &mut writer,
             result.and_then(|report| {
                 cancel.check()?;
+                corpus.flush()?;
                 Ok(report)
             }),
         )?;
@@ -236,6 +238,7 @@ impl KeywordIndex {
             source_id: id.into(),
             ..IndexChanges::default()
         };
+        let mut corpus = self.corpus.batch();
         let result = input
             .ingest(id, cancel, |object| {
                 let object_id = &object.source.object_id;
@@ -250,7 +253,7 @@ impl KeywordIndex {
                     }
                     None => changes.added.push(object_id.clone()),
                 }
-                let units = self.index_object(&writer, object, cancel)?;
+                let units = self.index_object(&writer, object, &mut corpus, cancel)?;
                 changes.indexed_units += units;
                 Ok(units)
             })
@@ -267,7 +270,8 @@ impl KeywordIndex {
                         objects: Arc::new(legacy),
                     }))?;
                 }
-                cancel.check()
+                cancel.check()?;
+                corpus.flush()
             });
         finish_or_rollback(&mut writer, result)?;
         if !changes.added.is_empty() || !changes.updated.is_empty() || !changes.deleted.is_empty() {
@@ -311,6 +315,7 @@ impl KeywordIndex {
         &self,
         writer: &IndexWriter<TantivyDocument>,
         object: SourceObject,
+        corpus: &mut CorpusBatch<'_>,
         cancel: &Cancellation,
     ) -> Result<usize> {
         let id = &object.source.source_id;
@@ -340,7 +345,7 @@ impl KeywordIndex {
             format: Some(object.format()),
             chunk_layout: object.chunk_layout()?,
         };
-        self.corpus.save(&object, end_line)?;
+        corpus.save(&object, end_line)?;
         writer.add_document(doc!(
             self.source_id => id.as_str(),
             self.object_key => object_key(id, &object.source.object_id),

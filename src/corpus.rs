@@ -74,8 +74,75 @@ pub struct CorpusDocument {
 
 pub(crate) struct Corpus {
     json: MmapDirectory,
+    /// JSON revisions existed when the corpus opened. Without them, saves skip a file check.
+    legacy_json: bool,
     sqlite_path: PathBuf,
     sqlite: Option<Mutex<Connection>>,
+}
+
+/// Corpus revisions waiting to be inserted together. Each SQLite commit syncs the disk, so a
+/// commit per document made indexing wait about 1 ms per document on Windows.
+pub(crate) struct CorpusBatch<'a> {
+    corpus: &'a Corpus,
+    rows: Vec<(String, String, String, Vec<u8>)>,
+    bytes: usize,
+}
+
+const BATCH_ROWS: usize = 256;
+const BATCH_BYTES: usize = 32 * 1024 * 1024;
+
+impl CorpusBatch<'_> {
+    pub fn save(&mut self, object: &SourceObject, end_line: usize) -> Result<()> {
+        if self.corpus.sqlite.is_none() {
+            return self.corpus.save(object, end_line);
+        }
+        let bytes = self.corpus.sqlite_record(object, end_line)?;
+        let source = &object.source;
+        self.bytes += bytes.len();
+        self.rows.push((
+            source.source_id.clone(),
+            source.object_id.clone(),
+            source.version.clone(),
+            bytes,
+        ));
+        if self.rows.len() >= BATCH_ROWS || self.bytes >= BATCH_BYTES {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Inserts the waiting revisions in one transaction. Call it before the index commit that
+    /// refers to them.
+    pub fn flush(&mut self) -> Result<()> {
+        let Some(connection) = &self.corpus.sqlite else {
+            return Ok(());
+        };
+        if self.rows.is_empty() {
+            return Ok(());
+        }
+        let mut connection = connection
+            .lock()
+            .map_err(|_| Error::Io("Could not lock the corpus database"))?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| sqlite_error(error, "Could not save the corpus revision"))?;
+        {
+            let mut insert = transaction
+                .prepare(INSERT)
+                .map_err(|error| sqlite_error(error, "Could not save the corpus revision"))?;
+            for (source_id, object_id, version, bytes) in &self.rows {
+                insert
+                    .execute(params![source_id, object_id, version, bytes])
+                    .map_err(|error| sqlite_error(error, "Could not save the corpus revision"))?;
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|error| sqlite_error(error, "Could not save the corpus revision"))?;
+        self.rows.clear();
+        self.bytes = 0;
+        Ok(())
+    }
 }
 
 impl Corpus {
@@ -89,54 +156,30 @@ impl Corpus {
             CorpusBackend::Sqlite => Some(Mutex::new(open_sqlite(&sqlite_path, path, cancel)?)),
             CorpusBackend::Json => None,
         };
+        let legacy_json = std::fs::read_dir(path)
+            .map_err(|_| Error::Io("Could not list the corpus directory"))?
+            .filter_map(|entry| entry.ok())
+            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "json"));
         Ok(Self {
             json,
+            legacy_json,
             sqlite_path,
             sqlite,
         })
     }
 
+    pub fn batch(&self) -> CorpusBatch<'_> {
+        CorpusBatch {
+            corpus: self,
+            rows: Vec::new(),
+            bytes: 0,
+        }
+    }
+
     pub fn save(&self, object: &SourceObject, end_line: usize) -> Result<()> {
         let source = &object.source;
-        let path = record_path(&source.source_id, &source.object_id, &source.version);
-        let has_json = self
-            .json
-            .exists(&path)
-            .map_err(|_| Error::Io("Could not check the corpus revision"))?;
-        if self.sqlite.is_none() {
-            if has_json {
-                return Ok(());
-            }
-            let document = DocumentRef {
-                source_id: source.source_id.clone(),
-                object_id: source.object_id.clone(),
-            };
-            if self
-                .read_optional_sqlite(&document, &source.version)?
-                .is_some()
-            {
-                return Ok(());
-            }
-        }
-        let record = || CorpusDocument {
-            evidence: object.evidence(LineRange {
-                start_line: 1,
-                end_line,
-            }),
-            content: object.content.clone(),
-            format: object.format(),
-            parsed_version: object.parsed_version.clone(),
-            metadata: object.metadata.clone(),
-        };
         if let Some(connection) = &self.sqlite {
-            let bytes = if has_json {
-                self.json
-                    .atomic_read(&path)
-                    .map_err(|_| Error::Io("Could not read the legacy corpus revision"))?
-            } else {
-                serde_json::to_vec(&record())
-                    .map_err(|_| Error::Io("Could not encode the corpus revision"))?
-            };
+            let bytes = self.sqlite_record(object, end_line)?;
             let connection = connection
                 .lock()
                 .map_err(|_| Error::Io("Could not lock the corpus database"))?;
@@ -148,8 +191,46 @@ impl Corpus {
                 .map_err(|error| sqlite_error(error, "Could not save the corpus revision"))?;
             return Ok(());
         }
-        storage::write_json(&self.json, &path, &record())
+        let path = record_path(&source.source_id, &source.object_id, &source.version);
+        if self
+            .json
+            .exists(&path)
+            .map_err(|_| Error::Io("Could not check the corpus revision"))?
+        {
+            return Ok(());
+        }
+        let document = DocumentRef {
+            source_id: source.source_id.clone(),
+            object_id: source.object_id.clone(),
+        };
+        if self
+            .read_optional_sqlite(&document, &source.version)?
+            .is_some()
+        {
+            return Ok(());
+        }
+        storage::write_json(&self.json, &path, &record(object, end_line))
             .map_err(|_| Error::Io("Could not save the corpus revision"))
+    }
+
+    /// The SQLite record for a revision. A legacy JSON revision is kept byte for byte.
+    fn sqlite_record(&self, object: &SourceObject, end_line: usize) -> Result<Vec<u8>> {
+        let source = &object.source;
+        if self.legacy_json {
+            let path = record_path(&source.source_id, &source.object_id, &source.version);
+            if self
+                .json
+                .exists(&path)
+                .map_err(|_| Error::Io("Could not check the corpus revision"))?
+            {
+                return self
+                    .json
+                    .atomic_read(&path)
+                    .map_err(|_| Error::Io("Could not read the legacy corpus revision"));
+            }
+        }
+        serde_json::to_vec(&record(object, end_line))
+            .map_err(|_| Error::Io("Could not encode the corpus revision"))
     }
 
     pub fn get(&self, document: &DocumentRef, version: &str) -> Result<Option<CorpusDocument>> {
@@ -327,6 +408,19 @@ fn sqlite_error(error: rusqlite::Error, message: &'static str) -> Error {
     match error.sqlite_error_code() {
         Some(ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) => Error::Busy,
         _ => Error::Io(message),
+    }
+}
+
+fn record(object: &SourceObject, end_line: usize) -> CorpusDocument {
+    CorpusDocument {
+        evidence: object.evidence(LineRange {
+            start_line: 1,
+            end_line,
+        }),
+        content: object.content.clone(),
+        format: object.format(),
+        parsed_version: object.parsed_version.clone(),
+        metadata: object.metadata.clone(),
     }
 }
 

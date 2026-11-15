@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, OpenOptions, OperationOptions, OptimizationReport, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -40,6 +40,7 @@ interface NativeDatabase {
   getCorpusDocument(sourceId: string, objectId: string, version: string, cancel: NativeCancellation): Promise<CorpusDocument | null>;
   getDocument(sourceId: string, objectId: string, cancel: NativeCancellation): Promise<ReadOutcome | null>;
   read(evidence: string, cancel: NativeCancellation): Promise<ReadOutcome>;
+  describeEvidence(evidence: string, cancel: NativeCancellation): Promise<(EvidenceExcerpt | null)[]>;
   wikiBuild(options: string, cancel: NativeCancellation): Promise<WikiPage>;
   wikiGet(id: string, cancel: NativeCancellation): Promise<WikiPage | null>;
   wikiAffected(sourceId: string | undefined, cancel: NativeCancellation): Promise<WikiImpact[]>;
@@ -448,6 +449,15 @@ export class Dunlin {
   async read(evidence: Evidence, { signal }: OperationOptions = {}): Promise<ReadOutcome> {
     const input = evidenceInput(evidence);
     return this.#run(signal, (database, cancel) => database.read(JSON.stringify(input), cancel));
+  }
+
+  /**
+   * Reads the text, character offsets and overlapping source locations of evidence ranges from
+   * their saved revisions, without loading whole documents into JavaScript. Missing revisions give null.
+   */
+  async describeEvidence(evidence: readonly Evidence[], { signal }: OperationOptions = {}): Promise<(EvidenceExcerpt | null)[]> {
+    const input = evidence.map(evidenceInput);
+    return this.#run(signal, (database, cancel) => database.describeEvidence(JSON.stringify(input), cancel));
   }
 
   async serveMcp({ transport, search, read, searchOnly }: McpOptions = { transport: 'stdio' }): Promise<McpHandle> {

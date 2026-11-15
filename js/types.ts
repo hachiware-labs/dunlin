@@ -81,6 +81,17 @@ export interface LineRange {
   endLine: number;
 }
 
+/** An evidence range read from its saved document revision. */
+export interface EvidenceExcerpt {
+  text: string;
+  /** Characters (Unicode code points) before the excerpt in the document. */
+  start: number;
+  /** start plus the characters in text. */
+  end: number;
+  /** Source locations, such as pages, that overlap the evidence lines. */
+  locations: SourceLocation[];
+}
+
 /** A document for Dunlin.chunkDocuments. */
 export interface ChunkDocument {
   content: string;

@@ -4,6 +4,7 @@ pub mod chunk;
 mod corpus;
 mod engine;
 mod evaluate;
+mod excerpt;
 mod explore;
 mod japanese;
 mod legacy_delete;
@@ -28,6 +29,7 @@ pub use evaluate::{
     CandidateMetrics, EvaluationCase, EvaluationOptions, EvaluationReport, EvaluationSet,
     OptimizationReport, OptimizeOptions, RelevantObject,
 };
+pub use excerpt::EvidenceExcerpt;
 pub use explore::{
     ExploreEvidence, ExploreIssue, ExploreOptions, ExploreOutcome, ExploreStop, ExploreVia,
 };
@@ -347,6 +349,55 @@ impl KnowledgeBase {
         let result = self.index.corpus.get(document, version)?;
         cancel.check()?;
         Ok(result)
+    }
+
+    /// Reads the text, character offsets and overlapping locations of evidence ranges from their
+    /// saved revisions. Each document is loaded once per call. Missing revisions give `None`.
+    pub fn describe_evidence(
+        &self,
+        items: &[Evidence],
+        cancel: &Cancellation,
+    ) -> Result<Vec<Option<EvidenceExcerpt>>> {
+        fn key(evidence: &Evidence) -> (&str, &str, &str) {
+            let source = &evidence.source;
+            (&source.source_id, &source.object_id, &source.version)
+        }
+        let mut keys = Vec::new();
+        for evidence in items {
+            source::validate_id(&evidence.source.source_id)?;
+            if !keys.contains(&key(evidence)) {
+                keys.push(key(evidence));
+            }
+        }
+        let load = |&(source_id, object_id, version): &(&str, &str, &str)| {
+            cancel.check()?;
+            let document = DocumentRef {
+                source_id: source_id.to_owned(),
+                object_id: object_id.to_owned(),
+            };
+            self.index.corpus.get(&document, version)
+        };
+        // Documents can be large; the addon parses them on the Rayon pool.
+        #[cfg(all(feature = "node", not(test)))]
+        let loaded: Vec<_> = {
+            use rayon::prelude::*;
+            keys.par_iter().map(load).collect::<Result<_>>()?
+        };
+        #[cfg(not(all(feature = "node", not(test))))]
+        let loaded: Vec<_> = keys.iter().map(load).collect::<Result<_>>()?;
+        items
+            .iter()
+            .map(|evidence| {
+                cancel.check()?;
+                let position = keys.iter().position(|item| *item == key(evidence));
+                position
+                    .and_then(|position| loaded[position].as_ref())
+                    .map(|document| {
+                        excerpt::excerpt(&document.content, &document.metadata.locations, evidence)
+                    })
+                    .transpose()
+            })
+            .collect()
     }
 
     pub fn read(&self, evidence: &Evidence, cancel: &Cancellation) -> Result<ReadOutcome> {

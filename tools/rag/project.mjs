@@ -977,7 +977,6 @@ async function searchProject(database, build, plan, query, project, options = {}
     async assemble({ result }, args) {
       const budget = budgetChars ?? args.budget_chars;
       const context = [];
-      const documents = new Map();
       let remaining = budget;
       let contextStop = result.totalHits > max ? 'candidate_limit' : 'exhausted';
       const hits = args.merge_overlaps ? mergedCandidates(result.hits) : result.hits;
@@ -1007,19 +1006,19 @@ async function searchProject(database, build, plan, query, project, options = {}
         if (evidence.byteRange) {
           excerpt.byteRange = { start: evidence.byteRange.start, end: evidence.byteRange.start + Buffer.byteLength(body) };
         }
-        const { source } = evidence;
-        const key = JSON.stringify([source.sourceId, source.objectId, source.version]);
-        if (!documents.has(key)) documents.set(key, await database.getCorpusDocument(source, source.version, { signal }));
-        const locations = documents.get(key)?.locations?.filter(({ range }) =>
-          range.startLine <= excerpt.range.endLine && range.endLine >= excerpt.range.startLine);
-        context.push({ evidence: excerpt, text: header + body, decorations, body_range: { start, end: start + bodySize },
-          ...(locations?.length && { source_locations: locations }) });
+        context.push({ evidence: excerpt, text: header + body, decorations, body_range: { start, end: start + bodySize } });
         remaining -= headingSize + bodySize;
         if (!remaining) { contextStop = 'budget'; break; }
       }
+      // One native call reads the context excerpts and the returned hits, loading each document once.
+      const returned = result.hits.slice(0, top);
+      const evidence = [...context.map((item) => item.evidence), ...returned.map((hit) => hit.evidence)];
+      const described = evidence.length ? await database.describeEvidence(evidence, { signal }) : [];
+      const located = context.map((item, i) => ({ ...item, ...(described[i]?.locations.length && { source_locations: described[i].locations }) }));
       return {
-        ...result, hits: result.hits.slice(0, top), status: result.hits.length < top ? 'fewer_matches' : 'complete',
-        context, context_text: context.map(({ text }) => text).join(''),
+        ...result, hits: returned, status: result.hits.length < top ? 'fewer_matches' : 'complete',
+        excerpts: { hits: described.slice(context.length), context: described.slice(0, context.length) },
+        context: located, context_text: located.map(({ text }) => text).join(''),
         context_chars: budget - remaining, budget_chars: budget, context_stop: contextStop, build_id: build.build_id,
         search_config_id: searchConfigId(plan, options, build, project),
       };

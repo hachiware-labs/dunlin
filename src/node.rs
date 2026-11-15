@@ -425,6 +425,21 @@ impl NativeDatabase {
     }
 
     #[napi]
+    pub fn describe_evidence(
+        &self,
+        evidence: String,
+        cancel: &NativeCancellation,
+    ) -> Result<AsyncTask<Job<Json>>> {
+        let database = self.database()?;
+        let cancel = cancel.0.clone();
+        Ok(task(move || {
+            let evidence: Vec<Evidence> = serde_json::from_str(&evidence)
+                .map_err(|_| crate::Error::Invalid("Invalid evidence"))?;
+            json(database.describe_evidence(&evidence, &cancel)?)
+        }))
+    }
+
+    #[napi]
     pub fn wiki_build(
         &self,
         options: String,

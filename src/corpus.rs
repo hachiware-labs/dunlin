@@ -154,11 +154,15 @@ impl Corpus {
 
     pub fn get(&self, document: &DocumentRef, version: &str) -> Result<Option<CorpusDocument>> {
         if let Some(connection) = &self.sqlite {
-            let connection = connection
-                .lock()
-                .map_err(|_| Error::Io("Could not lock the corpus database"))?;
-            if let Some(record) = read_sqlite(&connection, document, version)? {
-                return Ok(Some(record));
+            // Parse after releasing the lock so that parallel reads of large records overlap.
+            let bytes = {
+                let connection = connection
+                    .lock()
+                    .map_err(|_| Error::Io("Could not lock the corpus database"))?;
+                read_sqlite_bytes(&connection, document, version)?
+            };
+            if let Some(bytes) = bytes {
+                return parse_record(&bytes).map(Some);
             }
         }
         let path = record_path(&document.source_id, &document.object_id, version);
@@ -185,6 +189,7 @@ impl Corpus {
         let connection =
             Connection::open_with_flags(&self.sqlite_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .map_err(|error| sqlite_error(error, "Could not open the corpus database"))?;
+        map_reads(&connection)?;
         if schema_version(&connection)? == 0 {
             return Ok(None);
         }
@@ -198,6 +203,7 @@ fn open_sqlite(path: &Path, legacy: &Path, cancel: &Cancellation) -> Result<Conn
     connection
         .busy_timeout(Duration::from_secs(10))
         .map_err(|error| sqlite_error(error, "Could not configure the corpus database"))?;
+    map_reads(&connection)?;
     if schema_version(&connection)? == 0 {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -285,19 +291,36 @@ fn read_sqlite(
     document: &DocumentRef,
     version: &str,
 ) -> Result<Option<CorpusDocument>> {
-    let bytes: Option<Vec<u8>> = connection
+    read_sqlite_bytes(connection, document, version)?
+        .map(|bytes| parse_record(&bytes))
+        .transpose()
+}
+
+fn read_sqlite_bytes(
+    connection: &Connection,
+    document: &DocumentRef,
+    version: &str,
+) -> Result<Option<Vec<u8>>> {
+    connection
         .query_row(
             "SELECT record FROM revisions WHERE source_id = ?1 AND object_id = ?2 AND version = ?3",
             params![document.source_id, document.object_id, version],
             |row| row.get(0),
         )
         .optional()
-        .map_err(|error| sqlite_error(error, "Could not read the corpus revision"))?;
-    bytes
-        .map(|bytes| {
-            serde_json::from_slice(&bytes).map_err(|_| Error::Io("Invalid SQLite corpus revision"))
-        })
-        .transpose()
+        .map_err(|error| sqlite_error(error, "Could not read the corpus revision"))
+}
+
+fn parse_record(bytes: &[u8]) -> Result<CorpusDocument> {
+    serde_json::from_slice(bytes).map_err(|_| Error::Io("Invalid SQLite corpus revision"))
+}
+
+/// Revisions hold whole documents, which span many overflow pages. Reading them through a memory
+/// map avoids one system call per page, which made a 0.5 MB record take about 2 ms on Windows.
+fn map_reads(connection: &Connection) -> Result<()> {
+    connection
+        .pragma_update(None, "mmap_size", 256 * 1024 * 1024)
+        .map_err(|error| sqlite_error(error, "Could not configure the corpus database"))
 }
 
 fn sqlite_error(error: rusqlite::Error, message: &'static str) -> Error {

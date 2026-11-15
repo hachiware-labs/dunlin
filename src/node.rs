@@ -276,6 +276,65 @@ pub fn store_originals(
     })
 }
 
+/// Reads `Dunlinfile.yaml` text. Returns `{ syntaxError: { line, message } }`, or
+/// `{ config, lines }` where `lines` lists `[path, line]` for every value.
+#[napi]
+pub fn parse_config(text: String) -> Result<String> {
+    use crate::yaml_config::{PathPart, parse_config};
+    use serde::ser::{SerializeMap, Serializer};
+
+    struct Path<'a>(&'a [PathPart]);
+    impl Serialize for Path<'_> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+            use serde::ser::SerializeSeq;
+            let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+            for part in self.0 {
+                match part {
+                    PathPart::Key(key) => seq.serialize_element(key)?,
+                    PathPart::Index(index) => seq.serialize_element(index)?,
+                }
+            }
+            seq.end()
+        }
+    }
+    struct Output(
+        std::result::Result<crate::yaml_config::ParsedConfig, crate::yaml_config::SyntaxError>,
+    );
+    impl Serialize for Output {
+        fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+            let mut map = serializer.serialize_map(None)?;
+            match &self.0 {
+                Ok(parsed) => {
+                    map.serialize_entry("config", &parsed.value)?;
+                    let lines: Vec<(Path<'_>, usize)> = parsed
+                        .lines
+                        .iter()
+                        .map(|(path, line)| (Path(path), *line))
+                        .collect();
+                    map.serialize_entry("lines", &lines)?;
+                }
+                Err(error) => {
+                    #[derive(Serialize)]
+                    struct Syntax<'a> {
+                        line: Option<usize>,
+                        message: &'a str,
+                    }
+                    map.serialize_entry(
+                        "syntaxError",
+                        &Syntax {
+                            line: error.line,
+                            message: error.message,
+                        },
+                    )?;
+                }
+            }
+            map.end()
+        }
+    }
+    serde_json::to_string(&Output(parse_config(&text)))
+        .map_err(|_| native_error(crate::Error::Index))
+}
+
 /// Describes every registered module as JSON, in registration order.
 #[napi]
 pub fn describe_modules() -> Result<String> {

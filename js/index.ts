@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { DunlinError } from './types.js';
 import type {
   ChunkDocument, ChunkOptions, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
-  McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, OptimizeOptions, ReadOutcome, RetrievalMethod,
+  McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
 } from './types.js';
@@ -58,6 +58,7 @@ interface NativeBinding {
   rankVectors(path: string, request: string, cancel: NativeCancellation): Promise<{ i: number; score: number }[]>;
   chunkDocuments(request: string): string;
   describeModules(): string;
+  parseConfig(text: string): string;
   readModuleArgs(name: string, args: string): string;
   readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
   storeOriginals(directory: string, files: { sha256: string; bytes: Uint8Array }[], cancel: NativeCancellation): Promise<(string | null)[]>;
@@ -297,6 +298,20 @@ export class Dunlin {
   static async rankVectors(path: string, options: { needle: readonly number[]; positions?: readonly number[]; rows: number; limit: number },
     { signal }: OperationOptions = {}): Promise<{ i: number; score: number }[]> {
     return cancellable(signal, (cancel) => native().rankVectors(resolve(path), JSON.stringify(options), cancel));
+  }
+
+  /**
+   * Read Dunlinfile.yaml text with the YAML 1.2 core schema. Returns the configuration and the
+   * start line of every value, or the line and message of a syntax error. Aliases, duplicate keys
+   * and more than one document are errors. NaN and infinities are returned as numbers.
+   */
+  static parseConfig(text: string): ParsedConfig {
+    try {
+      return JSON.parse(native().parseConfig(text), (_key, value: unknown) =>
+        value && typeof value === 'object' && '$dunlin_nonfinite' in value ? Number((value as { $dunlin_nonfinite: string }).$dunlin_nonfinite) : value) as ParsedConfig;
+    } catch (error) {
+      throw translateNativeError(error);
+    }
   }
 
   /** Describe every registered module, in registration order. */

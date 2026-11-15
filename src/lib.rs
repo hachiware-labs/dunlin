@@ -16,6 +16,7 @@ mod source;
 mod storage;
 mod sync;
 mod wiki;
+pub mod yaml_config;
 
 #[cfg(all(feature = "node", not(test)))]
 mod node;

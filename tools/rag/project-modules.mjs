@@ -1,4 +1,4 @@
-import { LineCounter, parseDocument, stringify } from 'yaml';
+import { stringify } from 'yaml';
 import { z } from 'zod';
 import { resolve, dirname } from 'node:path';
 
@@ -137,24 +137,21 @@ export function writeTemplate(config) {
     '# ' + sectionComments[section] + '\n' + text);
 }
 
+/** Reads Dunlinfile.yaml in Rust. `line(path)` gives the line of the longest existing prefix of path. */
 export function parseConfig(text) {
-  const counter = new LineCounter();
-  const yaml = parseDocument(text, { lineCounter: counter });
-  if (yaml.errors.length) {
-    const error = yaml.errors[0];
-    return { syntaxError: { line: error.linePos?.[0]?.line ?? null, message: 'Invalid YAML syntax or duplicate key.' } };
-  }
-  let config;
-  try { config = yaml.toJS({ maxAliasCount: 0 }); }
-  catch { return { syntaxError: { line: null, message: 'YAML aliases are unsupported.' } }; }
+  const parsed = Dunlin.parseConfig(text);
+  if (parsed.syntaxError) return { syntaxError: parsed.syntaxError };
+  // Array positions and keys share one form, so ['modules', 0] and ['modules', '0'] find the same line.
+  const key = (path) => JSON.stringify(path.map(String));
+  const lines = new Map(parsed.lines.map(([path, line]) => [key(path), line]));
   const line = (path) => {
     for (let length = path.length; length > 0; length--) {
-      const node = yaml.getIn(path.slice(0, length), true);
-      if (node?.range) return counter.linePos(node.range[0]).line;
+      const found = lines.get(key(path.slice(0, length)));
+      if (found !== undefined) return found;
     }
     return null;
   };
-  return { config, line };
+  return { config: parsed.config, line };
 }
 
 function isMapping(value) {

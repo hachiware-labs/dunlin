@@ -30,6 +30,7 @@ tantivy = { version = "0.27", default-features = false, features = ["mmap", "lz4
 unicode-segmentation = "1.13"
 url = "2"
 walkdir = "2"
+yaml-rust2 = { version = "0.13.0", default-features = false }
 
 [build-dependencies]
 napi-build = "2"

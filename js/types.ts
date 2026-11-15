@@ -81,6 +81,11 @@ export interface LineRange {
   endLine: number;
 }
 
+/** Dunlin.parseConfig: the configuration and value lines, or a syntax error. */
+export type ParsedConfig =
+  | { config: unknown; lines: [(string | number)[], number][]; syntaxError?: undefined }
+  | { syntaxError: { line: number | null; message: string }; config?: undefined; lines?: undefined };
+
 /** How dunlin modules describe prints one module argument. */
 export interface ModuleArgInfo {
   type?: string;

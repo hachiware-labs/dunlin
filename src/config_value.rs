@@ -54,8 +54,11 @@ impl Serialize for ConfigValue {
             Self::Null => serializer.serialize_unit(),
             Self::Bool(value) => serializer.serialize_bool(*value),
             // Whole numbers print without a fraction, as JavaScript does.
+            // Negative zero prints as -0.0 so that JavaScript reads it back as -0.
             Self::Number(value)
-                if value.fract() == 0.0 && value.abs() < 9.007_199_254_740_992e15 =>
+                if value.fract() == 0.0
+                    && value.abs() < 9.007_199_254_740_992e15
+                    && !(*value == 0.0 && value.is_sign_negative()) =>
             {
                 serializer.serialize_i64(*value as i64)
             }

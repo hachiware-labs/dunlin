@@ -24,6 +24,8 @@ pub mod yaml_config;
 mod node;
 #[cfg(any(feature = "node", test))]
 mod source_files;
+#[cfg(any(feature = "node", test))]
+mod source_load;
 #[cfg(all(feature = "node", not(test)))]
 mod vector;
 

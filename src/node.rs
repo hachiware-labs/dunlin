@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use napi::bindgen_prelude::{
-    AsyncTask, Buffer, Env, Error, Result, Status, Task, ToNapiValue, TypeName, ValueType,
+    AsyncTask, Buffer, Env, Error, Function, Object, Result, Status, Task, ToNapiValue, TypeName,
+    Unknown, ValueType,
 };
 use napi::sys::{napi_env, napi_value};
 use napi_derive::napi;
@@ -521,6 +522,146 @@ pub fn trial_limits_valid(limits: String) -> Result<bool> {
     Ok(crate::config_check::trial_limits_valid(&config_input(
         &limits,
     )?))
+}
+
+/// Arguments for host calls: call ID, kind (`parse` or `progress`), JSON arguments, bytes.
+type HostArgs = (u32, String, String, Buffer);
+type HostFunction = napi::threadsafe_function::ThreadsafeFunction<
+    HostArgs,
+    Unknown<'static>,
+    HostArgs,
+    Status,
+    false,
+>;
+
+/// Senders for host calls waiting for JavaScript, by call ID.
+type HostCalls = std::sync::Mutex<
+    std::collections::HashMap<u32, std::sync::mpsc::Sender<std::result::Result<String, String>>>,
+>;
+
+fn host_calls() -> &'static HostCalls {
+    static CALLS: std::sync::OnceLock<HostCalls> = std::sync::OnceLock::new();
+    CALLS.get_or_init(Default::default)
+}
+
+static NEXT_HOST_CALL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+/// Delivers the result of a host call. JavaScript calls this when its parser finishes.
+#[napi]
+pub fn complete_host_call(id: u32, result: Option<String>, error: Option<String>) {
+    let sender = host_calls()
+        .lock()
+        .ok()
+        .and_then(|mut calls| calls.remove(&id));
+    if let Some(sender) = sender {
+        let _ = sender.send(match (result, error) {
+            (_, Some(error)) => Err(error),
+            (Some(result), None) => Ok(result),
+            (None, None) => Err("The parser returned no result".into()),
+        });
+    }
+}
+
+struct JsHost {
+    function: HostFunction,
+}
+
+impl crate::source_load::Host for JsHost {
+    fn parse(
+        &self,
+        file: &crate::source_load::LoadFile,
+        bytes: &[u8],
+    ) -> std::result::Result<crate::config_value::ConfigValue, String> {
+        use napi::threadsafe_function::ThreadsafeFunctionCallMode;
+        let id = NEXT_HOST_CALL.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        host_calls()
+            .lock()
+            .map_err(|_| "Could not register the parser call".to_owned())?
+            .insert(id, sender);
+        let name = std::path::Path::new(&file.file)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let args = serde_json::json!({
+            "kind": file.kind,
+            "name": name,
+            "file": file.file,
+            "id": file.id,
+            "objectId": file.object_id,
+            "route": file.route,
+        })
+        .to_string();
+        let status = self.function.call(
+            (id, "parse".into(), args, Buffer::from(bytes.to_vec())),
+            ThreadsafeFunctionCallMode::Blocking,
+        );
+        if status != Status::Ok {
+            if let Ok(mut calls) = host_calls().lock() {
+                calls.remove(&id);
+            }
+            return Err("Could not call the JavaScript parser".into());
+        }
+        let text = receiver
+            .recv()
+            .map_err(|_| "The JavaScript parser stopped".to_owned())??;
+        serde_json::from_str(&text)
+            .map_err(|_| "The JavaScript parser returned invalid JSON".to_owned())
+    }
+
+    fn progress(&self, completed: usize) {
+        use napi::threadsafe_function::ThreadsafeFunctionCallMode;
+        self.function.call(
+            (
+                0,
+                "progress".into(),
+                completed.to_string(),
+                Buffer::from(Vec::new()),
+            ),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+    }
+}
+
+/// Loads source files for the `source` stage (see `source_load`). `host(id, kind, args, bytes)`
+/// parses the kinds Rust does not read and answers with `completeHostCall`. Resolves to
+/// `{ documents, warnings }` as JSON.
+#[napi]
+pub fn load_corpus<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = JsHost { function };
+        let outcome = serde_json::from_str::<crate::source_load::LoadRequest>(&request)
+            .map_err(|_| crate::source_load::LoadError {
+                message: "Invalid load request".into(),
+                aborted: false,
+            })
+            .and_then(|request| crate::source_load::load(&request, &host, &cancel));
+        match outcome {
+            Ok(loaded) => {
+                // Built by hand: serde_json::Value would sort the keys of each document.
+                let text = format!(
+                    "{{\"documents\":{},\"warnings\":{}}}",
+                    serde_json::to_string(&loaded.documents).unwrap_or_default(),
+                    serde_json::to_string(&loaded.warnings).unwrap_or_default()
+                );
+                deferred.resolve(move |_| Ok(text));
+            }
+            Err(error) if error.aborted => deferred.reject(native_error(crate::Error::Aborted)),
+            Err(error) => deferred.reject(Error::new(
+                Status::GenericFailure,
+                format!("LOAD_FAILED|{}", error.message),
+            )),
+        }
+    });
+    Ok(promise)
 }
 
 /// Describes every registered module as JSON, in registration order.

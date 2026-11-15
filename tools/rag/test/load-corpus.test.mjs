@@ -11,16 +11,21 @@ import { defaultRoutes } from '../project-parsers.mjs';
 
 async function fixture(t, files) {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-load-'));
-  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const docs = join(root, 'docs');
   await mkdir(docs);
   for (const [name, body] of files) await writeFile(join(docs, name), body);
-  const db = new DatabaseSync(':memory:');
+  // The loader opens state.sqlite itself, so the test uses a file.
+  const state = join(root, 'state.sqlite');
+  const db = new DatabaseSync(state);
   db.exec('CREATE TABLE loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL)');
-  t.after(() => db.close());
+  // Close the database before removing its directory.
+  t.after(() => {
+    db.close();
+    return rm(root, { recursive: true, force: true, maxRetries: 5 });
+  });
   const sources = [{ id: 'docs', files: files.map(([name]) => ({ file: join(docs, name), objectId: name })) }];
   const artifacts = join(root, 'artifacts');
-  const load = () => loadCorpus(sources, { artifacts }, [], [], db, false, defaultRoutes(), undefined, root);
+  const load = () => loadCorpus(sources, { artifacts, state }, [], [], db, false, defaultRoutes(), undefined, root);
   const shared = join(artifacts, 'originals', 'shared');
   return { db, load, shared };
 }

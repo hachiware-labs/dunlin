@@ -81,6 +81,42 @@ export interface LineRange {
   endLine: number;
 }
 
+/** A file for Dunlin.loadCorpus. */
+export interface LoadCorpusFile {
+  id: string;
+  file: string;
+  objectId: string;
+  /** text, html, office, pdf, ocr or command. Only text is read in Rust; the rest go to the host. */
+  kind: string;
+  /** The parser module instance, reported in warnings. */
+  route: string;
+  /** For command files, the identity that keys the extraction cache. */
+  command?: unknown;
+  /** Set by Rust for host calls: the file name without directories. */
+  name?: string;
+}
+
+export interface LoadCorpusRequest {
+  /** The project's state.sqlite. */
+  state: string;
+  /** The shared originals directory. */
+  originals: string;
+  force?: boolean;
+  /** The managed OCR version, part of the cache key for OCR files. */
+  ocrVersion: string;
+  files: LoadCorpusFile[];
+}
+
+export interface LoadCorpusHost {
+  parse(file: LoadCorpusFile, bytes: Buffer): Promise<unknown> | unknown;
+  progress?(completed: number): void;
+}
+
+export interface LoadedCorpus {
+  documents: Record<string, unknown>[];
+  warnings: { code: string; section: string; module: string; target: string; message: string }[];
+}
+
 /** A configuration diagnostic (spec 26.8). */
 export interface ConfigDiagnostic {
   code: string;
@@ -420,6 +456,7 @@ export interface McpHttpHandle extends McpHandle {
 }
 
 export type DunlinErrorCode =
+  | 'LOAD_FAILED'
   | 'INVALID_ARGUMENT'
   | 'IO_ERROR'
   | 'BUSY'

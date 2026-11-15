@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -63,6 +63,8 @@ interface NativeBinding {
   validateServe(type: string, input: string): string;
   checkTools(tools: string, catalog: string): string;
   trialLimitsValid(limits: string): boolean;
+  loadCorpus(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  completeHostCall(id: number, result: string | null, error: string | null): void;
   readModuleArgs(name: string, args: string): string;
   readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
   storeOriginals(directory: string, files: { sha256: string; bytes: Uint8Array }[], cancel: NativeCancellation): Promise<(string | null)[]>;
@@ -107,7 +109,7 @@ async function cancellable<T>(
 
 function translateNativeError(error: unknown): DunlinError {
   if (error instanceof DunlinError) return error;
-  const match = error instanceof Error && /^(INVALID_ARGUMENT|IO_ERROR|BUSY|ABORTED|TIMEOUT|NOT_FOUND|STALE_EVIDENCE|INDEX_ERROR|PLAN_NOT_FOUND|PLAN_ERROR|WIKI_NOT_FOUND|WIKI_ERROR)\|(.+)$/u.exec(error.message);
+  const match = error instanceof Error && /^(LOAD_FAILED|INVALID_ARGUMENT|IO_ERROR|BUSY|ABORTED|TIMEOUT|NOT_FOUND|STALE_EVIDENCE|INDEX_ERROR|PLAN_NOT_FOUND|PLAN_ERROR|WIKI_NOT_FOUND|WIKI_ERROR)\|(.+)$/u.exec(error.message);
   return match ? new DunlinError(match[1] as DunlinErrorCode, match[2]) : new DunlinError('INDEX_ERROR', 'The native operation failed');
 }
 
@@ -358,6 +360,28 @@ export class Dunlin {
     } catch (error) {
       throw translateNativeError(error);
     }
+  }
+
+  /**
+   * Load source files for the source stage: read, hash, look up the extraction cache in state.sqlite,
+   * decode text files, store originals and cache rows. Files of other kinds go to `host.parse`,
+   * which returns `{ content, format, locations?, parser? }`. Documents keep the input order.
+   */
+  static async loadCorpus(request: LoadCorpusRequest, host: LoadCorpusHost, { signal }: OperationOptions = {}): Promise<LoadedCorpus> {
+    // The native side passes its arguments as one array.
+    const callback = (...raw: unknown[]): void => {
+      const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
+      if (kind === 'progress') {
+        host.progress?.(Number(args));
+        return;
+      }
+      Promise.resolve()
+        .then(() => host.parse(JSON.parse(args) as LoadCorpusFile, bytes))
+        .then((result) => native().completeHostCall(id, configJson(result), null),
+          (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
+    };
+    const text = await cancellable(signal, (cancel) => native().loadCorpus(JSON.stringify(request), callback, cancel));
+    return JSON.parse(text) as LoadedCorpus;
   }
 
   /** Describe every registered module, in registration order. */

@@ -31,8 +31,8 @@ MCP・RAG のモジュールは `tools/rag/project-modules.mjs` の登録箇所�
 CLI や初期設定を変更したら、リファレンスを再生成します。
 
 ```sh
-node scripts/generate-docs.mjs
-node scripts/generate-docs.mjs --check
+npm run docs
+npm run docs:check
 ```
 
 変更を共有する場合は、利用者に見える差と、実行した確認を記載します。仕様や既存プロジェクトへの影響は該当するガイドにも反映します。 [実装構成](docs/architecture.md) · [受け入れ確認](docs/acceptance.md)

@@ -28,7 +28,7 @@ dunlin ask <question> [--project <directory>] [--build <ref>] [--config <file>] 
 dunlin serve [--project <directory>] [--transport <http|stdio>] [--host <address>] [--port <port>] [--print-config [--json]]
 dunlin status [--project <directory>] [--json]
 dunlin use <build> [--project <directory>] [--json]
-dunlin tag <name> <build> [--move] [--project <directory>] [--json]
+dunlin tag <name> [build] [--move] [--project <directory>] [--json]
 ```
 
 ## 評価と辞書
@@ -56,6 +56,18 @@ dunlin save-answer <query-run> <page> <title> [--project <directory>] [--json]
 dunlin archive <page> [--project <directory>] [--restore] [--json]
 dunlin undo <work-id> [--project <directory>] [--json]
 ```
+
+## 主な引数
+
+| 引数 | 用途 |
+| --- | --- |
+| `--project <directory>` | 操作するプロジェクトを指定します。 |
+| `--config <file>` | 試行に使う候補設定を指定します。 |
+| `--from <stage>` | 保存済みの前段の結果を使い、指定した段階から構築します。 |
+| `--input <build>` | 構築の入力となる既存ビルドを固定します。 |
+| `--tag <name>` | 試行ビルドまたは評価レポートに名前を付けます。 |
+| `--build <ref>` | 検索や評価の対象となるビルドのタグまたは ID を選びます。 |
+| `--json` | 機械処理向けの結果を出します。 |
 
 ## 評価のサブコマンドと引数
 

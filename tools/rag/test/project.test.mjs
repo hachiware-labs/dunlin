@@ -71,21 +71,25 @@ test('copies global model defaults into new projects and accepts explicit overri
 
   await run('init', 'mcp', 'kb');
   const mcp = parse(await read('kb'));
-  assert.deepEqual(mcp.models, { embedder: {
+  assert.equal(mcp.models, undefined);
+  assert.deepEqual(mcp.index.modules.map(({ use }) => use), ['index.keyword']);
+  await run('init', 'mcp', 'hybrid', '--embedding-model', 'local-embed');
+  const hybrid = parse(await read('hybrid'));
+  assert.deepEqual(hybrid.models, { embedder: {
     provider: 'ollama', kind: 'embedding', base_url: 'http://localhost:11434', model: 'local-embed',
   } });
-  assert.deepEqual(mcp.index.modules.map(({ use }) => use), ['index.keyword', 'index.vector']);
-  assert.deepEqual(mcp.index.modules[1].with, { model: 'embedder' });
-  assert.deepEqual(mcp.search.modules.map(({ use }) => use),
+  assert.deepEqual(hybrid.index.modules.map(({ use }) => use), ['index.keyword', 'index.vector']);
+  assert.deepEqual(hybrid.index.modules[1].with, { model: 'embedder' });
+  assert.deepEqual(hybrid.search.modules.map(({ use }) => use),
     ['query.normalize', 'retrieval.keyword', 'retrieval.vector', 'fusion.rrf', 'context.assemble']);
-  assert.deepEqual(mcp.search.modules[2].with, { model: 'embedder', top_k: 10 });
-  assert.deepEqual(mcp.search.modules[3].with, { k: 60 });
+  assert.deepEqual(hybrid.search.modules[2].with, { model: 'embedder', top_k: 10 });
+  assert.deepEqual(hybrid.search.modules[3].with, { k: 60 });
 
   await run('init', 'rag', 'qa');
   const rag = await read('qa');
   assert.deepEqual(parse(rag).models, { answerer: {
     provider: 'openai', kind: 'chat', base_url: 'https://api.openai.com/v1', api_key_env: 'OPENAI_API_KEY', model: 'answer-model',
-  }, ...mcp.models });
+  }, ...hybrid.models });
   assert.equal((await json('--project', 'qa', 'validate')).data.valid, true);
   for (const type of ['wiki', 'para']) {
     await run('init', type, type);
@@ -141,13 +145,17 @@ test('copies the global OCR selection into each project type and accepts init ov
   assert.match((await run('config', 'list')).stdout, /^ocr +lightonocr$/mu);
   const { name, version } = (await json('add', '--list')).data.find(({ name }) => name === 'ocr');
 
-  for (const type of ['rag', 'mcp', 'wiki', 'para']) {
+  for (const type of ['rag', 'wiki', 'para']) {
     await run('init', type, type);
     const config = await read(type);
     assert.equal(loader(config).with.ocr, 'loader.ocr');
     assert.deepEqual(config.tools, [{ name, version }]);
     assert.equal((await json('--project', type, 'validate')).data.valid, true);
   }
+  await run('init', 'mcp', 'mcp');
+  assert.equal(loader(await read('mcp')).with.ocr, 'none');
+  await run('init', 'mcp', 'mcp-ocr', '--ocr');
+  assert.equal(loader(await read('mcp-ocr')).with.ocr, 'loader.ocr');
   assert.equal((await read('wiki')).models.writer.model, 'local-writer');
   await run('init', 'rag', 'skip-ocr', '--no-ocr');
   assert.equal(loader(await read('skip-ocr')).with.ocr, 'none');

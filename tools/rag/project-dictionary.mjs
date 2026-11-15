@@ -163,17 +163,17 @@ export function dictionaryText(data) {
   const displayTokens = (tokens) => tokens.map(({ surface, term }) => term === surface ? surface
     : `${surface} (${term ?? 'ignored'})`).join(' / ');
   return [
-    `Report ${data.report_id}`,
-    `Questions with dictionary candidates ${counts.dictionary} · partial matches ${counts.partial_match} · outside dictionary scope ${counts.other} · unresolved ${counts.unresolved}`,
+    `評価レポート ${data.report_id}`,
+    `辞書候補 ${counts.dictionary}件 · 部分一致 ${counts.partial_match}件 · 辞書対象外 ${counts.other}件 · 未解決 ${counts.unresolved}件`,
     ...candidates.flatMap((candidate) => [candidate.csv, ...candidate.examples.flatMap((entry) => [
       `  ${entry.doc} — ${entry.quote}`,
-      `  Question terms ${displayTokens(entry.question_tokens)}`,
-      `  Evidence terms ${displayTokens(entry.evidence_tokens)}`,
-      `  Whole query ${entry.queries.whole}`,
-      `  Partial query ${entry.queries.partial}`,
+      `  質問の分かち書き ${displayTokens(entry.question_tokens)}`,
+      `  根拠の分かち書き ${displayTokens(entry.evidence_tokens)}`,
+      `  語全体の質問 ${entry.queries.whole}`,
+      `  部分語の質問 ${entry.queries.partial}`,
     ])]),
     ...findings.map(({ classification, reason, doc, question }) =>
-      `  ${classification === 'other' ? 'Outside dictionary scope' : 'Unresolved'} (${reason}) — ${question} [${doc}]`),
+      `  ${classification === 'other' ? '辞書対象外' : '未解決'} (${reason}) — ${question} [${doc}]`),
     ...(data.hint ? [data.hint] : []),
   ].join('\n');
 }

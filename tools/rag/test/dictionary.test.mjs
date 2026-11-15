@@ -40,6 +40,7 @@ test('diagnoses evaluation misses and measures whole and partial queries against
   buildConfig.search.modules.find(({ use }) => use === 'context.assemble').with.retrieval = 'top_k';
   await writeFile(configPath, stringify(buildConfig));
   const baseline = await json('build');
+  assert.equal((await json('tag', 'baseline-build')).build_id, baseline.build_id);
   for (const [question, doc, expected] of [
     ['東京大学', target, quote],
     ['みなとの仕様は', 'docs:device.txt', '製品名はみなとです。'],
@@ -73,8 +74,8 @@ test('diagnoses evaluation misses and measures whole and partial queries against
   assert.deepEqual(example.evidence_tokens.map(({ surface }) => surface), ['東京', '大学']);
   assert.deepEqual(example.queries, { whole: '東京大学', partial: '大学' });
   const text = (await run('--project', 'kb', 'dictionary', 'suggest')).stdout;
-  assert.match(text, /partial matches 1/u);
-  assert.match(text, /Whole query 東京大学\s+Partial query 大学/u);
+  assert.match(text, /部分一致 1件/u);
+  assert.match(text, /語全体の質問 東京大学\s+部分語の質問 大学/u);
 
   await mkdir(join(root, 'kb', 'candidates'));
   const candidateFile = 'kb/candidates/dict.yaml';
@@ -94,7 +95,7 @@ test('diagnoses evaluation misses and measures whole and partial queries against
   assert.equal(await readFile(configPath, 'utf8'), active);
   assert.deepEqual(added, await json('dictionary', 'add', 'selected.csv', '--config', candidateFile));
 
-  const trial = await json('build', '--from', 'index', '--input', baseline.build_id, '--config', candidateFile, '--tag', 'dict');
+  const trial = await json('build', '--from', 'index', '--input', 'baseline-build', '--config', candidateFile, '--tag', 'dict');
   assert.equal(trial.source_id, baseline.source_id);
   assert.equal(trial.transform_id, baseline.transform_id);
   assert.equal(trial.serving_changed, false);

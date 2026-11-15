@@ -89,7 +89,7 @@ export async function initialSettings(type, values) {
   const current = await readGlobal(globalPath());
   const enabled = { embedding: isSearchProject(type), llm: type !== 'mcp' };
   if (values.ocr && values['no-ocr']) throw fail('INVALID_ARGUMENT', 'Use either --ocr or --no-ocr.');
-  const selections = { ocr: !values['no-ocr'] && (values.ocr || current.ocr !== undefined) };
+  const selections = { ocr: !values['no-ocr'] && (values.ocr || type !== 'mcp' && current.ocr !== undefined) };
   for (const role of ['embedding', 'llm']) {
     const model = values[role + '-model'];
     const provider = values[role + '-provider'];
@@ -108,7 +108,7 @@ export async function initialSettings(type, values) {
     }
     const checked = model === undefined ? null : modelName.safeParse(model);
     if (checked && !checked.success) throw fail('INVALID_ARGUMENT', 'Specify a nonempty --' + role + '-model.');
-    const fallback = current[role];
+    const fallback = type === 'mcp' && role === 'embedding' && !specified ? undefined : current[role];
     const selectedProvider = provider ?? fallback?.provider ?? 'ollama';
     const selectedModel = checked?.data ?? (selectedProvider === fallback?.provider ? fallback.model : undefined);
     if (!selectedModel && role === 'embedding') {

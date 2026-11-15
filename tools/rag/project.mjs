@@ -51,7 +51,7 @@ export const projectCommands = {
   add: 'dunlin add <tool> | dunlin add --list [--project <directory>] [--json]',
   remove: 'dunlin remove <tool> [--project <directory>] [--json]',
   use: 'dunlin use <build> [--project <directory>] [--json]',
-  tag: 'dunlin tag <name> <build> [--move] [--project <directory>] [--json]',
+  tag: 'dunlin tag <name> [build] [--move] [--project <directory>] [--json]',
   'eval-data': 'dunlin eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]',
   eval: 'dunlin eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]',
   report: 'dunlin report <show|list|compare> [--project <directory>] [--json]',
@@ -655,10 +655,17 @@ async function tagBuild(project, name, ref, move) {
   ensureStages(db);
   db.exec('BEGIN IMMEDIATE');
   try {
-    const build = currentBuild(project.paths, true, ref);
+    const selected = ref ?? currentBuild(project.paths).build_id;
+    const build = currentBuild(project.paths, true, selected);
+    if (ref === undefined) build.search = moduleSettings(project.plan.search);
     const byTag = db.prepare('SELECT config FROM build_config WHERE ref = ?').get('tag:' + ref);
     const stored = byTag ?? db.prepare('SELECT config FROM build_config WHERE ref = ?').get(build.build_id);
     if (!stored) throw new ProjectError(3, 'CONFIG_REQUIRED', 'Build the candidate again to save its configuration.');
+    const configuration = JSON.parse(stored.config);
+    if (ref === undefined) {
+      configuration.search = project.config.search;
+      configuration.models = project.config.models;
+    }
     const existing = db.prepare('SELECT build_id, settings FROM build_tags JOIN tag_search USING (name) WHERE name = ?').get(name);
     const settings = JSON.stringify(build.search);
     if (existing && (existing.build_id !== build.build_id || existing.settings !== settings) && !move) {
@@ -667,7 +674,7 @@ async function tagBuild(project, name, ref, move) {
     if (!existing || existing.build_id !== build.build_id || existing.settings !== settings) {
       db.prepare('INSERT OR REPLACE INTO build_tags VALUES (?, ?)').run(name, build.build_id);
       db.prepare('INSERT OR REPLACE INTO tag_search VALUES (?, ?)').run(name, settings);
-      db.prepare('INSERT OR REPLACE INTO build_config VALUES (?, ?)').run('tag:' + name, stored.config);
+      db.prepare('INSERT OR REPLACE INTO build_config VALUES (?, ?)').run('tag:' + name, JSON.stringify(configuration));
       db.prepare('INSERT INTO tag_history (name, previous, target) VALUES (?, ?, ?)').run(name,
         existing ? JSON.stringify({ build_id: existing.build_id, search: JSON.parse(existing.settings) }) : null,
         JSON.stringify({ build_id: build.build_id, search: build.search }));
@@ -784,6 +791,7 @@ async function buildProject(project, command, runId, values, warnings) {
         let source;
         for (const stage of selected) {
           trialCheckpoint();
+          const stageStart = performance.now();
           if (stage === 'index') {
             const transformed = buildInput(db, 'transform', selected.includes('transform') ? null : fixed);
             if (!selected.includes('transform') && latestStageId(db, 'source') !== transformed.source_id) {
@@ -797,7 +805,7 @@ async function buildProject(project, command, runId, values, warnings) {
               force: values.force, tag: values.tag, generation, warnings, signal,
               activate: command === 'build' && values.until === undefined && !values.config && !values.tag,
             });
-            results.index = { id: summary.build_id, reused: summary.reused };
+            results.index = { id: summary.build_id, reused: summary.reused, elapsed_ms: Math.round(performance.now() - stageStart) };
             return { ...summary, stages: results, elapsed_ms: Math.round(performance.now() - start) };
           }
           const { output, reused } = stage === 'source'
@@ -806,7 +814,7 @@ async function buildProject(project, command, runId, values, warnings) {
           trialCheckpoint();
           saveStage(db, stage, output, reused);
           if (stage === 'source') source = output;
-          results[stage] = { id: output.id, reused };
+          results[stage] = { id: output.id, reused, elapsed_ms: Math.round(performance.now() - stageStart) };
         }
         return { stages: results, ...(source && { files: source.files, skipped: source.skipped }), serving_changed: false, elapsed_ms: Math.round(performance.now() - start) };
       };
@@ -1269,7 +1277,8 @@ export async function runProjectCommand(command, args, explicitProject) {
       : command === 'dictionary' ? { suggest: 1, add: 2 }
       : command === 'evidence-map' ? { create: 1, list: 1, show: 2, export: 2, import: 2, confirm: 2 } : null;
     const count = actions ? (Object.hasOwn(actions, positionals[0]) ? actions[positionals[0]] : -1)
-      : ['init', 'cite', 'issue', 'tag'].includes(command) || command === 'instruct' && !values.persistent
+      : command === 'tag' ? (positionals.length === 1 ? 1 : 2)
+      : ['init', 'cite', 'issue'].includes(command) || command === 'instruct' && !values.persistent
         || (command === 'modules' && positionals[0] === 'describe') ? 2
       : command === 'save-answer' ? 3
       : command === 'ingress' ? (values.pending ? 0 : positionals.length || -1)

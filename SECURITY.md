@@ -6,6 +6,6 @@ HTTP の既定の待ち受けはループバックです。外部からの接続
 
 ## 脆弱性の報告
 
-GitHub の非公開報告機能は現時点で無効です。リポジトリの Issues で管理者に**非公開の連絡先だけ**を尋ね、案内された経路で詳細を共有してください。連絡先を尋ねる投稿は公開されます。非公開の報告でも認証情報や資料の本文は伏せ、再現に必要な情報を添えます。 [Dunlin の Issues](https://github.com/hachiware-labs/dunlin/issues/new) · [GitHub の非公開報告に関する案内](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/report-privately)
+GitHub の非公開報告フォームから管理者へ連絡してください。非公開の報告でも認証情報や資料の本文は伏せ、再現に必要な情報を添えます。 [非公開で脆弱性を報告する](https://github.com/hachiware-labs/dunlin/security/advisories/new) · [GitHub の案内](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/report-privately)
 
 報告では Dunlin の版またはコミット、OS と Node.js の版、使用した種別、影響の説明を添えてください。現在は `main` の開発版を確認対象とします。

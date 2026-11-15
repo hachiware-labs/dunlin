@@ -3,7 +3,7 @@
   "version": "0.5.0",
   "private": true,
   "description": "Local knowledge search with source evidence, powered by Rust",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "dunlin": "./tools/rag/cli.mjs"
@@ -28,6 +28,7 @@
     "dist/tools/*",
     "examples/*.mjs",
     "examples/manuals/*.md",
+    "examples/evaluation/*.txt",
     "tools/rag/*.mjs",
     "tools/rag/authoring/*.mjs",
     "tools/rag/parsers/*",
@@ -52,6 +53,8 @@
     "build:hannoy": "node scripts/build-hannoy.mjs",
     "build:native": "napi build --platform --output-dir dist --js native.cjs --dts native.d.cts --release --features node",
     "build:js": "tsc -p tsconfig.json",
+    "docs": "node scripts/generate-docs.mjs",
+    "docs:check": "node scripts/generate-docs.mjs --check",
     "test": "tsc -p tests/tsconfig.json && node --test tests/*.test.mjs",
     "test:package": "napi create-npm-dirs && node scripts/test-package.mjs",
     "bench": "node benches/keyword.mjs"

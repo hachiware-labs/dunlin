@@ -440,8 +440,11 @@ test('builds mixed PDF and text sources in stable order and preserves the active
   assert.equal(archived.filter((bytes) => bytes.equals(pdf)).length, 1);
   const repeated = await json('build', '--skip-unsupported');
   assert.equal(repeated.data.reused, true);
-  assert.deepEqual(repeated.data.stages, Object.fromEntries(Object.entries(build.data.stages)
-    .map(([stage, value]) => [stage, { ...value, reused: true }])));
+  for (const [stage, result] of Object.entries(repeated.data.stages)) {
+    assert.equal(result.id, build.data.stages[stage].id);
+    assert.equal(result.reused, true);
+    assert.ok(Number.isInteger(result.elapsed_ms) && result.elapsed_ms >= 0);
+  }
 
   await writeFile(join(docs, 'a-broken.pdf'), '%PDF-1.4\ninvalid');
   await rm(join(docs, 'b-duplicate.pdf'));

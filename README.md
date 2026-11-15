@@ -5,7 +5,7 @@
 例では、ポンプの点検手順を含む Markdown やテキストを `./manuals` に置いて検索します。
 
 ```sh
-dunlin init mcp ./kb --source ./manuals --no-embedding --no-ocr
+dunlin init mcp ./kb --source ./manuals
 cd kb
 dunlin build
 dunlin search "ポンプの点検はいつ実施しますか"
@@ -57,7 +57,7 @@ dunlin --help
 冒頭の手順を実行済みなら、`kb` 内で `dunlin serve --print-config` に進みます。
 
 ```sh
-dunlin init mcp ./kb --source ./manuals --no-embedding --no-ocr
+dunlin init mcp ./kb --source ./manuals
 cd kb
 dunlin build
 dunlin search "手順"
@@ -192,5 +192,5 @@ CI は手動で実行します。GitHub Actions の **Verify Dunlin** を起動�
 ## 現在の状態
 
 - バージョン 0.5.0 の開発版です。コマンドや設定の形は変わる可能性があります。
-- `dunlin` は仮のパッケージ名です。npm への公開とライセンスは未定です。
+- `dunlin` は仮のパッケージ名です。npm への公開は準備中です。本体のライセンスは MIT です。
 - 動作を確認している環境は、Windows x64、Linux x64（glibc）、macOS arm64 と x64 です。

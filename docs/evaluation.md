@@ -4,14 +4,16 @@
 
 ## 資料を用意する
 
-CLI をインストールして、新しい MCP プロジェクトを作ります。この例は同梱辞書を使うキーワード検索で進めます。 [CLI のインストール](../README.md#インストール)
+CLI をインストールし、リポジトリのルートで新しい MCP プロジェクトを作ります。この例は同梱辞書を使うキーワード検索で進めます。 [CLI のインストール](../README.md#インストール)
 
 ```sh
-dunlin init mcp ./evaluation-demo --no-embedding --no-ocr
+dunlin init mcp ./evaluation-demo
+cp examples/evaluation/product.txt evaluation-demo/docs/
+cp examples/evaluation/lecture.txt evaluation-demo/docs/
 cd evaluation-demo
 ```
 
-プロジェクト内に、次の2ファイルを UTF-8 で作ります。右列の1行をそれぞれのファイルに保存します。
+コピーした資料は次の2ファイルです。
 
 | 保存先 | 内容 |
 | --- | --- |
@@ -31,10 +33,10 @@ dunlin report show baseline
 
 この例では `scores` の `evidence_recall@context` が `0` になります。登録した引用が、実際に返す検索文脈に含まれなかったことを示しています。
 
-レポートに表示された `build_id` を使い、基準ビルドにもタグを付けます。次のコマンドの `BASELINE_BUILD_ID` を、表示された ID に置き換えます。
+現在提供中の基準ビルドにもタグを付けます。
 
 ```sh
-dunlin tag baseline-build BASELINE_BUILD_ID
+dunlin tag baseline-build
 ```
 
 ## 辞書候補を選ぶ
@@ -48,10 +50,10 @@ dunlin dictionary suggest --report baseline
 ```text
 東京大学,名詞,トウキョウダイガク
   docs:product.txt — 製品東京大学は限定品
-  Question terms 東京大学
-  Evidence terms 東京 / 大学
-  Whole query 東京大学
-  Partial query 大学
+  質問の分かち書き 東京大学
+  根拠の分かち書き 東京 / 大学
+  語全体の質問 東京大学
+  部分語の質問 大学
 ```
 
 出力中の `東京大学,名詞,トウキョウダイガク` を、見出しなしの UTF-8 CSV として `selected.csv` に保存します。本体と同じディレクトリに `Dunlinfile.yaml` のコピーを作り、候補設定に辞書を追加します。

@@ -28,6 +28,18 @@ function cliGuide() {
   return section('# CLI リファレンス', generated,
     'コマンドはプロジェクト内で実行します。別の場所からは `dunlin --project <directory> <command>` で対象を指定できます。`<…>` は入力する値、`[…]` は省略可能な指定です。各コマンドの使用法は `dunlin <command> --help` でも確認できます。',
     ...commandGroups.map(([title, names]) => section('## ' + title, block('text', names.split(' ').map((name) => projectCommands[name])))),
+    '## 主な引数',
+    [
+      '| 引数 | 用途 |',
+      '| --- | --- |',
+      '| `--project <directory>` | 操作するプロジェクトを指定します。 |',
+      '| `--config <file>` | 試行に使う候補設定を指定します。 |',
+      '| `--from <stage>` | 保存済みの前段の結果を使い、指定した段階から構築します。 |',
+      '| `--input <build>` | 構築の入力となる既存ビルドを固定します。 |',
+      '| `--tag <name>` | 試行ビルドまたは評価レポートに名前を付けます。 |',
+      '| `--build <ref>` | 検索や評価の対象となるビルドのタグまたは ID を選びます。 |',
+      '| `--json` | 機械処理向けの結果を出します。 |',
+    ].join('\n'),
     '## 評価のサブコマンドと引数',
     block('text', [
       'dunlin eval-data add --question <text> --doc <document> --quote <text> [--prefix <text>] [--suffix <text>] [--page <n>] [--heading <text>]',
@@ -133,7 +145,7 @@ async function configGuide() {
       examples.push(section('## ' + type, block('yaml', [yaml.trimEnd()])));
     }
     return section('# Dunlinfile の設定と既定値', generated,
-      '4種別の `dunlin init <type> <type>` が書き出した YAML を掲載しています。生成時にグローバルのモデル・OCR 設定を空にしました。グローバル設定や `init` の引数で指定したモデルと OCR は、作成時に新しいファイルへ反映されます。 [モデルの設定](mcp.md#初期化時にモデルを選ぶ)',
+      '4種別の `dunlin init <type> <type>` が書き出した YAML を掲載しています。生成時にグローバルのモデル・OCR 設定を空にしました。RAG、Wiki、PARA の初期化はグローバル設定を引き継ぎます。MCP では埋め込みと OCR を初期化時に明示指定できます。 [モデルの設定](mcp.md#初期化時にモデルを選ぶ)',
       '`use` にモジュール名、`with` にその引数を書きます。ソースや辞書の相対パスは設定ファイルの場所を基準にします。モデルやパスなど、対応する項目では `${ENV_NAME}` を使えます。API キーは `api_key_env` に環境変数の名前を指定します。設定を編集したら `dunlin validate --json` で確認できます。 [モジュールと引数](modules.md)',
       ...examples);
   } finally {

@@ -131,7 +131,7 @@ dunlin init para ./notes
 
 頻繁に使う組み合わせは `dunlin config set <embedding|llm> --provider <provider> --model <name>` でユーザーごとに保存する。`dunlin config list` で確認し、`dunlin config unset <embedding|llm>` で解除する。保存先は `~/.dunlin/config.yaml` とし、`DUNLIN_GLOBAL_CONFIG` で変更できる。
 
-- プロジェクト種別が使えるモデルだけを引き継ぐ。`init` の指定、ユーザー設定、標準値の順に優先する。プロバイダーを変えた場合、以前のプロバイダーのモデル名は引き継がない。埋め込みを使う場合はモデル名を指定する。
+- `init mcp` は埋め込みを明示した場合にモデルを設定する。RAG は `init` の指定、ユーザー設定、標準値の順に優先する。プロバイダーを変えた場合、以前のプロバイダーのモデル名は引き継がない。
 - `--no-embedding`、`--no-llm` で、それぞれのユーザー設定をその初期化だけ適用しない。同じ用途のモデル・プロバイダー指定との併用はエラーにする。
 - プロバイダーの標準値は Ollama。OpenAI を選ぶと、認証用の環境変数名 `OPENAI_API_KEY` を生成する設定に書く。キー本体は保存しない。
 - モデルの設定と、必要なモジュール・引数を `Dunlinfile.yaml` に書く。以後の実行は、そのプロジェクトの設定を使う。ユーザー設定の変更は次回以降の初期化に適用する。
@@ -140,7 +140,7 @@ dunlin init para ./notes
 
 `dunlin config set ocr` で LightOnOCR をユーザー設定に登録する。`--tool lightonocr` でツール名を明示できる。`dunlin config list` で確認し、`dunlin config unset ocr` で解除する。登録内容はモデルの既定値と同じ `~/.dunlin/config.yaml` に保存する。
 
-`init` で `--ocr` または `--no-ocr` を指定すると、そのプロジェクトだけユーザー設定を上書きする。指定の優先順位は `init` のオプション、ユーザー設定、組み込みの既定値（無効）の順である。
+`init mcp` は `--ocr` を明示すると OCR を有効にする。ほかの種別は `init` のオプション、ユーザー設定、組み込みの既定値（無効）の順で優先する。
 
 OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に OCR の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `dunlin add ocr` を実行して準備する。PDF のテキスト層は先に読み、テキスト層のないページや画像の認識に LightOnOCR を使う。
 
@@ -294,7 +294,7 @@ dunlin serve
 
 標準の `search` は、Lindera + IPADIC で分かち書きし、Tantivy の BM25 でキーワード検索する。MCP は `serve` で stdio を使う。RAG は `ask` と HTTP の `serve` を備え、回答を生成するには `models.answerer.model` にモデル名を設定する。検索はモデル名が `null` のまま使える。 [HTTP の提供設定](#273-種別-rag-の-serve)
 
-`--embedding-model` またはグローバル設定で埋め込みモデルを指定すると、`models.embedder` と `index.vector` が加わる。`search` には `retrieval.vector`（`top_k: 10`）と `fusion.rrf`（`k: 60`）が加わり、キーワードとベクトルを組み合わせて検索する。 [初期化時のモデル指定](#初期化時のモデル指定)
+`--embedding-model` または RAG のグローバル設定で埋め込みモデルを指定すると、`models.embedder` と `index.vector` が加わる。`search` には `retrieval.vector`（`top_k: 10`）と `fusion.rrf`（`k: 60`）が加わり、キーワードとベクトルを組み合わせて検索する。 [初期化時のモデル指定](#初期化時のモデル指定)
 
 #### MCP の Dunlinfile.yaml
 
@@ -560,6 +560,7 @@ dunlin build --from transform --config candidates/trial-3.yaml --tag trial-3
 - 原文の総数、処理に成功した数、飛ばした数と理由
 - 再利用した段階と新たに実行した段階
 - 所要時間
+- `build --json` の `data.stages` に、各段階の処理開始から保存完了までの `elapsed_ms` を記録する。全体の `elapsed_ms` は実行ロック待ちも含む。
 - 提供内容が切り替わったかどうか
 - 次に打つコマンド（`search` など）
 

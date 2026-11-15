@@ -81,6 +81,8 @@ dunlin init rag ./rag
 
 グローバル設定の保存先は `~/.dunlin/config.yaml` です。`DUNLIN_GLOBAL_CONFIG` で保存先を指定でき、`dunlin config unset embedding` や `dunlin config unset llm` で登録を解除できます。設定は初期化時に新しいプロジェクトへ書き出されます。
 
+`init mcp` はキーワード検索を初期設定とし、埋め込みや OCR は `--embedding-model` や `--ocr` で指定した場合に有効になります。RAG ではグローバル設定を引き継ぎます。
+
 個別のプロジェクトでは、`init` のオプションで優先する設定を指定します。
 
 | 用途 | モデル・プロバイダー指定 | グローバル設定を省く指定 |

@@ -19,6 +19,8 @@ MCP と RAG では、`--source <directory>` を省くとプロジェクト内の
 
 よく使うモデルは、たとえば `dunlin config set llm --provider ollama --model qwen3:4b` で一度登録できます。次の `init rag`、`init wiki`、`init para` が、新しい `Dunlinfile.yaml` に書き出します。MCP や RAG でハイブリッド検索を使う場合は、同様に `dunlin config set embedding` で埋め込みモデルを登録できます。[モデルの初期化設定](docs/mcp.md#初期化時にモデルを選ぶ)
 
+OCR を既定で有効にするには `dunlin config set ocr` を実行します。次回の `init` から4種別に適用されます。GPU 実行環境とモデルは `dunlin add ocr` で準備します。 [OCR の初期化設定](docs/dunlin-spec.md#初期化時の-ocr-指定)
+
 Wiki/PARA は `--purpose` で目的を指定し、`Dunlinfile.yaml` の `models.writer.model` を設定してから `dunlin ingress <資料パス>` を実行します。生成した HTML は `site/` に保存されます。`ingress` と `verify --content` は作業 ID と進捗を標準エラーに表示し、`dunlin progress <作業ID> --json` でも確認できます。ブラウザでは順番待ちから完了まで同じ作業ページで追えます。内容検査の指摘には比較した二つの引用と出典が付きます。[Wiki/PARA の操作](docs/dunlin-spec.md#131-コマンド)
 
 ## CLI のセットアップ

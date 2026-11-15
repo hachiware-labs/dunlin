@@ -23,7 +23,7 @@ import { changeTool, toolsCatalog } from './project-tools.mjs';
 import { checkIndexTool, hannoy } from './project-index-tool.mjs';
 import { checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage } from './project-trials.mjs';
 import { answerModel, answerQuestion, answerText } from './project-answer.mjs';
-import { configureGlobal, initialModels } from './project-global.mjs';
+import { configureGlobal, initialSettings } from './project-global.mjs';
 import { serveRagHttp } from './project-rag-http.mjs';
 import { searchOutput } from './project-search-output.mjs';
 import { isSearchProject, serveAddress, serveCredential, withServeOverrides } from './project-serving.mjs';
@@ -34,8 +34,8 @@ const configName = 'Dunlinfile.yaml';
 let DatabaseSync;
 const projectTypes = ['mcp', 'rag', 'wiki', 'para'];
 export const projectCommands = {
-  init: 'dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--json]',
-  config: 'dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config unset <embedding|llm> [--json]',
+  init: 'dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--json]',
+  config: 'dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config set ocr [--tool lightonocr] | dunlin config unset <embedding|llm|ocr> [--json]',
   build: 'dunlin build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]',
   source: 'dunlin source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]',
   transform: 'dunlin transform [--project <directory>] [--config <file>] [--dry-run] [--json]',
@@ -156,8 +156,14 @@ async function initialize(type, directory, values) {
   }
   const location = source?.match(/^~[\\/]/u) ? resolve(homedir(), source.slice(2)) : source;
   const path = source === undefined ? './docs' : relative(root, resolve(location)).split(sep).join('/') || '.';
-  const models = await initialModels(type, values);
+  const { ocr, ...models } = await initialSettings(type, values);
   const config = isSearchProject(type) ? ragTemplate(type, path, models) : wikiTemplate(type, basename(root), purpose, models.llm);
+  if (ocr) {
+    const loader = (config.source ?? config.ingress).modules.find(({ use }) => use === 'loader.auto');
+    loader.with.ocr = 'loader.ocr';
+    const { name, version } = toolsCatalog.get('ocr');
+    config.tools = [{ name, version }];
+  }
   await mkdir(root, { recursive: true });
   await writeFile(configPath, writeTemplate(config), { flag: 'wx' });
   if (isSearchProject(type) && source === undefined) await mkdir(join(root, 'docs'), { recursive: true });
@@ -194,7 +200,7 @@ async function initialize(type, directory, values) {
     const missing = [!models.llm?.model && 'models.writer.model', !purpose && 'about.purpose'].filter(Boolean);
     next = missing.length ? 'Set ' + missing.join(' and ') + ', then run dunlin ingress.' : 'Run dunlin ingress <path>.';
   }
-  return { config: configPath, type, next };
+  return { config: configPath, type, next: ocr ? next + ' To prepare local GPU OCR, run dunlin add ocr.' : next };
 }
 
 function normalizeProjectType(config, warnings) {
@@ -1192,10 +1198,11 @@ export async function runProjectCommand(command, args, explicitProject) {
     options.json = { type: 'boolean' };
     if (command === 'init') {
       for (const key of ['source', 'purpose', 'embedding-model', 'embedding-provider', 'llm-model', 'llm-provider']) options[key] = { type: 'string' };
-      for (const key of ['no-embedding', 'no-llm']) options[key] = { type: 'boolean' };
+      for (const key of ['no-embedding', 'no-llm', 'ocr', 'no-ocr']) options[key] = { type: 'boolean' };
     } else if (command === 'config') {
       options.provider = { type: 'string' };
       options.model = { type: 'string' };
+      options.tool = { type: 'string' };
     } else options.project = { type: 'string' };
     if (command === 'build' || command === 'source') options['skip-unsupported'] = { type: 'boolean' };
     if (command === 'build' || stages.includes(command)) options['dry-run'] = { type: 'boolean' };
@@ -1491,7 +1498,7 @@ export async function runProjectCommand(command, args, explicitProject) {
     else if (command === 'config') console.log([data.path, ...['embedding', 'llm'].map((role) => {
       const setting = data[role];
       return role + '  ' + (setting ? setting.provider + ' / ' + setting.model : 'unset');
-    })].join('\n'));
+    }), 'ocr  ' + (data.ocr?.tool ?? 'unset')].join('\n'));
     else if (command === 'search') console.log(`${data.build_id} ${data.search_config_id}\n${data.context.text || 'No matches.'}`);
     else if (command === 'ask') console.log(answerText(data));
     else if (command === 'status' && data.build_id) {

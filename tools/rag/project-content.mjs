@@ -12,6 +12,26 @@ const office = new Set(['.docx', '.xlsx', '.pptx']);
 const formats = new Set(['.html', '.htm', '.pdf', ...office]);
 const images = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
 const extensionsFor = { text: new Set(['.html', '.htm']), office, pdf: new Set(['.pdf']) };
+const fileConcurrency = 4;
+
+async function processFiles(files, prepare, record, limit = fileConcurrency) {
+  const results = new Array(files.length);
+  let next = 0;
+  let failure;
+  await Promise.all(Array.from({ length: Math.min(files.length, limit) }, async () => {
+    while (!failure && next < files.length) {
+      const index = next++;
+      try {
+        results[index] = await prepare(files[index]);
+      } catch (error) {
+        if (!failure || index < failure.index) failure = { index, error };
+      }
+    }
+  }));
+  // Drain in-flight work before the caller can close the database. Record results in input order.
+  for (let index = 0; index < (failure?.index ?? files.length); index++) record(files[index], results[index]);
+  if (failure) throw failure.error;
+}
 
 function supported(file, categories) {
   const extension = extname(file).toLowerCase();
@@ -51,19 +71,20 @@ export async function inventory(sources, previous) {
   const old = new Map((previous?.groups ?? []).flatMap(([id, docs]) => docs.map(({ objectId, corpus }) =>
     [JSON.stringify([id, objectId]), corpus?.originalSha256])));
   const files = [];
-  for (const { id, files: paths } of sources) for (const { file, objectId } of paths) {
-    const key = JSON.stringify([id, objectId]);
+  const pending = sources.flatMap(({ id, files }) => files.map((entry) => ({ ...entry, id })));
+  await processFiles(pending, async ({ file }) => {
     const handle = await open(file, 'r');
-    let actual;
     try {
       const hash = createHash('sha256');
       for await (const chunk of handle.createReadStream({ autoClose: false })) hash.update(chunk);
-      actual = hash.digest('hex');
+      return hash.digest('hex');
     } finally { await handle.close(); }
+  }, ({ id, objectId }, actual) => {
+    const key = JSON.stringify([id, objectId]);
     const change = !old.has(key) ? 'added' : old.get(key) === actual ? 'unchanged' : 'updated';
     old.delete(key);
     files.push({ source_id: id, path: objectId, change });
-  }
+  });
   for (const key of old.keys()) {
     const [source_id, path] = JSON.parse(key);
     files.push({ source_id, path, change: 'deleted' });
@@ -74,50 +95,63 @@ export async function inventory(sources, previous) {
 export async function loadCorpus(sources, paths, skipped, warnings, db, force, ocr = false, progress = () => {}) {
   const excluded = new Set(skipped.map(({ source_id, path }) => JSON.stringify([source_id, path])));
   const groups = [];
+  const pending = [];
+  for (const { id, files } of sources) {
+    const documents = [];
+    groups.push([id, documents]);
+    for (const { file, objectId } of files) {
+      if (!excluded.has(JSON.stringify([id, objectId]))) pending.push({ id, file, objectId, documents });
+    }
+  }
   const saved = db.prepare('SELECT document FROM loaded_files WHERE id = ?');
   const save = db.prepare('INSERT OR IGNORE INTO loaded_files VALUES (?, ?)');
   let completed = 0;
   progress(completed);
-  for (const { id, files } of sources) {
-    const documents = [];
-    for (const { file, objectId } of files) {
-      if (excluded.has(JSON.stringify([id, objectId]))) continue;
-      trialCheckpoint();
-      try {
-        const extension = extname(file).toLowerCase();
-        const parsers = office.has(extension) ? { documents: { tool: 'docling-rs' } } : undefined;
-        const useOcr = ocr && (extension === '.pdf' || images.has(extension));
-        const key = (hash) => JSON.stringify(['loader.auto-v1', id, objectId, extension, hash, ...(useOcr ? [managedOcrVersion] : [])]);
-        const cache = {
-          read: (hash) => {
-            const row = !force && saved.get(key(hash));
-            return row && JSON.parse(row.document);
-          },
-          write: (hash, doc) => save.run(key(hash), JSON.stringify(doc)),
-        };
-        const { input } = await prepareLocalFile(join(paths.artifacts, 'originals'), id, file, objectId, parsers, true,
-          trialSignal(), useOcr ? loadOcr : extension === '.pdf' ? loadPdf : ['.html', '.htm'].includes(extension) ? loadHtml : undefined, cache,
-          { sharedOriginals: true });
-        if (!input.content.trim()) {
-          warnings.push({ code: 'EMPTY_EXTRACTION', section: 'source', module: 'loader.auto', target: id + ':' + objectId,
-            message: 'No text extracted. Scanned documents require OCR.' });
-        }
-        documents.push(input);
-        progress(++completed);
-      } catch (error) {
-        if (error.code === 'TRIAL_LIMIT_REACHED') throw error;
-        throw new Error('Could not load ' + id + ':' + objectId + '. ' + error.message, { cause: error });
-      }
+  const originals = join(paths.artifacts, 'originals');
+  // Managed OCR serves one request at a time. Keep its document and trial accounting order.
+  const limit = ocr ? 1 : fileConcurrency;
+  await processFiles(pending, async ({ id, file, objectId }) => {
+    trialCheckpoint();
+    try {
+      const extension = extname(file).toLowerCase();
+      const parsers = office.has(extension) ? { documents: { tool: 'docling-rs' } } : undefined;
+      const useOcr = ocr && (extension === '.pdf' || images.has(extension));
+      const key = (hash) => JSON.stringify(['loader.auto-v1', id, objectId, extension, hash, ...(useOcr ? [managedOcrVersion] : [])]);
+      const cache = {
+        read: (hash) => {
+          const row = !force && saved.get(key(hash));
+          return row && JSON.parse(row.document);
+        },
+        write: (hash, doc) => save.run(key(hash), JSON.stringify(doc)),
+      };
+      const { input } = await prepareLocalFile(originals, id, file, objectId, parsers, true,
+        trialSignal(), useOcr ? loadOcr : extension === '.pdf' ? loadPdf : ['.html', '.htm'].includes(extension) ? loadHtml : undefined, cache,
+        { sharedOriginals: true });
+      progress(++completed);
+      return input;
+    } catch (error) {
+      if (error.code === 'TRIAL_LIMIT_REACHED') throw error;
+      throw new Error('Could not load ' + id + ':' + objectId + '. ' + error.message, { cause: error });
     }
-    groups.push([id, documents]);
-  }
+  }, ({ id, objectId, documents }, input) => {
+    if (!input.content.trim()) {
+      warnings.push({ code: 'EMPTY_EXTRACTION', section: 'source', module: 'loader.auto', target: id + ':' + objectId,
+        message: 'No text extracted. Scanned documents require OCR.' });
+    }
+    documents.push(input);
+  }, limit);
   return groups;
 }
 
 async function loadOcr(bytes) {
   const { parseOcr } = await import('./parsers/ocr.mjs');
-  const parsed = await parseOcr(bytes, { tool: 'lightonocr', managed: true, model: lightonModel, lang: 'ja' }, trialSignal());
-  return { ...parsed, bytes, parser: { tool: 'lightonocr', model: lightonModel, lang: 'ja' } };
+  try {
+    const parsed = await parseOcr(bytes, { tool: 'lightonocr', managed: true, model: lightonModel, lang: 'ja' }, trialSignal());
+    return { ...parsed, bytes, parser: { tool: 'lightonocr', model: lightonModel, lang: 'ja' } };
+  } catch (error) {
+    if (error.code === 'OCR_NOT_PREPARED') throw new Error('Local GPU OCR is not prepared. Run dunlin add ocr.', { cause: error });
+    throw error;
+  }
 }
 
 async function loadPdf(bytes) {

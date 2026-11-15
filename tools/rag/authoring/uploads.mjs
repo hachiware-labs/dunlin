@@ -5,6 +5,7 @@ import { atomicWrite, directory, readBytes, readText, revision, withWriteLock } 
 
 const uploadedSourceId = /^upload-[a-f0-9]{57}$/u;
 const sha256Pattern = /^[a-f0-9]{64}$/u;
+const sharedWrites = new Map();
 export const originalUriTemplate = 'dunlin://original/{sourceId}/{sha256}';
 export const originalMimeType = 'application/octet-stream';
 
@@ -31,13 +32,28 @@ async function saveOriginal(root, document, bytes, shared) {
   await directory(parent, true);
   const sha256 = revision(bytes);
   const path = join(parent, `${sha256}.bin`);
+  if (shared) {
+    let pending = sharedWrites.get(path);
+    if (!pending) {
+      pending = { bytes, done: writeOriginal(path, bytes).finally(() => sharedWrites.delete(path)) };
+      sharedWrites.set(path, pending);
+    } else if (!pending.bytes.equals(bytes)) {
+      throw new Error('Stored original file does not match its SHA-256 digest');
+    }
+    await pending.done;
+  } else {
+    await writeOriginal(path, bytes);
+  }
+  return { ...originalForDigest(document, sha256), size: bytes.length };
+}
+
+async function writeOriginal(path, bytes) {
   const existing = await readBytes(path);
   if (existing === null) {
     await atomicWrite(path, bytes);
   } else if (!existing.equals(bytes)) {
     throw new Error('Stored original file does not match its SHA-256 digest');
   }
-  return { ...originalForDigest(document, sha256), size: bytes.length };
 }
 
 export function originalForDigest(document, sha256) {

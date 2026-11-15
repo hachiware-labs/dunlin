@@ -410,6 +410,72 @@ test('uses a PDF text layer before trying to start local OCR', async (t) => {
     { code: 1, stderr: /Run dunlin setup ocr/u });
 });
 
+test('builds mixed PDF and text sources in stable order and preserves the active build on failure', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dunlin-mixed-sources-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const projectCli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
+  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const json = async (...args) => JSON.parse((await runNode(process.execPath, [projectCli, ...args, '--json'],
+    { cwd: root, env, timeout: 15_000 })).stdout);
+  await json('init', 'rag', '.');
+  const docs = join(root, 'docs');
+  const pdf = textLayerPdf('Calibration procedure', 'Replace the filter every six months.');
+  await Promise.all([
+    writeFile(join(docs, 'a-original.pdf'), pdf),
+    writeFile(join(docs, 'b-duplicate.pdf'), pdf),
+    writeFile(join(docs, 'c-empty.md'), ' '),
+    writeFile(join(docs, 'd-empty.txt'), ''),
+    writeFile(join(docs, 'e-guide.md'), '# 点検手順\n電源を止めます。\n'),
+    writeFile(join(docs, 'ignored.bin'), 'unsupported'),
+  ]);
+  const build = await json('build', '--skip-unsupported');
+  assert.equal(build.data.documents, 4);
+  assert.deepEqual(build.warnings.filter(({ code }) => code === 'EMPTY_EXTRACTION').map(({ target }) => target),
+    ['docs:c-empty.md', 'docs:d-empty.txt']);
+  const search = (await json('search', 'Calibration')).data;
+  assert.deepEqual(search.results.map(({ document_id }) => document_id).sort(), ['docs:a-original.pdf', 'docs:b-duplicate.pdf']);
+  assert.ok(search.results.every(({ page }) => page === 1));
+  const originals = join(root, '.dunlin', 'artifacts', 'originals', 'shared');
+  const archived = await Promise.all((await readdir(originals)).map((name) => readFile(join(originals, name))));
+  assert.equal(archived.filter((bytes) => bytes.equals(pdf)).length, 1);
+  const repeated = await json('build', '--skip-unsupported');
+  assert.equal(repeated.data.reused, true);
+  assert.deepEqual(repeated.data.stages, Object.fromEntries(Object.entries(build.data.stages)
+    .map(([stage, value]) => [stage, { ...value, reused: true }])));
+
+  await writeFile(join(docs, 'a-broken.pdf'), '%PDF-1.4\ninvalid');
+  await rm(join(docs, 'b-duplicate.pdf'));
+  await writeFile(join(docs, 'e-guide.md'), '# 点検手順\n新しい手順です。\n');
+  const changes = (await json('build', '--dry-run')).data.files.map(({ path, change }) => [path, change]);
+  assert.deepEqual(changes.filter(([, change]) => change !== 'unchanged'),
+    [['a-broken.pdf', 'added'], ['e-guide.md', 'updated'], ['ignored.bin', 'added'], ['b-duplicate.pdf', 'deleted']]);
+  await assert.rejects(json('build', '--skip-unsupported'), (failure) => {
+    assert.equal(failure.code, 1);
+    assert.match(JSON.parse(failure.stdout).errors[0].message, /Could not load docs:a-broken\.pdf/u);
+    return true;
+  });
+  assert.deepEqual((await json('search', 'Calibration')).data, search);
+});
+
+test('uses text-layer PDFs in an OCR-enabled project and guides setup for scans', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dunlin-project-ocr-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const projectCli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
+  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml'), DUNLIN_OCR_HOME: join(root, 'ocr') };
+  const run = (...args) => runNode(process.execPath, [projectCli, ...args], { cwd: root, env, timeout: 15_000 });
+  await run('config', 'set', 'ocr');
+  await run('init', 'rag', '.');
+  await writeFile(join(root, 'docs', 'manual.pdf'), textLayerPdf('Calibration procedure'));
+  await run('build');
+  const { stdout } = await run('search', 'Calibration', '--json');
+  const [result] = JSON.parse(stdout).data.results;
+  assert.equal(result.document_id, 'docs:manual.pdf');
+  assert.equal(result.page, 1);
+
+  await writeFile(join(root, 'docs', 'scan.pdf'), await scannedPdf(['Scan']));
+  await assert.rejects(run('build'), { code: 1, stderr: /Run dunlin add ocr\./u });
+});
+
 test('shares Docling across projects and converts locally after the service stops', { timeout: 120_000 }, async (t) => {
   try {
     await import('docling.rs');

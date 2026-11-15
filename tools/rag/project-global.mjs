@@ -10,10 +10,12 @@ import { isSearchProject } from './project-serving.mjs';
 const providers = { embedding: ['ollama', 'openai'], llm: ['ollama', 'openai', 'strata'] };
 const modelName = z.string().trim().min(1).refine((name) => !/[\u0000-\u001f\u007f]/u.test(name));
 const selectionSchema = (role) => z.strictObject({ model: modelName, provider: z.enum(providers[role]) });
+const ocrSchema = z.strictObject({ tool: z.literal('lightonocr') });
 const globalSchema = z.strictObject({
   version: z.literal(1),
   embedding: selectionSchema('embedding').optional(),
   llm: selectionSchema('llm').optional(),
+  ocr: ocrSchema.optional(),
 });
 const providerSettings = {
   ollama: { base_url: 'http://localhost:11434' },
@@ -42,21 +44,30 @@ async function readGlobal(path) {
   } catch {
     // Report the allowed settings without disclosing values from the file.
   }
-  throw fail('INVALID_GLOBAL_CONFIG', 'Check ' + path + '. Expected version: 1 and optional embedding and llm entries with provider and model.');
+  throw fail('INVALID_GLOBAL_CONFIG', 'Check ' + path + '. Expected version: 1, optional embedding and llm entries with provider and model, and optional ocr with tool: lightonocr.');
 }
 
-export async function configureGlobal(action, role, { provider, model }) {
+export async function configureGlobal(action, role, { provider, model, tool }) {
   const path = globalPath();
-  if (action === 'list' && provider === undefined && model === undefined) return { path, ...await readGlobal(path) };
-  if (!Object.hasOwn(providers, role) || action === 'unset' && (provider !== undefined || model !== undefined)) {
-    throw fail('INVALID_ARGUMENT', 'Use config set <embedding|llm> --model <name> [--provider <name>], config list, or config unset <embedding|llm>.');
+  const modelOptions = provider !== undefined || model !== undefined;
+  const options = modelOptions || tool !== undefined;
+  const ocr = role === 'ocr';
+  if (action === 'list' && !options) return { path, ...await readGlobal(path) };
+  if ((!ocr && !Object.hasOwn(providers, role)) || (action === 'unset' && options)) {
+    throw fail('INVALID_ARGUMENT', 'Use config list, config set <embedding|llm> --model <name> [--provider <name>], config set ocr [--tool lightonocr], or config unset <embedding|llm|ocr>.');
   }
   let selection;
   if (action === 'set') {
-    const checked = selectionSchema(role).safeParse({ provider: provider ?? 'ollama', model });
-    if (!checked.success) throw fail('INVALID_ARGUMENT',
-      'Specify a nonempty --model and a --provider from ' + providers[role].join(', ') + '.');
-    selection = checked.data;
+    if (ocr) {
+      const checked = ocrSchema.safeParse({ tool: tool ?? 'lightonocr' });
+      if (modelOptions || !checked.success) throw fail('INVALID_ARGUMENT', 'Use config set ocr [--tool lightonocr].');
+      selection = checked.data;
+    } else {
+      const checked = selectionSchema(role).safeParse({ provider: provider ?? 'ollama', model });
+      if (tool !== undefined || !checked.success) throw fail('INVALID_ARGUMENT',
+        'Specify a nonempty --model and a --provider from ' + providers[role].join(', ') + '.');
+      selection = checked.data;
+    }
   }
   const folder = dirname(path);
   await mkdir(folder, { recursive: true });
@@ -74,10 +85,11 @@ export function projectModel(kind, { provider = 'ollama', model = null } = {}) {
   return { provider, kind, ...providerSettings[provider], model };
 }
 
-export async function initialModels(type, values) {
+export async function initialSettings(type, values) {
   const current = await readGlobal(globalPath());
   const enabled = { embedding: isSearchProject(type), llm: type !== 'mcp' };
-  const selections = {};
+  if (values.ocr && values['no-ocr']) throw fail('INVALID_ARGUMENT', 'Use either --ocr or --no-ocr.');
+  const selections = { ocr: !values['no-ocr'] && (values.ocr || current.ocr !== undefined) };
   for (const role of ['embedding', 'llm']) {
     const model = values[role + '-model'];
     const provider = values[role + '-provider'];

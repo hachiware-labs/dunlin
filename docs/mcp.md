@@ -94,7 +94,9 @@ dunlin init rag ./rag
 
 ## 初期化で生成される Dunlinfile.yaml
 
-`--source` を省くと、MCP と RAG はどちらも `./docs` を入力にします。設計仕様に、グローバル設定にモデル登録がない状態で生成した YAML の全文を掲載しています。 [MCP の Dunlinfile.yaml](dunlin-spec.md#mcp-の-dunlinfileyaml) · [RAG の Dunlinfile.yaml](dunlin-spec.md#rag-の-dunlinfileyaml)
+`--source` を省くと、MCP と RAG はどちらも `./docs` を入力にします。設計仕様に、グローバル設定にモデルと OCR の登録がない状態で生成した YAML の全文を掲載しています。 [MCP の Dunlinfile.yaml](dunlin-spec.md#mcp-の-dunlinfileyaml) · [RAG の Dunlinfile.yaml](dunlin-spec.md#rag-の-dunlinfileyaml)
+
+スキャン資料を取り込むプロジェクトでは、初期化時に `--ocr` を指定できます。続けて作るプロジェクトで毎回有効にするには `dunlin config set ocr` を使います。 [OCR の初期化設定](dunlin-spec.md#初期化時の-ocr-指定)
 
 ## 日本語検索とユーザー辞書
 

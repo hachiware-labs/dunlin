@@ -92,7 +92,9 @@ export async function managedOcr({ required = true, requireModel = true } = {}) 
     }
   }));
   if (!runtime || (files && files.some((present) => !present))) {
-    if (required) throw new Error('Local GPU OCR is not prepared. Run dunlin setup ocr.');
+    if (required) {
+      throw Object.assign(new Error('Local GPU OCR is not prepared. Run dunlin setup ocr.'), { code: 'OCR_NOT_PREPARED' });
+    }
     return;
   }
   return { python: runtime.python, modelDir, backend: runtime.backend };

@@ -123,6 +123,52 @@ test('copies global model defaults into new projects and accepts explicit overri
   assert.equal(await read('qa'), rag);
 });
 
+test('copies the global OCR selection into each project type and accepts init overrides', { timeout: 30_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dunlin-global-ocr-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const path = join(root, 'global.yaml');
+  const ocrHome = join(root, 'ocr');
+  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: path, DUNLIN_OCR_HOME: ocrHome };
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 10_000 });
+  const json = async (...args) => JSON.parse((await run(...args, '--json')).stdout);
+  const read = async (name) => parse(await readFile(join(root, name, 'Dunlinfile.yaml'), 'utf8'));
+  const loader = (config) => (config.source ?? config.ingress).modules.find(({ use }) => use === 'loader.auto');
+
+  await json('config', 'set', 'llm', '--model', 'local-writer');
+  const selected = await json('config', 'set', 'ocr', '--tool', 'lightonocr');
+  assert.deepEqual(selected.data, { path, version: 1, llm: { provider: 'ollama', model: 'local-writer' }, ocr: { tool: 'lightonocr' } });
+  assert.deepEqual((await json('config', 'list')).data, selected.data);
+  assert.match((await run('config', 'list')).stdout, /^ocr +lightonocr$/mu);
+  const { name, version } = (await json('add', '--list')).data.find(({ name }) => name === 'ocr');
+
+  for (const type of ['rag', 'mcp', 'wiki', 'para']) {
+    await run('init', type, type);
+    const config = await read(type);
+    assert.equal(loader(config).with.ocr, 'loader.ocr');
+    assert.deepEqual(config.tools, [{ name, version }]);
+    assert.equal((await json('--project', type, 'validate')).data.valid, true);
+  }
+  assert.equal((await read('wiki')).models.writer.model, 'local-writer');
+  await run('init', 'rag', 'skip-ocr', '--no-ocr');
+  assert.equal(loader(await read('skip-ocr')).with.ocr, 'none');
+  assert.equal((await read('skip-ocr')).tools, undefined);
+  await assert.rejects(run('init', 'rag', 'conflict', '--ocr', '--no-ocr'), { code: 2 });
+  await assert.rejects(run('config', 'set', 'ocr', '--tool', 'tesseract-js'), { code: 2 });
+  await assert.rejects(run('config', 'set', 'ocr', '--model', 'unsupported'), { code: 2 });
+  await assert.rejects(run('config', 'list', '--tool', 'lightonocr'), { code: 2 });
+  await assert.rejects(run('config', 'unset', 'ocr', '--tool', 'lightonocr'), { code: 2 });
+
+  await run('config', 'unset', 'ocr');
+  assert.equal((await json('config', 'list')).data.ocr, undefined);
+  await run('init', 'rag', 'default');
+  await run('init', 'rag', 'enabled', '--ocr');
+  assert.equal(loader(await read('default')).with.ocr, 'none');
+  assert.equal(loader(await read('enabled')).with.ocr, 'loader.ocr');
+  assert.equal(loader(await read('rag')).with.ocr, 'loader.ocr');
+  assert.deepEqual((await read('enabled')).tools, [{ name, version }]);
+  await assert.rejects(stat(ocrHome), { code: 'ENOENT' });
+});
+
 test('searches Japanese questions and pins the user dictionary to its build', { timeout: 35_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-japanese-search-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));

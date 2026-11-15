@@ -136,6 +136,16 @@ dunlin init para ./notes
 - プロバイダーの標準値は Ollama。OpenAI を選ぶと、認証用の環境変数名 `OPENAI_API_KEY` を生成する設定に書く。キー本体は保存しない。
 - モデルの設定と、必要なモジュール・引数を `Dunlinfile.yaml` に書く。以後の実行は、そのプロジェクトの設定を使う。ユーザー設定の変更は次回以降の初期化に適用する。
 
+#### 初期化時の OCR 指定
+
+`dunlin config set ocr` で LightOnOCR をユーザー設定に登録する。`--tool lightonocr` でツール名を明示できる。`dunlin config list` で確認し、`dunlin config unset ocr` で解除する。登録内容はモデルの既定値と同じ `~/.dunlin/config.yaml` に保存する。
+
+`init` で `--ocr` または `--no-ocr` を指定すると、そのプロジェクトだけユーザー設定を上書きする。指定の優先順位は `init` のオプション、ユーザー設定、組み込みの既定値（無効）の順である。
+
+OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に OCR の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `dunlin add ocr` を実行して準備する。PDF のテキスト層は先に読み、テキスト層のないページや画像の認識に LightOnOCR を使う。
+
+#### 初期化で作成する項目
+
 | 作成物 | 内容 |
 | --- | --- |
 | `Dunlinfile.yaml` | 編集可能な設定の正本 |
@@ -280,7 +290,7 @@ dunlin serve
 
 ### 5.5 設定ファイルの例
 
-次の2例は、グローバル設定にモデルを登録せず、`init` に追加のオプションを渡さずに生成した `Dunlinfile.yaml` の全文である。入力ディレクトリの既定は `./docs`。`--source` を指定すると、`source.filesystem` の `with.path` にプロジェクトから見た指定先のパスが入る。
+次の2例は、グローバル設定にモデルと OCR の登録がなく、`init` に追加のオプションを渡さない場合に生成する `Dunlinfile.yaml` の全文である。入力ディレクトリの既定は `./docs`。`--source` を指定すると、`source.filesystem` の `with.path` にプロジェクトから見た指定先のパスが入る。
 
 標準の `search` は、Lindera + IPADIC で分かち書きし、Tantivy の BM25 でキーワード検索する。MCP は `serve` で stdio を使う。RAG は `ask` と HTTP の `serve` を備え、回答を生成するには `models.answerer.model` にモデル名を設定する。検索はモデル名が `null` のまま使える。 [HTTP の提供設定](#273-種別-rag-の-serve)
 
@@ -484,6 +494,7 @@ eval:
 | `transform` | 正規化などの前処理、チャンク化 | コーパス | チャンク集合 |
 | `index` | 埋め込み（設定時）、キーワード索引とベクトル索引の作成 | チャンク集合 | 埋め込み集合、索引 |
 
+- MCP/RAG の `source` と Wiki/PARA の `ingress` は、ファイルの読み込み、ハッシュ計算、本文抽出を最大4件まで同時に進める。文書と警告は入力順に記録する。OCR を有効にした取り込みは、認識要求の順序を保つためファイルを1件ずつ処理する。
 - チャンク化は `transform` に入れる。チャンク設定を変えても、抽出はやり直さない。
 - 埋め込みは `index` に入れる。ただし内部ではチャンク単位で再利用し、トークナイザだけを変えたときに埋め込みを再計算しない。
 - 各段階の出力は、その段階が成功した時点で自動的に保存する。利用者が保存操作をする必要はない。
@@ -1030,7 +1041,7 @@ Wiki/PARA側は、資料を読んで知識をページやノートに蓄積し�
 
 ### 13.5 設定ファイルの例
 
-次の2例は、グローバル設定にモデルを登録せず、`init` に追加のオプションを渡さずに生成した `Dunlinfile.yaml` の全文である。`about.title` にはプロジェクトのディレクトリ名が入る。`--purpose` を指定すると、その文が `about.purpose` に入る。取り込みを始めるには目的と `models.writer.model` を設定する。`--llm-model` やグローバル設定から執筆モデルを指定できる。 [初期化時のモデル指定](#初期化時のモデル指定)
+次の2例は、グローバル設定にモデルと OCR の登録がなく、`init` に追加のオプションを渡さない場合に生成する `Dunlinfile.yaml` の全文である。`about.title` にはプロジェクトのディレクトリ名が入る。`--purpose` を指定すると、その文が `about.purpose` に入る。取り込みを始めるには目的と `models.writer.model` を設定する。`--llm-model` やグローバル設定から執筆モデルを指定できる。 [初期化時のモデル指定](#初期化時のモデル指定)
 
 Wiki は `wiki.write` でページを書き、PARA は `para.write` でノートを書く。PARA の分類は Projects、Areas、Resources、Archives の4つで、`init para` が `site/` の下に各ディレクトリを作る。
 

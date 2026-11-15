@@ -372,6 +372,7 @@ dependencies = [
  "blake3",
  "csv",
  "dunce",
+ "icu_normalizer",
  "lindera",
  "memmap2",
  "napi",
@@ -385,6 +386,7 @@ dependencies = [
  "serde_json",
  "tantivy",
  "tempfile",
+ "unicode-segmentation",
  "url",
  "walkdir",
 ]

@@ -159,6 +159,16 @@ pub fn merge_user_dictionary(
     })
 }
 
+/// Chunks documents synchronously. The request and result are JSON; see `chunk::ChunkRequest`.
+#[napi]
+pub fn chunk_documents(request: String) -> Result<String> {
+    let request: crate::chunk::ChunkRequest = serde_json::from_str(&request)
+        .map_err(|_| native_error(crate::Error::Invalid("Invalid chunk request")))?;
+    let chunks =
+        crate::chunk::chunk_documents(&request, &Cancellation::default()).map_err(native_error)?;
+    serde_json::to_string(&chunks).map_err(|_| native_error(crate::Error::Index))
+}
+
 #[napi]
 pub fn rank_vectors(
     path: String,

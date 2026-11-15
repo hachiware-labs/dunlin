@@ -4,9 +4,9 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, OpenOptions, OperationOptions, OptimizationReport, OptimizeOptions, ReadOutcome, RetrievalMethod,
-  RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SyncOutcome, Wiki, WikiBuildOptions,
+  RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
 } from './types.js';
 
@@ -55,6 +55,7 @@ interface NativeBinding {
   analyzeJapanese(texts: readonly string[], dictionary: string | undefined, cancel: NativeCancellation): Promise<JapaneseToken[][]>;
   mergeUserDictionary(existing: string | undefined, selected: string, cancel: NativeCancellation): Promise<string>;
   rankVectors(path: string, request: string, cancel: NativeCancellation): Promise<{ i: number; score: number }[]>;
+  chunkDocuments(request: string): string;
   acquireExecutionLock(path: string): { release(): void };
 }
 
@@ -291,6 +292,18 @@ export class Dunlin {
   static async rankVectors(path: string, options: { needle: readonly number[]; positions?: readonly number[]; rows: number; limit: number },
     { signal }: OperationOptions = {}): Promise<{ i: number; score: number }[]> {
     return cancellable(signal, (cancel) => native().rankVectors(resolve(path), JSON.stringify(options), cancel));
+  }
+
+  /**
+   * Split documents into character windows with the chunk.length and chunk.structure rules.
+   * Runs synchronously on the calling thread; pass a few documents at a time to stay responsive.
+   */
+  static chunkDocuments(documents: readonly ChunkDocument[], options: ChunkOptions): TextChunk[][] {
+    try {
+      return JSON.parse(native().chunkDocuments(JSON.stringify({ documents, ...options }))) as TextChunk[][];
+    } catch (error) {
+      throw translateNativeError(error);
+    }
   }
 
   /** Acquire a nonblocking process lock. Closing it releases ownership. */

@@ -81,6 +81,33 @@ export interface LineRange {
   endLine: number;
 }
 
+/** A document for Dunlin.chunkDocuments. */
+export interface ChunkDocument {
+  content: string;
+  /** Use Markdown headings as chunk titles. */
+  markdown?: boolean;
+  /** One-based lines that start a page. Used with structure. */
+  boundaries?: readonly number[];
+}
+
+export interface ChunkOptions {
+  /** Maximum characters per chunk. A grapheme is never split. */
+  size: number;
+  /** Characters repeated from the end of the previous chunk. */
+  overlap: number;
+  /** Split at headings and page boundaries instead of preferring sentence ends. */
+  structure?: boolean;
+  /** Add the NFKC form of each chunk as searchText. */
+  nfkc?: boolean;
+}
+
+export interface TextChunk {
+  heading: string;
+  range: LineRange;
+  byteRange: { start: number; end: number };
+  searchText?: string;
+}
+
 export interface Evidence {
   source: SourceRef;
   range: LineRange;

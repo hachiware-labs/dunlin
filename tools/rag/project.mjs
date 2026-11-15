@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { createGenerator } from './models.mjs';
-import { chunkCorpus, inventory, loadCorpus, parserAssignments, scanFolder, unsupportedFiles } from './project-content.mjs';
+import { chunkCorpus, inventory, loadCorpus, parserAssignments, scanFolder, unsupportedFiles, writeTogether } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
 import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
@@ -407,6 +407,7 @@ async function runTransform(db, source, plan, force, project) {
     hash: revision,
     read: (key) => { const row = !force && read.get(key); return row && JSON.parse(row.chunks); },
     write: (key, value) => write.run(key, JSON.stringify(value)),
+    together: (run) => writeTogether(db, run),
   };
   const chunks = await runModules(plan, { groups: source.groups }, {
     chunk: (input, args) => chunkCorpus(input, args, cache),

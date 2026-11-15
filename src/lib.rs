@@ -1,5 +1,6 @@
 //! Local, single-tenant knowledge indexing and evidence retrieval.
 
+pub mod chunk;
 mod corpus;
 mod engine;
 mod evaluate;

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 const project = fileURLToPath(new URL('../', import.meta.url));
 const output = join(project, 'dist', 'packages');
 const stage = await mkdtemp(join(tmpdir(), 'dunlin-package-'));
+const cache = join(stage, 'npm-cache');
 const npmCli = process.env.npm_execpath;
 assert.ok(npmCli, 'Run this script via npm run test:package');
 
@@ -27,7 +28,10 @@ async function installAndSearch(name, tarballs) {
   const consumer = join(stage, name);
   await mkdir(consumer);
   await writeFile(join(consumer, 'package.json'), '{"private":true,"type":"module"}');
-  npm(['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs], consumer);
+  const options = ['--cache', cache, '--ignore-scripts', '--no-audit', '--no-fund'];
+  // Resolve and cache the consumer's dependencies. npm ci reinstalls from the lockfile and cache.
+  npm(['install', ...options, ...tarballs], consumer);
+  npm(['ci', '--offline', ...options], consumer);
   const installed = await readdir(join(consumer, 'node_modules'));
   assert.ok(installed.includes('@modelcontextprotocol'));
   assert.ok(installed.includes('zod'));

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { access, mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -154,7 +154,7 @@ test('indexes Markdown, Unicode and code identifiers with verifiable line eviden
     assert.match(title, /認証$/);
     assert.deepEqual(evidence.range, { startLine: 3, endLine: 4 });
     assert.equal(evidence.source.sourceId, 'docs');
-    assert.equal(fileURLToPath(evidence.source.url), file);
+    assert.equal(await realpath(fileURLToPath(evidence.source.url)), await realpath(file));
     assert.equal(typeof evidence.acquiredAtMs, 'number');
     assert.equal((await database.read(evidence)).content, '## 認証\r\n新しい認証方式はOAuthです。🔑\r\n');
     const exactLine = { ...evidence, range: { startLine: 4, endLine: 4 } };

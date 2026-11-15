@@ -52,7 +52,9 @@ register('chunk.semantic', 'transform', 'chunk', 'corpus', 'chunks', {
 }, 'Split text at low-similarity boundaries between adjacent passages.',
 (input, args, ctx) => ctx.chunkSemantic(input, args), { external: true, deterministic: false, requires: ['embedding model'] });
 register('index.keyword', 'index', 'index', 'chunks', 'index', {
-  tokenizer: choice(['trigram', 'word'], 'trigram'), short_query: choice(['bigram', 'none'], 'bigram'),
+  tokenizer: choice(['lindera', 'trigram', 'word'], 'lindera'),
+  user_dictionary: z.string().trim().min(1).nullable().optional(),
+  short_query: z.enum(['bigram', 'none']).optional(),
 }, 'Build the BM25 keyword index.', (input, args, ctx) => ctx.index(input, args));
 register('index.vector', 'index', 'index', 'chunks', 'index', {
   model: z.string().min(1),
@@ -139,7 +141,8 @@ export function ragTemplate(type, path, { embedding, llm } = {}) {
   const config = { init: { version: 1, type } };
   for (const [stage, names] of Object.entries(sequences)) {
     if (stage === 'ask' && type !== 'rag') continue;
-    config[stage] = { modules: names.map((name) => defaultEntry(name, name === 'source.filesystem' ? { path } : {})) };
+    config[stage] = { modules: names.map((name) => defaultEntry(name,
+      name === 'source.filesystem' ? { path } : name === 'index.keyword' ? { user_dictionary: null } : {})) };
   }
   if (type === 'rag') config.models = { answerer: projectModel('chat', llm) };
   if (embedding) {
@@ -159,7 +162,7 @@ export function wikiTemplate(type, title, purpose, llm) {
     about: { title, purpose: purpose ?? '', out_of_scope: '' },
     models: { writer: projectModel('chat', llm) },
     ingress: { modules: [
-      defaultEntry('loader.auto'), defaultEntry('index.keyword'),
+      defaultEntry('loader.auto'), defaultEntry('index.keyword', { tokenizer: 'trigram', short_query: 'bigram' }),
       entry(type === 'wiki' ? 'wiki.write' : 'para.write', { model: 'writer', rules: './rules.md', max_pages_per_job: 20 }),
       entry('citation.verify', { on_failure: 'reject' }),
     ] },
@@ -377,7 +380,7 @@ export function validateRag(config, file, line) {
             'Use a value allowed by the module argument definition.', { ...details, received: args[key] });
         } else {
           values[key] = checked.data;
-          if (!Object.hasOwn(args, key)) diagnostic(warnings, 'ARG_DEFAULT', argPath, argumentInfo(schema),
+          if (checked.data !== undefined && !Object.hasOwn(args, key)) diagnostic(warnings, 'ARG_DEFAULT', argPath, argumentInfo(schema),
             'Write the default value explicitly to make the configuration reproducible.', details);
         }
       }
@@ -394,8 +397,16 @@ export function validateRag(config, file, line) {
       if (module.tool && !config.tools?.some?.((tool) => tool?.name === module.tool)) {
         issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ' + module.tool + ' tool', 'Run dunlin add ' + module.tool + '.', details);
       }
-      if (name === 'index.keyword' && values.tokenizer === 'word' && values.short_query === 'bigram') {
-        issue('ARG_CONFLICT', [...path, 'with', 'short_query'], 'none with the word tokenizer', 'Use trigram with bigram or word with none.', details);
+      if (name === 'index.keyword') {
+        if (values.tokenizer === 'trigram') values.short_query ??= 'bigram';
+        else if (values.short_query === 'bigram') issue('ARG_CONFLICT', [...path, 'with', 'short_query'],
+          'bigram with the trigram tokenizer', 'Remove short_query or select the trigram tokenizer.', details);
+        if (values.user_dictionary && values.tokenizer !== 'lindera') issue('ARG_CONFLICT', [...path, 'with', 'user_dictionary'],
+          'A CSV with the lindera tokenizer', 'Select lindera or remove user_dictionary.', details);
+        if (values.user_dictionary) {
+          try { values.user_dictionary = resolve(dirname(file), resolveConfigValue(values.user_dictionary, name + '.with.user_dictionary')); }
+          catch (failure) { issue('REQUIREMENT_MISSING', [...path, 'with', 'user_dictionary'], 'A resolvable local CSV path', failure.message, details); }
+        }
       }
       if (name === 'rerank.model' && values.model) {
         const model = config.models?.[values.model];

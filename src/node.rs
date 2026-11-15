@@ -13,7 +13,7 @@ use serde_json::Value;
 
 use crate::{
     Cancellation, CorpusBackend, DocumentRef, Evidence, ExploreOptions, KnowledgeBase,
-    RetrievalMethod, source::DocumentInput,
+    RetrievalMethod, engine::KeywordOptions, source::DocumentInput,
 };
 
 #[napi]
@@ -68,6 +68,11 @@ pub fn acquire_execution_lock(path: String) -> Result<NativeExecutionLock> {
     Ok(NativeExecutionLock(Some(file)))
 }
 
+#[napi(object)]
+pub struct JapaneseKeywordOptions {
+    pub user_dictionary: Option<String>,
+}
+
 #[napi]
 pub fn open_native(
     path: String,
@@ -76,6 +81,7 @@ pub fn open_native(
     keyword_ngrams: Option<bool>,
     keyword_bigrams: Option<bool>,
     corpus_path: Option<String>,
+    keyword_japanese: Option<JapaneseKeywordOptions>,
 ) -> AsyncTask<Job<NativeDatabase>> {
     let cancel = cancel.0.clone();
     task(move || {
@@ -88,13 +94,21 @@ pub fn open_native(
                 ));
             }
         };
+        let keyword = KeywordOptions {
+            ngrams: keyword_ngrams.unwrap_or(false),
+            bigrams: keyword_bigrams.unwrap_or(false),
+            japanese: keyword_japanese.is_some(),
+            user_dictionary: keyword_japanese
+                .as_ref()
+                .and_then(|options| options.user_dictionary.as_deref())
+                .map(Path::new),
+        };
         Ok(NativeDatabase(Some(Arc::new(
             KnowledgeBase::open_with_options(
                 Path::new(&path),
                 backend,
                 corpus_path.as_deref().map(Path::new),
-                keyword_ngrams.unwrap_or(false),
-                keyword_bigrams.unwrap_or(false),
+                keyword,
                 &cancel,
             )?,
         ))))

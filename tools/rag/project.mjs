@@ -407,12 +407,29 @@ async function runTransform(db, source, plan, force, project) {
   return { output: { id: outputId, key: id, config_id, source_id: source.id, modules: moduleSettings(plan), chunks }, reused: false };
 }
 
+async function readUserDictionary(path) {
+  if (!path) return null;
+  try {
+    const bytes = await readFile(path);
+    return { bytes, hash: revision(bytes) };
+  } catch {
+    throw new ProjectError(2, 'USER_DICTIONARY_REQUIRED', 'Could not read the user dictionary CSV at ' + path);
+  }
+}
+
+function dictionarySnapshot(paths, hash) {
+  return join(paths.artifacts, 'dictionaries', hash + '.csv');
+}
+
 async function runIndex(db, project, runId, transformed, { keyword: args, vector: vectorArgs }, { force, activate, tag, generation, warnings, signal }) {
   const { paths } = project;
   const source = readStage(db, 'source', transformed.source_id);
   if (!source) throw new ProjectError(3, 'STAGE_REQUIRED', 'The source output referenced by transform is missing. Run dunlin build.');
   const embedder = vectorArgs ? vectorModel(project.config, vectorArgs.settings.model) : null;
-  const indexConfigId = digest('cfg', ['index.keyword-v2', args,
+  const dictionary = await readUserDictionary(args?.user_dictionary);
+  const japanese = args?.tokenizer === 'lindera';
+  const keyword = japanese ? { tokenizer: 'lindera', dictionary_hash: dictionary?.hash ?? null } : args;
+  const indexConfigId = digest('cfg', [japanese ? 'index.lindera-ipadic-v1' : 'index.keyword-v2', keyword,
     ...(embedder ? ['index.vector-v1', vectorArgs, embedder.identity] : [])]);
   const configId = digest('cfg', [source.config_id, transformed.config_id, indexConfigId, moduleSettings(project.plan.search),
     project.plan.search.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, null, args.model))]);
@@ -428,14 +445,15 @@ async function runIndex(db, project, runId, transformed, { keyword: args, vector
       && (manifest.vector?.count === 0 || await exists(join(paths.artifacts, manifest.index, backend.file)))));
   const previous = db.prepare('SELECT build_id FROM project WHERE id = 1').get().build_id;
   const configuration = safeConfig(project.config);
-  for (const entry of configuration.source.modules) {
-    if (entry.use === 'source.filesystem' && entry.with?.path) {
-      const path = entry.with.path;
-      if (project.configRoot !== project.root) {
+  if (project.configRoot !== project.root) {
+    for (const [stage, name, arg] of [['source', 'source.filesystem', 'path'], ['index', 'index.keyword', 'user_dictionary']]) {
+      for (const entry of configuration[stage].modules) {
+        const path = entry.use === name && entry.with?.[arg];
+        if (!path) continue;
         if (path.includes('${') && !isAbsolute(path)) {
-          const expanded = resolveConfigValue(path, 'source.filesystem.with.path');
-          if (!isAbsolute(expanded)) entry.with.path = relative(project.root, project.configRoot).split(sep).join('/') + '/' + path;
-        } else entry.with.path = relative(project.root, resolve(project.configRoot, path)).split(sep).join('/') || '.';
+          const expanded = resolveConfigValue(path, name + '.with.' + arg);
+          if (!isAbsolute(expanded)) entry.with[arg] = relative(project.root, project.configRoot).split(sep).join('/') + '/' + path;
+        } else entry.with[arg] = relative(project.root, resolve(project.configRoot, path)).split(sep).join('/') || '.';
       }
     }
   }
@@ -449,12 +467,17 @@ async function runIndex(db, project, runId, transformed, { keyword: args, vector
   let committed = false;
   let changed = false;
   try {
+    if (dictionary) {
+      const snapshot = dictionarySnapshot(paths, dictionary.hash);
+      await mkdir(dirname(snapshot), { recursive: true });
+      if (!await exists(snapshot)) await atomicWrite(snapshot, dictionary.bytes);
+    }
     if (!reused) {
       await mkdir(location);
       created = true;
       const active = db.prepare('SELECT manifest FROM builds WHERE id = ?').get(previous);
       const prior = active && JSON.parse(active.manifest);
-      const baseline = !force && prior?.shared_corpus && JSON.stringify(prior.keyword) === JSON.stringify(args)
+      const baseline = !force && prior?.shared_corpus && JSON.stringify(prior.keyword) === JSON.stringify(keyword)
         && await Dunlin.inspectIndex(join(paths.artifacts, prior.index));
       if (baseline) {
         await cp(join(paths.artifacts, prior.index), location, {
@@ -462,7 +485,12 @@ async function runIndex(db, project, runId, transformed, { keyword: args, vector
           filter: (path) => !path.endsWith('-shm') && !/vectors\.(json|f32)$/u.test(path) && basename(path) !== 'hannoy',
         });
       }
-      const database = await Dunlin.open(location, { corpusBackend: 'sqlite', corpusDirectory: paths.corpus, ...keywordOptions(args) });
+      const database = await Dunlin.open(location, { corpusBackend: 'sqlite', corpusDirectory: paths.corpus, ...keywordOptions(keyword, paths) })
+        .catch((error) => {
+          if (dictionary && error.code === 'INVALID_ARGUMENT') throw new ProjectError(2, 'INVALID_USER_DICTIONARY',
+            'Could not load ' + args.user_dictionary + '. ' + error.message);
+          throw error;
+        });
       let vector;
       try {
         const unused = new Set(Object.keys(baseline ? baseline.sources : {}));
@@ -493,7 +521,7 @@ async function runIndex(db, project, runId, transformed, { keyword: args, vector
       if (vector) buildId = digest('bld', [buildKey, vector.output]);
       manifest = {
         build_id: buildId, index: runId, files: source.files, documents: searchableDocuments,
-        skipped: source.skipped, source_id: source.id, transform_id: transformed.id, keyword: args, vector, config_id: configId,
+        skipped: source.skipped, source_id: source.id, transform_id: transformed.id, keyword, vector, config_id: configId,
         construction: { source: source.modules, transform: transformed.modules, index: moduleSettings(project.plan.index) }, shared_corpus: true,
       };
     }
@@ -692,7 +720,10 @@ async function buildProject(project, command, runId, values, warnings) {
         const sourceArgsChanged = previous?.config_id !== digest('cfg', moduleSettings(settings.source));
         const transformArgsChanged = transform?.config_id !== digest('cfg', moduleSettings(settings.transform));
         const config = serving && state.prepare('SELECT config FROM build_config WHERE ref = ?').get(serving.build_id);
-        const indexArgsChanged = !config || JSON.stringify(JSON.parse(config.config).index) !== JSON.stringify(project.config.index);
+        const dictionary = selected.includes('index') && await readUserDictionary(
+          settings.index.find(({ module }) => module.name === 'index.keyword')?.args.user_dictionary);
+        const indexArgsChanged = !config || JSON.stringify(JSON.parse(config.config).index) !== JSON.stringify(project.config.index)
+          || (serving?.keyword?.dictionary_hash ?? null) !== (dictionary?.hash ?? null);
         data.files = (await inventory(sources, previous)).map((file) => {
           const skip = skipped.has(JSON.stringify([file.source_id, file.path]));
           const changed = values.force || file.change !== 'unchanged';
@@ -847,6 +878,8 @@ function searchConfigId(plan, options = {}, build, project) {
   const models = plan.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, build, args.model));
   return digest('search', [moduleSettings(plan), {
     limit, budgetChars, sourceIds: sourceIds ? [...new Set(sourceIds)].sort() : undefined,
+    keyword: build?.keyword?.tokenizer === 'lindera' && plan.some(({ module }) => module.name === 'retrieval.keyword')
+      ? ['search.lindera-ipadic-v1', build.keyword.dictionary_hash] : undefined,
     vector: plan.some(({ module }) => ['retrieval.vector', 'hannoy.search'].includes(module.name)) ? build?.vector?.identity : undefined,
     rerank: models.length ? models : undefined,
   }]);
@@ -955,7 +988,10 @@ async function projectSearchJson(database, build, plan, query, project, options 
   return searchOutput(database, result, query, searchConfigId(plan, {}, build, project), trialSignal(options.signal));
 }
 
-function keywordOptions(args) {
+function keywordOptions(args, paths) {
+  if (args?.tokenizer === 'lindera') {
+    return { keywordJapanese: args.dictionary_hash ? { userDictionary: dictionarySnapshot(paths, args.dictionary_hash) } : {} };
+  }
   if (!args || args.tokenizer === 'word') return {};
   return { keywordNgrams: true, keywordBigrams: args.short_query === 'bigram' };
 }
@@ -966,7 +1002,7 @@ async function openBuild(paths, build) {
     throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run dunlin build first.');
   }
   return Dunlin.open(index, { corpusBackend: 'sqlite', corpusDirectory: build.shared_corpus ? paths.corpus : undefined,
-    ...keywordOptions(build.keyword) });
+    ...keywordOptions(build.keyword, paths) });
 }
 
 async function waitForHttp(server, type, host) {

@@ -9,6 +9,7 @@ export interface OpenOptions extends OperationOptions {
   corpusDirectory?: string;
   keywordNgrams?: boolean;
   keywordBigrams?: boolean;
+  keywordJapanese?: { userDictionary?: string };
 }
 
 export type RetrievalMethod = 'keyword' | 'coverage';

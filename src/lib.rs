@@ -4,6 +4,7 @@ mod corpus;
 mod engine;
 mod evaluate;
 mod explore;
+mod japanese;
 mod legacy_delete;
 mod model;
 mod plans;
@@ -21,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub use corpus::{CorpusBackend, CorpusDocument, CorpusMetadata, ParserInfo, SourceLocation};
-use engine::KeywordIndex;
+use engine::{KeywordIndex, KeywordOptions};
 pub use evaluate::{
     CandidateMetrics, EvaluationCase, EvaluationOptions, EvaluationReport, EvaluationSet,
     OptimizationReport, OptimizeOptions, RelevantObject,
@@ -65,15 +66,14 @@ impl KnowledgeBase {
         backend: CorpusBackend,
         cancel: &Cancellation,
     ) -> Result<Self> {
-        Self::open_with_options(path, backend, None, false, false, cancel)
+        Self::open_with_options(path, backend, None, KeywordOptions::default(), cancel)
     }
 
     pub(crate) fn open_with_options(
         path: &Path,
         backend: CorpusBackend,
         corpus_path: Option<&Path>,
-        ngrams: bool,
-        bigrams: bool,
+        keyword: KeywordOptions<'_>,
         cancel: &Cancellation,
     ) -> Result<Self> {
         cancel.check()?;
@@ -84,8 +84,7 @@ impl KnowledgeBase {
             &index_path,
             corpus_path.unwrap_or(&path.join(".dunlin-corpus-v1")),
             backend,
-            ngrams,
-            bigrams,
+            keyword,
             cancel,
         )?;
         let plans = PlanStore::open(&path.join(".dunlin-plans-v1"))?;

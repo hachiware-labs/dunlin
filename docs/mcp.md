@@ -132,8 +132,8 @@ index:
   modules:
     - use: index.keyword
       with:
-        tokenizer: trigram
-        short_query: bigram
+        tokenizer: lindera
+        user_dictionary: null
 # For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.
 # Retrieve candidates and assemble source context.
 search:
@@ -193,8 +193,8 @@ index:
   modules:
     - use: index.keyword
       with:
-        tokenizer: trigram
-        short_query: bigram
+        tokenizer: lindera
+        user_dictionary: null
 # For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.
 # Retrieve candidates and assemble source context.
 search:
@@ -249,6 +249,27 @@ serve:
     request_timeout_seconds: 120
     max_concurrent: 8
 ```
+
+## 日本語検索とユーザー辞書
+
+標準のキーワード索引は同梱の Lindera と IPADIC で分かち書きします。分かち書きした語を BM25 で順位付けし、問い合わせと同じ語列が続く箇所に加点します。モデルを登録せずに `dunlin search "ポンプの点検はいつ実施しますか"` を使えます。[Lindera のライセンス](../licenses/lindera-LICENSE.txt) · [IPADIC の通知](../licenses/ipadic-NOTICE.txt)
+
+専門用語を登録する場合は、たとえば `dictionaries/ja.csv` に UTF-8 で次の1行を書きます。見出し行は省き、`表層形,品詞,読み` の順に並べます。表層形は、文書と問い合わせの前処理後の表記に合わせます。標準の Unicode 正規化は NFKC です。
+
+```csv
+メカニカルシール,名詞,メカニカルシール
+```
+
+```yaml
+index:
+  modules:
+    - use: index.keyword
+      with:
+        tokenizer: lindera
+        user_dictionary: ./dictionaries/ja.csv
+```
+
+辞書を追加・編集したあとに `dunlin build --from index` を実行します。各ビルドは、構築時に保存した辞書を検索にも使います。稼働中の `serve` に辞書の変更を反映するには、構築してから再起動します。既存の `tokenizer: trigram` のプロジェクトも、上の設定と同じ手順で移行できます。
 
 ## ベクトル索引を切り替える
 

@@ -27,7 +27,7 @@ test('initializes the four project types through the public CLI', async (t) => {
     if (searchProject) {
       assert.deepEqual(config.source.modules[0], { use: 'source.filesystem', with: { path: './docs', exclude: [] } });
       assert.deepEqual(config.transform.modules[1], { use: 'chunk.length', with: { unit: 'characters', size: 800, overlap: 100 } });
-      assert.deepEqual(config.index.modules[0], { use: 'index.keyword', with: { tokenizer: 'trigram', short_query: 'bigram' } });
+      assert.deepEqual(config.index.modules[0], { use: 'index.keyword', with: { tokenizer: 'lindera', user_dictionary: null } });
       assert.equal(config.search.modules.at(-1).use, 'context.assemble');
       if (type === 'mcp') {
         assert.deepEqual(config.serve, { transport: 'stdio' });
@@ -121,6 +121,59 @@ test('copies global model defaults into new projects and accepts explicit overri
   await run('init', 'mcp', 'next');
   assert.equal(parse(await read('next')).models, undefined);
   assert.equal(await read('qa'), rag);
+});
+
+test('searches Japanese questions and pins the user dictionary to its build', { timeout: 35_000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dunlin-japanese-search-'));
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 10_000 });
+  const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
+  await run('init', 'mcp', 'kb');
+  const docs = join(root, 'kb', 'docs');
+  const configPath = join(root, 'kb', 'Dunlinfile.yaml');
+  const compound = '超伝導異常監視モジュール';
+  await writeFile(join(docs, 'guide.txt'), '保守手順\nメカニカルシールは6か月ごとに交換してください。\nポンプは毎月の第1営業日に点検を実施します。\n');
+  await writeFile(join(docs, 'module.txt'), compound + 'を交換します。\n');
+  await writeFile(join(docs, 'general.txt'), '超伝導を研究する。異常を検知する。監視を開始する。モジュールを組み立てる。\n');
+  await writeFile(join(docs, 'close.txt'), '電源を遮断して計器を確認する。\n');
+  await writeFile(join(docs, 'reversed.txt'), '計器を確認して電源を遮断する。\n');
+  const baseline = (await json('build')).data;
+  const query = 'メカニカルシールの交換周期は';
+  for (const question of [query, 'ポンプの点検はいつ実施しますか', '手順']) {
+    assert.equal((await json('search', question)).data.results[0].document_id, 'docs:guide.txt');
+  }
+  assert.deepEqual((await json('search', '人工衛星の軌道は')).data.results, []);
+  const sequence = (await json('search', '電源を遮断して計器を確認する')).data;
+  assert.equal(sequence.results[0].document_id, 'docs:close.txt');
+  assert.ok(sequence.results[0].score > sequence.results.find(({ document_id }) => document_id === 'docs:reversed.txt').score);
+  await json('eval-data', 'add', '--question', query, '--doc', 'docs:guide.txt', '--quote', '6か月ごとに交換');
+  assert.equal((await json('eval')).data.scores['evidence_recall@context'], 1);
+  const original = (await json('search', compound)).data;
+  assert.ok(original.results.some(({ document_id }) => document_id === 'docs:general.txt'));
+
+  const config = parse(await readFile(configPath, 'utf8'));
+  config.index.modules[0].with.user_dictionary = './user.csv';
+  await writeFile(configPath, stringify(config));
+  const dictionaryPath = join(root, 'kb', 'user.csv');
+  await writeFile(dictionaryPath, compound + ',名詞,チョウデンドウイジョウカンシモジュール\n');
+  const withDictionary = (await json('build', '--from', 'index')).data;
+  assert.notEqual(withDictionary.build_id, baseline.build_id);
+  assert.equal(withDictionary.transform_id, baseline.transform_id);
+  await json('tag', 'compound', withDictionary.build_id);
+  const focused = (await json('search', compound)).data;
+  assert.deepEqual(focused.results.map(({ document_id }) => document_id), ['docs:module.txt']);
+  assert.notEqual(focused.search_config_id, original.search_config_id);
+
+  await writeFile(dictionaryPath, '遮断計器,名詞,シャダンケイキ\n');
+  assert.deepEqual((await json('search', compound)).data, focused);
+  await json('build', '--from', 'index');
+  assert.deepEqual((await json('search', compound, '--build', 'compound')).data, focused);
+  assert.ok((await json('search', compound)).data.results.some(({ document_id }) => document_id === 'docs:general.txt'));
+
+  await writeFile(dictionaryPath, '領域,名詞\n');
+  await assert.rejects(json('build', '--from', 'index'), (error) =>
+    error.code === 2 && JSON.parse(error.stdout).errors[0].code === 'INVALID_USER_DICTIONARY');
 });
 
 test('runs only the selected stages and indexes the saved chunk ranges', { timeout: 30_000 }, async (t) => {

@@ -53,6 +53,7 @@ async function installAndSearch(name, tarballs) {
   run('init', 'para', 'para', '--purpose', 'PARA');
   run('--project', 'kb', 'build');
   assert.match(run('--project', 'kb', 'search', '手順'), /作業手順/u);
+  assert.match(run('--project', 'kb', 'search', '作業手順はどのように確認しますか'), /作業手順/u);
   const config = JSON.parse(run('--project', 'kb', 'serve', '--print-config', '--json'));
   assert.equal(config.schema_version, 1);
   assert.ok(config.data.args.includes('serve'));
@@ -96,6 +97,9 @@ async function installAndSearch(name, tarballs) {
 
 try {
   const bundled = await pack(project, join(output, 'bundled'));
+  for (const name of ['lindera-LICENSE.txt', 'ipadic-NOTICE.txt']) {
+    assert.ok(bundled.files.some(({ path }) => path === 'licenses/' + name));
+  }
   const addons = bundled.files.filter(({ path }) => path.endsWith('.node'));
   assert.equal(addons.length, 1, 'Build one native target in a clean dist directory before packing');
   await installAndSearch('bundled-consumer', [bundled.path]);
@@ -111,7 +115,8 @@ try {
   await mkdir(nativeDir);
   await copyFile(join(project, binary), join(nativeDir, platform.main));
   await cp(join(project, 'dist', 'tools'), join(nativeDir, 'tools'), { recursive: true });
-  await writeFile(join(nativeDir, 'package.json'), JSON.stringify({ ...platform, files: [...platform.files, 'tools/*'], private: true }));
+  await cp(join(project, 'licenses'), join(nativeDir, 'licenses'), { recursive: true });
+  await writeFile(join(nativeDir, 'package.json'), JSON.stringify({ ...platform, files: [...platform.files, 'tools/*', 'licenses/*.txt'], private: true }));
   const nativeTar = await pack(nativeDir, join(output, 'split'));
 
   const rootDir = join(stage, 'root');
@@ -125,7 +130,7 @@ try {
   await copyFile(join(project, 'README.md'), join(rootDir, 'README.md'));
   await cp(join(project, 'examples'), join(rootDir, 'examples'), { recursive: true });
   for (const { path } of bundled.files) {
-    if ((path.startsWith('dist/') && !path.startsWith('dist/tools/') && !path.endsWith('.node')) || /^(tools\/rag|docs)\//u.test(path)) {
+    if ((path.startsWith('dist/') && !path.startsWith('dist/tools/') && !path.endsWith('.node')) || /^(tools\/rag|docs|licenses)\//u.test(path)) {
       const target = join(rootDir, path);
       await mkdir(dirname(target), { recursive: true });
       await copyFile(join(project, path), target);

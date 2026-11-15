@@ -15,7 +15,7 @@ Dunlin は、手元の資料から立ち上げられるローカルのナレッ�
 
 初期化すると、作業ディレクトリに `Dunlinfile.yaml` と `.dunlin/state.sqlite` を作ります。コマンドはそのディレクトリ内で実行するか、`--project <directory>` で対象を指定します。
 
-MCP と RAG では、`--source <directory>` を省くとプロジェクト内の `docs/` を使います。両種別で同じ構築・検索モジュールを使い、`search --json` の `data`、MCP の `structuredContent`、HTTP の `/v1/search` は共通形式です。RAG の回答を使うには `models.answerer.model` にモデル名を設定します。[起動手順](docs/mcp.md) · [生成される Dunlinfile.yaml](docs/mcp.md#初期化で生成される-dunlinfileyaml)
+MCP と RAG では、`--source <directory>` を省くとプロジェクト内の `docs/` を使います。標準のキーワード検索は同梱の Lindera と IPADIC で分かち書きし、自然文で問い合わせできます。`search --json` の `data`、MCP の `structuredContent`、HTTP の `/v1/search` は共通形式です。RAG の回答を使うには `models.answerer.model` にモデル名を設定します。[起動手順](docs/mcp.md) · [日本語検索とユーザー辞書](docs/mcp.md#日本語検索とユーザー辞書)
 
 よく使うモデルは、たとえば `dunlin config set llm --provider ollama --model qwen3:4b` で一度登録できます。次の `init rag`、`init wiki`、`init para` が、新しい `Dunlinfile.yaml` に書き出します。MCP や RAG でハイブリッド検索を使う場合は、同様に `dunlin config set embedding` で埋め込みモデルを登録できます。[モデルの初期化設定](docs/mcp.md#初期化時にモデルを選ぶ)
 

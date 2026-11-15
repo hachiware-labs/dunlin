@@ -32,7 +32,8 @@
     "tools/rag/parsers/*",
     "docs/acceptance.md",
     "docs/dunlin-spec.md",
-    "docs/mcp.md"
+    "docs/mcp.md",
+    "licenses/*.txt"
   ],
   "napi": {
     "binaryName": "dunlin",

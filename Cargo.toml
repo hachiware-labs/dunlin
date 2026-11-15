@@ -13,7 +13,9 @@ node = ["dep:memmap2", "dep:napi", "dep:napi-derive", "dep:rayon"]
 
 [dependencies]
 blake3 = "1"
+csv = "1.4"
 dunce = "1"
+lindera = { version = "=6.2.0", default-features = false, features = ["embed-ipadic"] }
 memmap2 = { version = "0.9", optional = true }
 napi = { version = "3", default-features = false, features = ["napi8", "serde-json"], optional = true }
 napi-derive = { version = "3", optional = true }

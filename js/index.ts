@@ -43,7 +43,7 @@ interface NativeDatabase {
 interface NativeBinding {
   NativeCancellation: new () => NativeCancellation;
   openNative(path: string, cancel: NativeCancellation, backend?: CorpusBackend, keywordNgrams?: boolean, keywordBigrams?: boolean,
-    corpusPath?: string): Promise<NativeDatabase>;
+    corpusPath?: string, keywordJapanese?: OpenOptions['keywordJapanese']): Promise<NativeDatabase>;
   inspectIndex(path: string, cancel: NativeCancellation): Promise<IndexStatus | null>;
   rankVectors(path: string, request: string, cancel: NativeCancellation): Promise<{ i: number; score: number }[]>;
   acquireExecutionLock(path: string): { release(): void };
@@ -243,13 +243,18 @@ export class Dunlin {
     this.#database = database;
   }
 
-  static async open(path: string, { signal, corpusBackend, corpusDirectory, keywordNgrams, keywordBigrams }: OpenOptions = {}): Promise<Dunlin> {
+  static async open(path: string, {
+    signal, corpusBackend, corpusDirectory, keywordNgrams, keywordBigrams, keywordJapanese,
+  }: OpenOptions = {}): Promise<Dunlin> {
     const directory = absolutePath(path);
     if (corpusBackend !== undefined && corpusBackend !== 'sqlite' && corpusBackend !== 'json') {
       throw new DunlinError('INVALID_ARGUMENT', 'Expected corpus backend sqlite or json');
     }
     const corpusPath = corpusDirectory === undefined ? undefined : absolutePath(corpusDirectory);
-    const database = await cancellable(signal, (cancel) => native().openNative(directory, cancel, corpusBackend, keywordNgrams, keywordBigrams, corpusPath));
+    const dictionary = keywordJapanese?.userDictionary;
+    const japanese = keywordJapanese === undefined ? undefined : dictionary === undefined ? {} : { userDictionary: absolutePath(dictionary) };
+    const database = await cancellable(signal, (cancel) =>
+      native().openNative(directory, cancel, corpusBackend, keywordNgrams, keywordBigrams, corpusPath, japanese));
     return new Dunlin(database);
   }
 

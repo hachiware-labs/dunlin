@@ -24,11 +24,59 @@ use crate::{
     Cancellation, CorpusBackend, DocumentFormat, Error, Evidence, IndexChanges, IndexStatus,
     LineRange, ReadOutcome, Result, RetrievalMethod, SearchHit, SourceRef, SyncOutcome,
     corpus::Corpus,
+    japanese::{GAP, JapaneseTokenizer},
     legacy_delete::LegacyDeleteQuery,
     source::{self, SourceInput, SourceObject},
 };
 
 const MEMBERSHIP_MARKER: &str = "@member-v1";
+
+#[derive(Default)]
+pub(crate) struct KeywordOptions<'a> {
+    pub ngrams: bool,
+    pub bigrams: bool,
+    pub japanese: bool,
+    pub user_dictionary: Option<&'a Path>,
+}
+
+enum KeywordTokenizer {
+    Word,
+    Trigram { bigrams: bool },
+    Japanese(Box<JapaneseTokenizer>),
+}
+
+impl KeywordTokenizer {
+    fn open(options: KeywordOptions<'_>) -> Result<Self> {
+        if options.japanese {
+            if options.ngrams || options.bigrams {
+                return Err(Error::Invalid(
+                    "Choose Japanese keyword tokenization or n-grams",
+                ));
+            }
+            Ok(Self::Japanese(Box::new(JapaneseTokenizer::open(
+                options.user_dictionary,
+            )?)))
+        } else if options.ngrams {
+            Ok(Self::Trigram {
+                bigrams: options.bigrams,
+            })
+        } else {
+            Ok(Self::Word)
+        }
+    }
+
+    fn indexed_terms(&self, text: &str) -> Result<String> {
+        match self {
+            Self::Japanese(tokenizer) => Ok(tokenizer.terms(text)?.join(" ")),
+            Self::Trigram { bigrams } => Ok(indexed_terms(text, true, *bigrams)),
+            Self::Word => Ok(indexed_terms(text, false, false)),
+        }
+    }
+
+    fn ngrams(&self) -> bool {
+        matches!(self, Self::Trigram { .. })
+    }
+}
 
 pub(crate) struct KeywordIndex {
     pub(crate) corpus: Corpus,
@@ -41,8 +89,7 @@ pub(crate) struct KeywordIndex {
     body_terms: Field,
     evidence: Field,
     content: Field,
-    ngrams: bool,
-    bigrams: bool,
+    tokenizer: KeywordTokenizer,
 }
 
 impl KeywordIndex {
@@ -86,10 +133,10 @@ impl KeywordIndex {
         path: &Path,
         corpus_path: &Path,
         backend: CorpusBackend,
-        ngrams: bool,
-        bigrams: bool,
+        options: KeywordOptions<'_>,
         cancel: &Cancellation,
     ) -> Result<Self> {
+        let tokenizer = KeywordTokenizer::open(options)?;
         let mut schema = Schema::builder();
         let terms = TextOptions::default().set_indexing_options(
             TextFieldIndexing::default()
@@ -135,8 +182,7 @@ impl KeywordIndex {
             body_terms,
             evidence,
             content,
-            ngrams,
-            bigrams,
+            tokenizer,
         })
     }
 
@@ -280,8 +326,8 @@ impl KeywordIndex {
                 self.object_key => key.as_str(),
                 self.object_key => MEMBERSHIP_MARKER,
                 self.title => title.as_str(),
-                self.title_terms => indexed_terms(&title, self.ngrams, self.bigrams),
-                self.body_terms => indexed_terms(text, self.ngrams, self.bigrams),
+                self.title_terms => self.tokenizer.indexed_terms(&title)?,
+                self.body_terms => self.tokenizer.indexed_terms(text)?,
                 self.evidence => encode(&Evidence { byte_range, ..object.evidence(range) })?,
             ))?;
             units += 1;
@@ -447,13 +493,33 @@ impl KeywordSnapshot<'_> {
         mut visit: impl FnMut(SearchHit),
     ) -> Result<usize> {
         cancel.check()?;
-        let groups = query_groups(input)?;
+        let japanese_terms;
+        let groups;
+        let query = if let KeywordTokenizer::Japanese(tokenizer) = &self.index.tokenizer {
+            validate_query_input(input)?;
+            japanese_terms = tokenizer.terms(input)?;
+            let mut seen = HashSet::new();
+            groups = japanese_terms
+                .iter()
+                .map(String::as_str)
+                .filter(|term| *term != GAP && seen.insert(*term))
+                .map(|term| (term, false))
+                .collect::<Vec<_>>();
+            if groups.is_empty() {
+                return Ok(0);
+            }
+            validate_query_size(&groups)?;
+            self.japanese_query(&groups, &japanese_terms)
+        } else {
+            groups = query_groups(input)?;
+            self.any_term(&groups)
+        };
         let (top, count) = match method {
             RetrievalMethod::Coverage if groups.len() > 1 => {
-                self.coverage(&groups, limit, sources, cancel)?
+                self.coverage(&groups, query, limit, sources, cancel)?
             }
             RetrievalMethod::Keyword | RetrievalMethod::Coverage => {
-                self.keyword(&groups, limit, sources)?
+                self.keyword(query, limit, sources)?
             }
         };
         for (rank, (score, address)) in top.into_iter().enumerate() {
@@ -474,11 +540,11 @@ impl KeywordSnapshot<'_> {
 
     fn keyword(
         &self,
-        groups: &[(&str, bool)],
+        query: BooleanQuery,
         limit: usize,
         sources: &[String],
     ) -> Result<(Vec<(f32, DocAddress)>, usize)> {
-        let query = self.scoped(self.any_term(groups), sources);
+        let query = self.scoped(query, sources);
         Ok(self.searcher.search(
             query.as_ref(),
             &(TopDocs::with_limit(limit).order_by_score(), Count),
@@ -488,6 +554,7 @@ impl KeywordSnapshot<'_> {
     fn coverage(
         &self,
         groups: &[(&str, bool)],
+        any: BooleanQuery,
         limit: usize,
         sources: &[String],
         cancel: &Cancellation,
@@ -509,9 +576,9 @@ impl KeywordSnapshot<'_> {
         cancel.check()?;
         let count = if top.len() == limit {
             self.searcher
-                .search(self.scoped(self.any_term(groups), sources).as_ref(), &Count)?
+                .search(self.scoped(any, sources).as_ref(), &Count)?
         } else {
-            let (fallback, count) = self.keyword(groups, limit, sources)?;
+            let (fallback, count) = self.keyword(any, limit, sources)?;
             let strict = top
                 .iter()
                 .map(|&(_, address)| address)
@@ -536,13 +603,42 @@ impl KeywordSnapshot<'_> {
         )
     }
 
+    fn japanese_query(&self, groups: &[(&str, bool)], terms: &[String]) -> BooleanQuery {
+        let mut clauses: Vec<Box<dyn Query>> = vec![Box::new(self.any_term(groups))];
+        let mut seen = HashSet::new();
+        for pair in terms.windows(2) {
+            if pair.iter().any(|term| term == GAP) || !seen.insert((&pair[0], &pair[1])) {
+                continue;
+            }
+            for (field, boost) in [(self.index.title_terms, 1.0), (self.index.body_terms, 0.5)] {
+                let phrase = PhraseQuery::new(
+                    pair.iter()
+                        .map(|term| Term::from_field_text(field, term))
+                        .collect(),
+                );
+                clauses.push(Box::new(BoostQuery::new(Box::new(phrase), boost)));
+            }
+        }
+        BooleanQuery::union(clauses)
+    }
+
     fn term_queries(&self, word: &str, cjk: bool) -> [Box<dyn Query>; 2] {
         [
             Box::new(BoostQuery::new(
-                field_query(self.index.title_terms, word, cjk, self.index.ngrams),
+                field_query(
+                    self.index.title_terms,
+                    word,
+                    cjk,
+                    self.index.tokenizer.ngrams(),
+                ),
                 2.0,
             )),
-            field_query(self.index.body_terms, word, cjk, self.index.ngrams),
+            field_query(
+                self.index.body_terms,
+                word,
+                cjk,
+                self.index.tokenizer.ngrams(),
+            ),
         ]
     }
 
@@ -579,6 +675,9 @@ impl KeywordSnapshot<'_> {
         if let Some(object) = self.find_object(&url_key(url), sources)? {
             return Ok(Some(object));
         }
+        if matches!(self.index.tokenizer, KeywordTokenizer::Japanese(_)) {
+            return Ok(None);
+        }
         // Older indices lack URL keys. Narrow by file name and verify the stored URL exactly.
         let path = Url::parse(url)
             .map_err(|_| Error::Index)?
@@ -590,7 +689,14 @@ impl KeywordSnapshot<'_> {
         let clauses: Vec<_> = word_groups(name)
             .filter(|(word, _)| word.len() <= 240)
             .take(64)
-            .map(|(word, cjk)| field_query(self.index.title_terms, word, cjk, self.index.ngrams))
+            .map(|(word, cjk)| {
+                field_query(
+                    self.index.title_terms,
+                    word,
+                    cjk,
+                    self.index.tokenizer.ngrams(),
+                )
+            })
             .collect();
         if clauses.is_empty() {
             return Ok(None);
@@ -736,21 +842,31 @@ fn index_revision(searcher: &Searcher) -> String {
 }
 
 pub(crate) fn query_groups(input: &str) -> Result<Vec<(&str, bool)>> {
+    validate_query_input(input)?;
+    let groups: Vec<_> = word_groups(input).take(65).collect();
+    validate_query_size(&groups)?;
+    Ok(groups)
+}
+
+fn validate_query_input(input: &str) -> Result<()> {
     if input.len() > 4096 {
         return Err(Error::Invalid("Query must be at most 4096 UTF-8 bytes"));
     }
-    let groups: Vec<_> = word_groups(input).take(65).collect();
-    if groups.is_empty() {
+    if word_groups(input).next().is_none() {
         return Err(Error::Invalid(
             "Query must contain a letter, digit, or identifier",
         ));
     }
+    Ok(())
+}
+
+fn validate_query_size(groups: &[(&str, bool)]) -> Result<()> {
     if groups.len() > 64 || groups.iter().any(|(word, _)| word.len() > 240) {
         return Err(Error::Invalid(
             "Query must contain at most 64 terms of up to 240 bytes each",
         ));
     }
-    Ok(groups)
+    Ok(())
 }
 
 fn stored(document: &TantivyDocument, field: Field) -> Result<&str> {

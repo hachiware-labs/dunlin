@@ -15,7 +15,7 @@ import { parse, stringify } from 'yaml';
 
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const runNode = promisify(execFile);
-const query = '交換周期';
+const query = '交換周期はどのくらいですか';
 const content = '🧰 点検の案内です。\n交換周期は6か月です。\n';
 
 async function project(t) {

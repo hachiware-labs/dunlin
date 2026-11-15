@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      macos:
+        description: Run only the macOS ARM and Intel checks
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -16,22 +21,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: windows-2022
-            node: '22'
-            target: win32-x64-msvc
-          - runner: ubuntu-24.04
-            node: '22'
-            target: linux-x64-gnu
-          - runner: ubuntu-24.04
-            node: '24'
-            target: linux-x64-gnu
-          - runner: macos-15
-            node: '22'
-            target: darwin-arm64
-          - runner: macos-15-intel
-            node: '22'
-            target: darwin-x64
+        include: >-
+          ${{ fromJSON(
+            (github.event_name == 'workflow_dispatch' && inputs.macos)
+            && '[
+              {"runner":"macos-15","node":"22","target":"darwin-arm64"},
+              {"runner":"macos-15-intel","node":"22","target":"darwin-x64"}
+            ]'
+            || '[
+              {"runner":"windows-2022","node":"22","target":"win32-x64-msvc"},
+              {"runner":"ubuntu-24.04","node":"22","target":"linux-x64-gnu"},
+              {"runner":"ubuntu-24.04","node":"24","target":"linux-x64-gnu"}
+            ]'
+          ) }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

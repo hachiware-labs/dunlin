@@ -1,6 +1,6 @@
 # Dunlin 文書取り込みツール
 
-HTTP(S) や S3 から原本を取得してパースし、全文と出典情報を Dunlin の `replaceDocuments` に渡す開発用ツールです。Dunlin は全文をコーパスに保存し、チャンクからキーワード索引を作ります。`--index` には、ライブラリの `Dunlin.open()` で直接開く索引ディレクトリを渡します。Dunlinfile を使って MCP や RAG を作る手順は CLI ガイドを参照してください。[ライブラリ API](../../README.md#nodejs-ライブラリのインストール) · [CLI ガイド](../../docs/mcp.md)
+HTTP(S) や S3 から原本を取得してパースし、全文と出典情報を Dunlin の `replaceDocuments` に渡す開発用ツールです。Dunlin は全文をコーパスに保存し、チャンクからキーワード索引を作ります。`--index` には、ライブラリの `Dunlin.open()` で直接開く索引ディレクトリを渡します。Dunlinfile を使って MCP や RAG を作る手順は CLI ガイドを参照してください。[ライブラリ API](../../docs/api.md) · [CLI ガイド](../../docs/mcp.md)
 
 ## セットアップ
 

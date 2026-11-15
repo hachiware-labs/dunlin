@@ -4,7 +4,7 @@ MCP は検索結果と出典をエージェントに渡します。RAG は同じ
 
 ## MCP で検索を提供する
 
-[CLI のセットアップ](../README.md#cli-のセットアップ)を済ませ、`./manuals` に Markdown または UTF-8 テキストの資料を置きます。
+[インストール](../README.md#インストール)を済ませ、`./manuals` に Markdown または UTF-8 テキストの資料を置きます。
 
 ```sh
 dunlin init mcp ./mcp --source ./manuals

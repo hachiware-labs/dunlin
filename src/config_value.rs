@@ -46,6 +46,85 @@ impl ConfigValue {
     pub fn is_number(&self) -> bool {
         matches!(self, Self::Number(_) | Self::NonFinite(_))
     }
+
+    /// `JSON.stringify(value)` as JavaScript writes it, for digests that must match the
+    /// JavaScript implementation: `-0` is `0`, `1e21` is `1e+21` and NaN or infinities are `null`.
+    pub fn to_js_json(&self) -> String {
+        let mut out = String::new();
+        self.write_js_json(&mut out);
+        out
+    }
+
+    fn write_js_json(&self, out: &mut String) {
+        match self {
+            Self::Null | Self::NonFinite(_) => out.push_str("null"),
+            Self::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
+            Self::Number(value) => out.push_str(&js_number(*value)),
+            // serde_json escapes the same characters as JSON.stringify, with lowercase hex.
+            Self::String(text) => out.push_str(&serde_json::to_string(text).unwrap_or_default()),
+            Self::Array(items) => {
+                out.push('[');
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    item.write_js_json(out);
+                }
+                out.push(']');
+            }
+            Self::Object(entries) => {
+                out.push('{');
+                for (index, (key, value)) in entries.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&serde_json::to_string(key).unwrap_or_default());
+                    out.push(':');
+                    value.write_js_json(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+}
+
+/// `Number.prototype.toString()` for a JSON number (ECMA-262 Number::toString).
+pub fn js_number(value: f64) -> String {
+    if !value.is_finite() {
+        return "null".into();
+    }
+    if value == 0.0 {
+        return "0".into();
+    }
+    // Rust prints the shortest digits that round-trip, as JavaScript does.
+    let scientific = format!("{:e}", value.abs());
+    let (mantissa, exponent) = scientific.split_once('e').unwrap_or((&scientific, "0"));
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let k = digits.len() as i32;
+    let n = exponent.parse::<i32>().unwrap_or(0) + 1;
+    let body = if k <= n && n <= 21 {
+        digits + &"0".repeat((n - k) as usize)
+    } else if 0 < n && n <= 21 {
+        format!("{}.{}", &digits[..n as usize], &digits[n as usize..])
+    } else if -6 < n && n <= 0 {
+        format!("0.{}{digits}", "0".repeat((-n) as usize))
+    } else {
+        let mantissa = if k == 1 {
+            digits.clone()
+        } else {
+            format!("{}.{}", &digits[..1], &digits[1..])
+        };
+        format!(
+            "{mantissa}e{}{}",
+            if n > 0 { '+' } else { '-' },
+            (n - 1).abs()
+        )
+    };
+    if value < 0.0 {
+        format!("-{body}")
+    } else {
+        body
+    }
 }
 
 impl Serialize for ConfigValue {
@@ -163,6 +242,32 @@ impl<'de> Deserialize<'de> for ConfigValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_numbers_as_javascript() {
+        for (value, text) in [
+            (0.0, "0"),
+            (-0.0, "0"),
+            (1.0, "1"),
+            (-12.5, "-12.5"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1e21, "1e+21"),
+            (1e20, "100000000000000000000"),
+            (123456789012345680000.0, "123456789012345680000"),
+            (1.5e-7, "1.5e-7"),
+            (0.000001, "0.000001"),
+            (1.25e-6, "0.00000125"),
+            (5e-324, "5e-324"),
+            (1.7976931348623157e308, "1.7976931348623157e+308"),
+            (2f64.powi(53) + 2.0, "9007199254740994"),
+        ] {
+            assert_eq!(js_number(value), text, "{value}");
+        }
+        let value: ConfigValue =
+            serde_json::from_str(r#"{"b":[-0.0,1e21,"\u0001\n"],"a":{"$dunlin_nonfinite":"NaN"}}"#)
+                .unwrap();
+        assert_eq!(value.to_js_json(), r#"{"b":[0,1e+21,"\u0001\n"],"a":null}"#);
+    }
 
     #[test]
     fn keeps_key_order_and_non_finite_numbers() {

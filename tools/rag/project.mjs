@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { createGenerator } from './models.mjs';
-import { chunkCorpus, inventory, loadCorpus, parserAssignments, scanFolder, unsupportedFiles, writeTogether } from './project-content.mjs';
+import { chunkCorpus, inventory, parserAssignments, runSourceStage, scanFolder, unsupportedFiles, writeTogether } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
 import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
@@ -340,6 +340,7 @@ function latestStageId(db, stage) {
   return db.prepare('SELECT id FROM latest_stage WHERE stage = ?').get(stage)?.id;
 }
 
+/** Records a transform stage. Rust records the source stage. */
 function saveStage(db, stage, output, reused) {
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -352,13 +353,10 @@ function saveStage(db, stage, output, reused) {
         insert.run(key, json);
         return key;
       };
-      if (stage === 'source') manifest.groups = output.groups.map(([source, docs]) =>
-        [source, docs.map(({ content, ...doc }) => ({ ...doc, text: put(content) }))]);
       if (stage === 'transform') manifest.chunks = output.chunks.map((group) => group.map(put));
       db.prepare('INSERT OR IGNORE INTO stage_outputs VALUES (?, ?, ?)').run(stage, output.id, JSON.stringify(manifest));
     }
     db.prepare('INSERT INTO latest_stage VALUES (?, ?) ON CONFLICT(stage) DO UPDATE SET id = excluded.id').run(stage, output.id);
-    if (stage === 'source') db.prepare('INSERT INTO source_checks (source_id, checked_at) VALUES (?, ?)').run(output.id, new Date().toISOString());
     if (stage === 'transform' && output.key !== output.id) {
       db.prepare('INSERT OR REPLACE INTO transform_outputs VALUES (?, ?)').run(output.key, output.id);
     }
@@ -380,17 +378,14 @@ async function runSource(db, project, plan, { force, skipUnsupported, warnings }
     },
   });
   const { sources, reject } = parsed;
-  const routes = parserRoutes(parsed.parsers);
-  const skipped = unsupportedFiles(sources, routes);
-  const stats = { files: sources.reduce((sum, source) => sum + source.files.length, 0), skipped };
-  if (skipped.length && reject && !skipUnsupported) {
-    throw new ProjectError(2, 'UNSUPPORTED_FILES', 'Unsupported files found. Set source.filesystem with.exclude or use --skip-unsupported.', stats);
+  // Rust routes, loads, computes the stage ID and records the stage (spec 28.9 step 2a).
+  const result = await runSourceStage({ sources, routes: parserRoutes(parsed.parsers), reject, skipUnsupported, force, modules: moduleSettings(plan) },
+    paths, project.root);
+  if (result.unsupported) {
+    throw new ProjectError(2, 'UNSUPPORTED_FILES', 'Unsupported files found. Set source.filesystem with.exclude or use --skip-unsupported.', result.unsupported);
   }
-  const groups = await loadCorpus(sources, paths, skipped, warnings, db, force, routes, undefined, project.root);
-  const config_id = digest('cfg', moduleSettings(plan));
-  const id = digest('src', [config_id, groups, stats.skipped]);
-  const reused = Boolean(!force && db.prepare('SELECT 1 FROM stage_outputs WHERE stage = ? AND id = ?').get('source', id));
-  return { output: { id, config_id, modules: moduleSettings(plan), ...stats, groups }, reused };
+  warnings.push(...result.warnings);
+  return { output: result.output, reused: result.reused };
 }
 
 async function runTransform(db, source, plan, force, project) {
@@ -817,7 +812,7 @@ async function buildProject(project, command, runId, values, warnings) {
             ? await runSource(db, project, settings.source, { force: values.force, skipUnsupported: values['skip-unsupported'], warnings })
             : await runTransform(db, source ?? buildInput(db, 'source', fixed), settings.transform, values.force, project);
           trialCheckpoint();
-          saveStage(db, stage, output, reused);
+          if (stage !== 'source') saveStage(db, stage, output, reused);
           if (stage === 'source') source = output;
           results[stage] = { id: output.id, reused, elapsed_ms: Math.round(performance.now() - stageStart) };
         }

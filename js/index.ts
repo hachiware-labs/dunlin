@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -66,6 +66,7 @@ interface NativeBinding {
   loadCorpus(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   completeHostCall(id: number, result: string | null, error: string | null): void;
   scanSource(request: string, cancel: NativeCancellation): Promise<string>;
+  runSource(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   routeFiles(request: string): string;
   matchesGlob(path: string, pattern: string): boolean;
   readModuleArgs(name: string, args: string): string;
@@ -86,6 +87,21 @@ function native(): NativeBinding {
       `Could not load the Dunlin addon for ${process.platform}/${process.arch}, Node ${process.versions.node}. Install a package built for this platform.`,
     );
   }
+}
+
+/** The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. */
+function hostCallback(host: LoadCorpusHost): (...raw: unknown[]) => void {
+  return (...raw) => {
+    const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
+    if (kind === 'progress') {
+      host.progress?.(Number(args));
+      return;
+    }
+    Promise.resolve()
+      .then(() => host.parse(JSON.parse(args) as LoadCorpusFile, bytes))
+      .then((result) => native().completeHostCall(id, configJson(result), null),
+        (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
+  };
 }
 
 async function cancellable<T>(
@@ -371,20 +387,18 @@ export class Dunlin {
    * which returns `{ content, format, locations?, parser? }`. Documents keep the input order.
    */
   static async loadCorpus(request: LoadCorpusRequest, host: LoadCorpusHost, { signal }: OperationOptions = {}): Promise<LoadedCorpus> {
-    // The native side passes its arguments as one array.
-    const callback = (...raw: unknown[]): void => {
-      const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
-      if (kind === 'progress') {
-        host.progress?.(Number(args));
-        return;
-      }
-      Promise.resolve()
-        .then(() => host.parse(JSON.parse(args) as LoadCorpusFile, bytes))
-        .then((result) => native().completeHostCall(id, configJson(result), null),
-          (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
-    };
-    const text = await cancellable(signal, (cancel) => native().loadCorpus(JSON.stringify(request), callback, cancel));
+    const text = await cancellable(signal, (cancel) => native().loadCorpus(JSON.stringify(request), hostCallback(host), cancel));
     return JSON.parse(text) as LoadedCorpus;
+  }
+
+  /**
+   * Run the `source` stage over scanned sources: route files to parser modules, load them as
+   * loadCorpus does, compute the stage ID and record the stage in state.sqlite. Stops before
+   * loading when a module rejects unsupported files and skipUnsupported is not set.
+   */
+  static async runSource(request: SourceStageRequest, host: LoadCorpusHost, { signal }: OperationOptions = {}): Promise<SourceStageOutcome> {
+    const text = await cancellable(signal, (cancel) => native().runSource(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as SourceStageOutcome;
   }
 
   /**
@@ -403,7 +417,7 @@ export class Dunlin {
    * Route files to parser modules (spec 6.7): the first route whose patterns and formats claim the
    * file, with loader.auto last. Returns the route name and decoding kind, or nulls, for each file.
    */
-  static routeFiles(routes: readonly { name: string; category: string; match?: readonly string[]; ocr?: boolean }[],
+  static routeFiles(routes: readonly ParserRoute[],
     files: readonly { file: string; objectId: string }[]): { route: string | null; kind: string | null }[] {
     return nativeJson(() => native().routeFiles(JSON.stringify({ routes, files }))) as { route: string | null; kind: string | null }[];
   }

@@ -664,6 +664,58 @@ pub fn load_corpus<'env>(
     Ok(promise)
 }
 
+/// Runs the `source` stage on scanned sources (see `source_stage`): routes, loads, computes the
+/// stage ID and records the stage in `state.sqlite`. The host works as for `loadCorpus`. Resolves to
+/// `{ status: "done", output, reused, warnings }` or `{ status: "unsupported", files, skipped }`.
+#[napi]
+pub fn run_source<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    use crate::source_stage::SourceOutcome;
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = JsHost { function };
+        let outcome = serde_json::from_str::<crate::source_stage::SourceRequest>(&request)
+            .map_err(|error| crate::source_load::LoadError {
+                message: format!("Invalid source request: {error}"),
+                aborted: false,
+            })
+            .and_then(|request| crate::source_stage::run(&request, &host, &cancel));
+        let json = |value: &crate::config_value::ConfigValue| {
+            serde_json::to_string(value).unwrap_or_default()
+        };
+        // Built by hand: serde_json::Value would sort the keys of each document.
+        let outcome = outcome.map(|outcome| match outcome {
+            SourceOutcome::Done {
+                output,
+                reused,
+                warnings,
+            } => format!(
+                "{{\"status\":\"done\",\"output\":{},\"reused\":{reused},\"warnings\":{}}}",
+                json(&output),
+                serde_json::to_string(&warnings).unwrap_or_default()
+            ),
+            SourceOutcome::Unsupported(stats) => {
+                format!("{{\"status\":\"unsupported\",\"stats\":{}}}", json(&stats))
+            }
+        });
+        match outcome {
+            Ok(text) => deferred.resolve(move |_| Ok(text)),
+            Err(error) if error.aborted => deferred.reject(native_error(crate::Error::Aborted)),
+            Err(error) => deferred.reject(Error::new(
+                Status::GenericFailure,
+                format!("LOAD_FAILED|{}", error.message),
+            )),
+        }
+    });
+    Ok(promise)
+}
+
 /// Scans a source folder (see `source_scan`). Resolves to `{ id, files: [{ file, objectId }] }`
 /// as JSON, unsorted, or `{ error }` with a message.
 #[napi]

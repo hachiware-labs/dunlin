@@ -31,6 +31,8 @@ mod source_files;
 mod source_load;
 #[cfg(any(feature = "node", test))]
 mod source_scan;
+#[cfg(any(feature = "node", test))]
+mod source_stage;
 #[cfg(all(feature = "node", not(test)))]
 mod vector;
 

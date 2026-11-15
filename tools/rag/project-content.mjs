@@ -111,19 +111,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
       pending.push({ id, file, objectId, documents, route, kind });
     }
   }
-  // Rust reads, hashes, caches, runs loader.command and stores. It calls back here for the parsers
-  // that are still in JavaScript.
-  const host = {
-    progress,
-    async parse({ kind, name }, bytes) {
-      const signal = trialSignal();
-      const parsed = kind === 'ocr' ? await loadOcr(bytes)
-        : kind === 'pdf' ? await loadPdf(bytes)
-        : kind === 'html' ? await loadHtml(bytes)
-        : await decodeRemote([bytes], undefined, name, { parsers: { documents: { tool: 'docling-rs' } }, keepOriginal: true, signal });
-      return { content: parsed.content, format: parsed.format, locations: parsed.locations, parser: parsed.parser };
-    },
-  };
+  const host = parserHost(progress);
   const request = {
     state: paths.state, originals: join(paths.artifacts, 'originals', 'shared'), force: Boolean(force), ocrVersion: managedOcrVersion,
     root: root ?? process.cwd(),
@@ -142,6 +130,45 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   loaded.documents.forEach((document, index) => pending[index].documents.push(document));
   warnings.push(...loaded.warnings);
   return groups;
+}
+
+/**
+ * Runs the `source` stage in Rust: routing, loading, the stage ID and its record in state.sqlite.
+ * Returns `{ output, reused, warnings }`, or `{ unsupported: { files, skipped } }`.
+ */
+export async function runSourceStage({ sources, routes, reject, skipUnsupported, force, modules }, paths, root) {
+  const request = {
+    state: paths.state, originals: join(paths.artifacts, 'originals', 'shared'), root, force: Boolean(force),
+    skipUnsupported: Boolean(skipUnsupported), reject: Boolean(reject), ocrVersion: managedOcrVersion, sources,
+    routes: routes.map(({ name, category, match, ocr }) => ({ name, category, ...(match && { match }), ocr })),
+    commands: routes.filter(({ category }) => category === 'command').map(({ name, args }) => ({ module: name, args })),
+    modules,
+  };
+  let result;
+  try {
+    result = await Dunlin.runSource(request, parserHost(), { signal: trialSignal() });
+  } catch (error) {
+    trialCheckpoint();
+    if (error.code === 'LOAD_FAILED') throw new Error(error.message, { cause: error });
+    throw error;
+  }
+  return result.status === 'unsupported' ? { unsupported: result.stats }
+    : { output: result.output, reused: result.reused, warnings: result.warnings };
+}
+
+/** Rust reads, hashes, caches, runs loader.command and stores. It calls back here for the parsers that are still in JavaScript. */
+function parserHost(progress = () => {}) {
+  return {
+    progress,
+    async parse({ kind, name }, bytes) {
+      const signal = trialSignal();
+      const parsed = kind === 'ocr' ? await loadOcr(bytes)
+        : kind === 'pdf' ? await loadPdf(bytes)
+        : kind === 'html' ? await loadHtml(bytes)
+        : await decodeRemote([bytes], undefined, name, { parsers: { documents: { tool: 'docling-rs' } }, keepOriginal: true, signal });
+      return { content: parsed.content, format: parsed.format, locations: parsed.locations, parser: parsed.parser };
+    },
+  };
 }
 
 async function loadOcr(bytes) {

@@ -114,7 +114,7 @@ fn node_message(error: &std::io::Error, operation: &str, path: &str) -> String {
 }
 
 /// A parser module for routing, in matching order.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Route {
     pub name: String,
     /// `auto`, `text`, `office`, `pdf`, `ocr` or `command`.
@@ -132,7 +132,7 @@ pub struct RouteRequest {
     pub files: Vec<RouteFile>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteFile {
     pub file: String,

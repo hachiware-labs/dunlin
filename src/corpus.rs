@@ -53,6 +53,12 @@ pub struct ParserInfo {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
+    /// Source module that extracted the document, such as `loader.command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    /// Version reported for an external parser tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

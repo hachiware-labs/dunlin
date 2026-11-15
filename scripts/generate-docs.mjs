@@ -83,7 +83,7 @@ function cliGuide() {
     '`--json` の応答には `status`、`run_id`、`data`、`warnings`、`errors` が含まれます。代表的な終了コードは `0` が正常、`1` が実行エラー、`2` が引数や設定の問題、`3` が前提となるデータの不足、`4` が競合または上限です。 [エラーの対処](troubleshooting.md)');
 }
 
-const typeNames = { integer: '整数', number: '数値', string: '文字列', boolean: '真偽値', array: '配列', 'one of the listed values': '列挙' };
+const typeNames = { integer: '整数', number: '数値', string: '文字列', boolean: '真偽値', array: '配列', mapping: '対応表', 'one of the listed values': '列挙' };
 const keywordArgs = {
   user_dictionary: { type: '文字列または null' },
   short_query: { type: '列挙', choices: ['bigram', 'none'] },
@@ -98,7 +98,7 @@ function moduleGuide() {
       const rows = Object.entries(args).map(([key, original]) => {
         const info = name === 'index.keyword' && keywordArgs[key] ? keywordArgs[key] : original;
         const allowed = info.choices?.map(code).join('、') ?? (Number.isFinite(info.min) && Number.isFinite(info.max) ? info.min + '〜' + info.max : '—');
-        const fallback = Object.hasOwn(info, 'default') ? code(JSON.stringify(info.default)) : name === 'index.keyword' && keywordArgs[key] ? '省略可' : '必須';
+        const fallback = Object.hasOwn(info, 'default') ? code(JSON.stringify(info.default)) : info.optional || (name === 'index.keyword' && keywordArgs[key]) ? '省略可' : '必須';
         return `| ${code(key)} | ${typeNames[info.type] ?? info.type ?? '—'} | ${fallback} | ${allowed} |`;
       });
       return section('### ' + name, description + (requires.length ? '\n\n必要な構成は ' + requires.map(code).join('、') + ' です。' : ''),

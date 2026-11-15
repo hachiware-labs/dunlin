@@ -3,15 +3,12 @@ import { extname, join, matchesGlob, relative, sep } from 'node:path';
 import { open, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 
-import { isPlainDocument, listFiles, prepareLocalFile } from './ingest-files.mjs';
+import { listFiles, prepareLocalFile } from './ingest-files.mjs';
 import { lightonModel } from './parsers/catalog.mjs';
 import { managedOcrVersion } from './parsers/lighton-setup.mjs';
+import { commandIdentity, commandVersion, defaultRoutes, parserKind, parseWithCommand, resolveParser } from './project-parsers.mjs';
 import { trialCheckpoint, trialSignal } from './project-trials.mjs';
 
-const office = new Set(['.docx', '.xlsx', '.pptx']);
-const formats = new Set(['.html', '.htm', '.pdf', ...office]);
-const images = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif']);
-const extensionsFor = { text: new Set(['.html', '.htm']), office, pdf: new Set(['.pdf']) };
 const fileConcurrency = 4;
 
 async function processFiles(files, prepare, record, limit = fileConcurrency) {
@@ -33,13 +30,6 @@ async function processFiles(files, prepare, record, limit = fileConcurrency) {
   if (failure) throw failure.error;
 }
 
-function supported(file, categories) {
-  const extension = extname(file).toLowerCase();
-  return categories.some((category) => category === 'auto' ? isPlainDocument(file) || formats.has(extension)
-    : category === 'ocr' ? extension === '.pdf' || images.has(extension)
-    : category === 'text' && isPlainDocument(file) || extensionsFor[category]?.has(extension));
-}
-
 export async function scanFolder(sources, { path, exclude }, { name, projectRoot }) {
   const root = await realpath(path);
   if (!(await stat(root)).isDirectory()) throw new Error('Expected a directory for ' + name);
@@ -55,16 +45,23 @@ export async function scanFolder(sources, { path, exclude }, { name, projectRoot
   return [...sources, { id, files }];
 }
 
-export function unsupportedFiles(sources, ocr = false, categories = ['auto']) {
+/** Returns the files that no parser claims. routes come from parserRoutes or defaultRoutes. */
+export function unsupportedFiles(sources, routes = defaultRoutes()) {
   const skipped = [];
   for (const { id, files } of sources) {
     for (const { file, objectId } of files) {
-      if (!supported(file, categories) && !(ocr && supported(file, ['ocr']))) {
+      if (!resolveParser(routes, file, objectId)) {
         skipped.push({ source_id: id, path: objectId, reason: 'No configured loader for this file format' });
       }
     }
   }
   return skipped;
+}
+
+/** Names the parser module for each scanned file, or null when none claims it. */
+export function parserAssignments(sources, routes) {
+  return new Map(sources.flatMap(({ id, files }) => files.map(({ file, objectId }) =>
+    [JSON.stringify([id, objectId]), resolveParser(routes, file, objectId)?.name ?? null])));
 }
 
 export async function inventory(sources, previous) {
@@ -92,7 +89,7 @@ export async function inventory(sources, previous) {
   return files;
 }
 
-export async function loadCorpus(sources, paths, skipped, warnings, db, force, ocr = false, progress = () => {}) {
+export async function loadCorpus(sources, paths, skipped, warnings, db, force, routes = defaultRoutes(), progress = () => {}, root) {
   const excluded = new Set(skipped.map(({ source_id, path }) => JSON.stringify([source_id, path])));
   const groups = [];
   const pending = [];
@@ -100,8 +97,16 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, o
     const documents = [];
     groups.push([id, documents]);
     for (const { file, objectId } of files) {
-      if (!excluded.has(JSON.stringify([id, objectId]))) pending.push({ id, file, objectId, documents });
+      if (excluded.has(JSON.stringify([id, objectId]))) continue;
+      const route = resolveParser(routes, file, objectId);
+      pending.push({ id, file, objectId, documents, route, kind: parserKind(route, file) });
     }
+  }
+  const ocr = pending.some(({ kind }) => kind === 'ocr');
+  // Resolve each command parser's version once, before any file is parsed with it.
+  const versions = new Map();
+  for (const route of new Set(pending.filter(({ kind }) => kind === 'command').map(({ route }) => route))) {
+    versions.set(route, await commandVersion(route, root, trialSignal()));
   }
   const saved = db.prepare('SELECT document FROM loaded_files WHERE id = ?');
   const save = db.prepare('INSERT OR IGNORE INTO loaded_files VALUES (?, ?)');
@@ -110,13 +115,18 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, o
   const originals = join(paths.artifacts, 'originals');
   // Managed OCR serves one request at a time. Keep its document and trial accounting order.
   const limit = ocr ? 1 : fileConcurrency;
-  await processFiles(pending, async ({ id, file, objectId }) => {
+  await processFiles(pending, async ({ id, file, objectId, route, kind }) => {
     trialCheckpoint();
     try {
       const extension = extname(file).toLowerCase();
-      const parsers = office.has(extension) ? { documents: { tool: 'docling-rs' } } : undefined;
-      const useOcr = ocr && (extension === '.pdf' || images.has(extension));
-      const key = (hash) => JSON.stringify(['loader.auto-v1', id, objectId, extension, hash, ...(useOcr ? [managedOcrVersion] : [])]);
+      const parsers = kind === 'office' ? { documents: { tool: 'docling-rs' } } : undefined;
+      const useOcr = kind === 'ocr';
+      const version = versions.get(route);
+      const key = kind === 'command'
+        ? (hash) => JSON.stringify(['loader.command-v1', id, objectId, hash, commandIdentity(route, version)])
+        : (hash) => JSON.stringify(['loader.auto-v1', id, objectId, extension, hash, ...(useOcr ? [managedOcrVersion] : [])]);
+      const decode = kind === 'command' ? (bytes, name) => parseWithCommand(route, bytes, name, { root, version, signal: trialSignal() })
+        : useOcr ? loadOcr : kind === 'pdf' ? loadPdf : kind === 'html' ? loadHtml : undefined;
       const cache = {
         read: (hash) => {
           const row = !force && saved.get(key(hash));
@@ -125,7 +135,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, o
         write: (hash, doc) => save.run(key(hash), JSON.stringify(doc)),
       };
       const { input } = await prepareLocalFile(originals, id, file, objectId, parsers, true,
-        trialSignal(), useOcr ? loadOcr : extension === '.pdf' ? loadPdf : ['.html', '.htm'].includes(extension) ? loadHtml : undefined, cache,
+        trialSignal(), decode, cache,
         { sharedOriginals: true });
       progress(++completed);
       return input;
@@ -133,9 +143,9 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, o
       if (error.code === 'TRIAL_LIMIT_REACHED') throw error;
       throw new Error('Could not load ' + id + ':' + objectId + '. ' + error.message, { cause: error });
     }
-  }, ({ id, objectId, documents }, input) => {
+  }, ({ id, objectId, documents, route }, input) => {
     if (!input.content.trim()) {
-      warnings.push({ code: 'EMPTY_EXTRACTION', section: 'source', module: 'loader.auto', target: id + ':' + objectId,
+      warnings.push({ code: 'EMPTY_EXTRACTION', section: 'source', module: route.name, target: id + ':' + objectId,
         message: 'No text extracted. Scanned documents require OCR.' });
     }
     documents.push(input);

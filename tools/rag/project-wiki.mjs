@@ -10,6 +10,7 @@ import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { createGenerator } from './models.mjs';
 import { listFiles } from './ingest-files.mjs';
 import { loadCorpus, unsupportedFiles } from './project-content.mjs';
+import { defaultRoutes } from './project-parsers.mjs';
 import { categories, idParts, readText, revision } from './authoring/files.mjs';
 import { escapeHtml, renderMarkdown, renderPublication, contentSecurityPolicy } from './authoring/html.mjs';
 import { checkTools } from './project-tools.mjs';
@@ -631,12 +632,12 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
   if (!args.length && !values.pending) throw new WikiError(2, 'SOURCE_REQUIRED', 'Provide a path or specify --pending.');
   const grouped = [...files.values()].map((file) => ({ id: 'source-' +
     revision(values.uploadName ? 'browser:' + values.uploadName.normalize('NFKC') : file.file).slice(0, 24), files: [file] }));
-  const ocr = loader.ocr === 'loader.ocr';
-  const skipped = unsupportedFiles(grouped, ocr);
+  const routes = defaultRoutes(loader.ocr === 'loader.ocr');
+  const skipped = unsupportedFiles(grouped, routes);
   const pending = values.pending ? db.prepare('SELECT id, data FROM wiki_sources WHERE reflected = 0').all() : [];
   if (values['dry-run']) return { files: files.size, pending: pending.length, skipped };
   if (skipped.length && loader.unsupported === 'error') throw new WikiError(2, 'UNSUPPORTED_FILES', JSON.stringify(skipped));
-  const groups = await loadCorpus(grouped, paths, skipped, helpers.warnings, db, false, ocr,
+  const groups = await loadCorpus(grouped, paths, skipped, helpers.warnings, db, false, routes,
     (completed) => progress('extracting_sources', { completed, total: files.size - skipped.length }));
   await mkdir(databasePath, { recursive: true });
   const database = await helpers.open(databasePath, keyword);

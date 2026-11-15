@@ -6,6 +6,7 @@ import { checkTools } from './project-tools.mjs';
 import { checkTrialLimits, trialCheckpoint } from './project-trials.mjs';
 import { isSearchProject, serveTemplate, validateServe } from './project-serving.mjs';
 import { projectModel } from './project-global.mjs';
+import { checkCommand } from './project-parsers.mjs';
 
 const integer = (min, max, value) => z.number().int().min(min).max(max).default(value);
 const choice = (values, value) => z.enum(values).default(value);
@@ -20,22 +21,39 @@ function register(name, stage, role, input, output, args, description, run, opti
 register('source.filesystem', 'source', 'source', 'project', 'files', {
   path: z.string().min(1).default('./docs'), exclude: z.array(z.string()).default([]),
 }, 'Scan a local folder.', (input, args, ctx) => ctx.scan(input, args, ctx));
+// Parsers are matched in the written order. loader.auto is the fallback and is matched last.
+const match = z.array(z.string().min(1)).min(1).optional();
 register('loader.auto', 'source', 'parser', 'files', 'corpus', {
   unsupported: choice(['error', 'skip'], 'error'), ocr: choice(['none', 'loader.ocr'], 'none'),
-}, 'Extract the text and source positions.', (input, args, ctx) => ctx.load(input, args));
+}, 'Route files that no other parser claimed by format, and extract the text and source positions.',
+(input, args, ctx) => ctx.load(input, { ...args, category: 'auto' }, ctx));
 for (const [category, description] of Object.entries({
   text: 'Read UTF-8 text, Markdown and HTML, preserving headings.',
   office: 'Read Word, Excel and PowerPoint documents as structured text.',
   pdf: 'Extract the existing text layer and page positions from PDFs.',
 })) {
   register('loader.' + category, 'source', 'parser', 'files', 'corpus', {
-    unsupported: choice(['error', 'skip'], 'error'),
-  }, description, (input, args, ctx) => ctx.load(input, { ...args, category }));
+    unsupported: choice(['error', 'skip'], 'error'), match,
+  }, description, (input, args, ctx) => ctx.load(input, { ...args, category }, ctx));
 }
 register('loader.ocr', 'source', 'parser', 'files', 'corpus', {
-  unsupported: choice(['error', 'skip'], 'error'),
+  unsupported: choice(['error', 'skip'], 'error'), match,
 }, 'Extract text and original page positions with the installed OCR model.',
-(input, args, ctx) => ctx.load(input, { ...args, ocr: 'loader.ocr', category: 'ocr' }), { requires: ['ocr tool'] });
+(input, args, ctx) => ctx.load(input, { ...args, ocr: 'loader.ocr', category: 'ocr' }, ctx), { requires: ['ocr tool'] });
+const argv = z.array(z.string().min(1)).min(1);
+register('loader.command', 'source', 'parser', 'files', 'corpus', {
+  match: z.array(z.string().min(1)).min(1),
+  command: argv,
+  input: choice(['file', 'stdin'], 'file'),
+  output: choice(['markdown', 'text', 'json'], 'markdown'),
+  version: z.string().min(1).optional(),
+  version_command: argv.optional(),
+  env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u), z.string()).default({}),
+  timeout_ms: integer(1000, 3_600_000, 120_000),
+  concurrency: integer(1, 4, 2),
+}, 'Extract matching files with an external command that prints Markdown, text or JSON.',
+(input, args, ctx) => ctx.load(input, { ...args, category: 'command' }, ctx),
+{ external: true, deterministic: false, requires: ['external command'], speedArgs: ['timeout_ms', 'concurrency'] });
 register('text.normalize', 'transform', 'preprocess', 'corpus', 'corpus', {
   unicode: choice(['nfkc', 'none'], 'nfkc'),
 }, 'Normalize text while preserving original positions.', (input, args) => ({ ...input, unicode: args.unicode }));
@@ -240,20 +258,22 @@ function safeValue(value) {
   return value === null || ['string', 'number', 'boolean'].includes(typeof value) ? value : null;
 }
 
-const argumentTypes = { ZodNumber: 'integer', ZodString: 'string', ZodArray: 'array', ZodBoolean: 'boolean', ZodEnum: 'one of the listed values' };
-function argumentInfo(schema) {
-  const inner = schema instanceof z.ZodDefault ? schema.unwrap() : schema;
+const argumentTypes = { ZodNumber: 'integer', ZodString: 'string', ZodArray: 'array', ZodBoolean: 'boolean', ZodEnum: 'one of the listed values',
+  ZodRecord: 'mapping' };
+function argumentInfo(schema, effect = 'output') {
+  const inner = schema instanceof z.ZodDefault || schema instanceof z.ZodOptional ? schema.unwrap() : schema;
   const fallback = schema.safeParse(undefined);
   return { type: inner instanceof z.ZodNumber && !inner.isInt ? 'number' : argumentTypes[inner.constructor.name],
-    ...(fallback.success && { default: fallback.data }),
+    ...(fallback.success && fallback.data !== undefined && { default: fallback.data }),
     ...(inner.options && { choices: inner.options }),
     ...(inner.minValue !== undefined && { min: inner.minValue, max: inner.maxValue }),
-    effect: 'output' };
+    ...(schema instanceof z.ZodOptional && { optional: true }),
+    effect };
 }
 
 export function describeModules(name) {
-  const describe = ({ args, run, ...info }) => ({ ...info, args: Object.fromEntries(
-    Object.entries(args).map(([key, schema]) => [key, argumentInfo(schema)]),
+  const describe = ({ args, run, speedArgs = [], ...info }) => ({ ...info, args: Object.fromEntries(
+    Object.entries(args).map(([key, schema]) => [key, argumentInfo(schema, speedArgs.includes(key) ? 'speed' : 'output')]),
   ) });
   if (name !== undefined) {
     const module = modules.get(name);
@@ -393,6 +413,11 @@ export function validateRag(config, file, line) {
       }
       if ((name === 'loader.ocr' || values.ocr === 'loader.ocr') && !config.tools?.some?.((tool) => tool?.name === 'ocr')) {
         issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ocr tool', 'Run dunlin add ocr.', details);
+      }
+      if (name === 'loader.command' && values.command) {
+        const { issues, warning } = checkCommand(values, file);
+        for (const { field, expected, hint } of issues) issue('REQUIREMENT_MISSING', [...path, 'with', ...field], expected, hint, details);
+        if (warning) diagnostic(warnings, 'ARG_RECOMMENDED', [...path, 'with', ...warning.field], warning.expected, warning.hint, details);
       }
       if (module.tool && !config.tools?.some?.((tool) => tool?.name === module.tool)) {
         issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ' + module.tool + ' tool', 'Run dunlin add ' + module.tool + '.', details);

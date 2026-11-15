@@ -28,7 +28,7 @@ test('keeps full corpus revisions when location metadata or the original changes
   const ref = { sourceId: 'parsed', objectId: 'manual.pdf' };
   const input = { objectId: ref.objectId, url: 'https://example.com/manual.pdf', format: 'text', content: 'Overview\r\nRetention\r\n' };
   const location = { page: 2, range: { startLine: 2, endLine: 2 }, bbox: [10, 20, 300, 100] };
-  const parser = { tool: 'ocr', model: 'fixture' };
+  const parser = { tool: 'ocr', model: 'fixture', module: 'loader.command', version: '2.1' };
   const database = await Dunlin.open(store);
   let versions;
   try {

@@ -14,7 +14,8 @@ import { z } from 'zod';
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { createGenerator } from './models.mjs';
-import { chunkCorpus, inventory, loadCorpus, scanFolder, unsupportedFiles } from './project-content.mjs';
+import { chunkCorpus, inventory, loadCorpus, parserAssignments, scanFolder, unsupportedFiles } from './project-content.mjs';
+import { parserRoutes } from './project-parsers.mjs';
 import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
@@ -370,22 +371,22 @@ function saveStage(db, stage, output, reused) {
 
 async function runSource(db, project, plan, { force, skipUnsupported, warnings }) {
   const { paths } = project;
-  const parsed = await runModules(plan, { sources: [], categories: [], ocr: false, reject: false }, {
+  const parsed = await runModules(plan, { sources: [], parsers: [], reject: false }, {
     scan(input, args, ctx) {
       return scanFolder(input.sources, args, { ...ctx, projectRoot: project.root }).then((sources) => ({ ...input, sources }));
     },
-    load(input, { unsupported, ocr, category = 'auto' }) {
-      return { ...input, categories: [...input.categories, category], ocr: input.ocr || ocr === 'loader.ocr',
-        reject: input.reject || unsupported === 'error' };
+    load(input, { category, ...args }, { name }) {
+      return { ...input, parsers: [...input.parsers, { name, category, args }], reject: input.reject || args.unsupported === 'error' };
     },
   });
-  const { sources, ocr, categories, reject } = parsed;
-  const skipped = unsupportedFiles(sources, ocr, categories);
+  const { sources, reject } = parsed;
+  const routes = parserRoutes(parsed.parsers);
+  const skipped = unsupportedFiles(sources, routes);
   const stats = { files: sources.reduce((sum, source) => sum + source.files.length, 0), skipped };
   if (skipped.length && reject && !skipUnsupported) {
     throw new ProjectError(2, 'UNSUPPORTED_FILES', 'Unsupported files found. Set source.filesystem with.exclude or use --skip-unsupported.', stats);
   }
-  const groups = await loadCorpus(sources, paths, skipped, warnings, db, force, ocr);
+  const groups = await loadCorpus(sources, paths, skipped, warnings, db, force, routes, undefined, project.root);
   const config_id = digest('cfg', moduleSettings(plan));
   const id = digest('src', [config_id, groups, stats.skipped]);
   const reused = Boolean(!force && db.prepare('SELECT 1 FROM stage_outputs WHERE stage = ? AND id = ?').get('source', id));
@@ -751,9 +752,12 @@ async function buildProject(project, command, runId, values, warnings) {
         for (const { args, name } of settings.source.filter(({ module }) => module.role === 'source')) {
           sources = await scanFolder(sources, args, { name, projectRoot: project.root });
         }
-        const useOcr = settings.source.some(({ module, args }) => module.name === 'loader.ocr' || args.ocr === 'loader.ocr');
-        const categories = settings.source.filter(({ module }) => module.role === 'parser').map(({ module }) => module.name.split('.')[1]);
-        data.skipped = unsupportedFiles(sources, useOcr, categories);
+        const routes = parserRoutes(settings.source.filter(({ module }) => module.role === 'parser')
+          .map(({ module, args, name }) => ({ name, category: module.name.split('.')[1], args })));
+        const parsers = parserAssignments(sources, routes);
+        data.skipped = unsupportedFiles(sources, routes);
+        data.commands = routes.filter(({ category }) => category === 'command').map(({ name, args }) =>
+          ({ module: name, command: args.command, ...(args.version_command && { version_command: args.version_command }) }));
         const skipped = new Set(data.skipped.map(({ source_id, path }) => JSON.stringify([source_id, path])));
         const sourceArgsChanged = previous?.config_id !== digest('cfg', moduleSettings(settings.source));
         const transformArgsChanged = transform?.config_id !== digest('cfg', moduleSettings(settings.transform));
@@ -765,7 +769,7 @@ async function buildProject(project, command, runId, values, warnings) {
         data.files = (await inventory(sources, previous)).map((file) => {
           const skip = skipped.has(JSON.stringify([file.source_id, file.path]));
           const changed = values.force || file.change !== 'unchanged';
-          return { ...file, stages: Object.fromEntries(selected.map((stage) => [stage,
+          return { ...file, parser: parsers.get(JSON.stringify([file.source_id, file.path])) ?? null, stages: Object.fromEntries(selected.map((stage) => [stage,
             skip ? 'skip' : file.change === 'deleted' ? 'remove' : changed ? 'run'
               : stage === 'source' ? sourceArgsChanged ? 'check_cache' : 'reuse'
               : stage === 'transform' ? sourceArgsChanged || transformArgsChanged ? 'check_cache' : 'reuse'

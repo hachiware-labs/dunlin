@@ -58,7 +58,7 @@ export interface SourceLocation {
 
 export interface CorpusMetadata {
   locations?: readonly SourceLocation[];
-  parser?: { tool: string; model?: string; lang?: string };
+  parser?: { tool: string; model?: string; lang?: string; module?: string; version?: string };
   originalSha256?: string;
 }
 

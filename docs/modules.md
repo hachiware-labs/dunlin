@@ -19,7 +19,7 @@ Scan a local folder.
 
 ### loader.auto
 
-Extract the text and source positions.
+Route files that no other parser claimed by format, and extract the text and source positions.
 
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
@@ -33,6 +33,7 @@ Read UTF-8 text, Markdown and HTML, preserving headings.
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
 | `unsupported` | 列挙 | `"error"` | `error`、`skip` |
+| `match` | 配列 | 省略可 | — |
 
 ### loader.office
 
@@ -41,6 +42,7 @@ Read Word, Excel and PowerPoint documents as structured text.
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
 | `unsupported` | 列挙 | `"error"` | `error`、`skip` |
+| `match` | 配列 | 省略可 | — |
 
 ### loader.pdf
 
@@ -49,6 +51,7 @@ Extract the existing text layer and page positions from PDFs.
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
 | `unsupported` | 列挙 | `"error"` | `error`、`skip` |
+| `match` | 配列 | 省略可 | — |
 
 ### loader.ocr
 
@@ -59,6 +62,25 @@ Extract text and original page positions with the installed OCR model.
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
 | `unsupported` | 列挙 | `"error"` | `error`、`skip` |
+| `match` | 配列 | 省略可 | — |
+
+### loader.command
+
+Extract matching files with an external command that prints Markdown, text or JSON.
+
+必要な構成は `external command` です。
+
+| 引数 | 型 | 既定値 | 範囲・候補 |
+| --- | --- | --- | --- |
+| `match` | 配列 | 必須 | — |
+| `command` | 配列 | 必須 | — |
+| `input` | 列挙 | `"file"` | `file`、`stdin` |
+| `output` | 列挙 | `"markdown"` | `markdown`、`text`、`json` |
+| `version` | 文字列 | 省略可 | — |
+| `version_command` | 配列 | 省略可 | — |
+| `env` | 対応表 | `{}` | — |
+| `timeout_ms` | 整数 | `120000` | 1000〜3600000 |
+| `concurrency` | 整数 | `2` | 1〜4 |
 
 ## transform
 

@@ -1,0 +1,92 @@
+# 検索を評価し、ユーザー辞書を試す
+
+評価データに質問と正解の引用を1件登録します。基準の索引でその根拠を拾えなければ、ユーザー辞書を足した試行を作り、同じ質問で評価し直します。最後に、語全体と部分語で同じ文書の順位を確認します。
+
+## 資料を用意する
+
+CLI をインストールして、新しい MCP プロジェクトを作ります。この例は同梱辞書を使うキーワード検索で進めます。 [CLI のインストール](../README.md#インストール)
+
+```sh
+dunlin init mcp ./evaluation-demo --no-embedding --no-ocr
+cd evaluation-demo
+```
+
+プロジェクト内に、次の2ファイルを UTF-8 で作ります。右列の1行をそれぞれのファイルに保存します。
+
+| 保存先 | 内容 |
+| --- | --- |
+| `docs/product.txt` | `製品東京大学は限定品` |
+| `docs/lecture.txt` | `東京大学で講演します。` |
+
+## 質問と引用を登録し、基準を測る
+
+`product.txt` を見つけたいときの問い合わせとして「東京大学」を登録します。`--doc` は対象の文書 ID、`--quote` はその文書に一意に現れる引用です。最初の `eval` に付けた `baseline` は評価レポートのタグです。
+
+```sh
+dunlin build
+dunlin eval-data add --question "東京大学" --doc "docs:product.txt" --quote "製品東京大学は限定品"
+dunlin eval --tag baseline
+dunlin report show baseline
+```
+
+この例では `scores` の `evidence_recall@context` が `0` になります。登録した引用が、実際に返す検索文脈に含まれなかったことを示しています。
+
+レポートに表示された `build_id` を使い、基準ビルドにもタグを付けます。次のコマンドの `BASELINE_BUILD_ID` を、表示された ID に置き換えます。
+
+```sh
+dunlin tag baseline-build BASELINE_BUILD_ID
+```
+
+## 辞書候補を選ぶ
+
+```sh
+dunlin dictionary suggest --report baseline
+```
+
+標準辞書では、問い合わせの「東京大学」は1語ですが、正解の引用では「東京」「大学」に分かれています。`suggest` は追加候補の CSV 行と、語全体・部分語の確認用問い合わせを表示します。
+
+```text
+東京大学,名詞,トウキョウダイガク
+  docs:product.txt — 製品東京大学は限定品
+  Question terms 東京大学
+  Evidence terms 東京 / 大学
+  Whole query 東京大学
+  Partial query 大学
+```
+
+出力中の `東京大学,名詞,トウキョウダイガク` を、見出しなしの UTF-8 CSV として `selected.csv` に保存します。本体と同じディレクトリに `Dunlinfile.yaml` のコピーを作り、候補設定に辞書を追加します。
+
+```sh
+cp Dunlinfile.yaml candidate.yaml
+dunlin dictionary add selected.csv --config candidate.yaml
+```
+
+`dictionary add` は、候補設定の `index.keyword` の `with.user_dictionary` に辞書のパスを設定します。
+
+## 同じ評価データで試行と比較を行う
+
+基準ビルドの抽出・チャンク化の結果を `--input baseline-build` で指定し、`--from index` で索引から作り直します。`dict` は試行ビルド、`dict-eval` はその評価レポートのタグです。
+
+```sh
+dunlin build --from index --input baseline-build --config candidate.yaml --tag dict
+dunlin eval --build dict --tag dict-eval
+dunlin report compare baseline dict-eval
+```
+
+比較結果の `comparable` が `true` であることを確認します。この例では `cases` の「東京大学」が `before: 0`、`after: 1`、`status: recovered` になり、辞書を追加すると登録した根拠を回収できることが分かります。
+
+## 語全体と部分語の順位を確かめる
+
+評価に登録した語全体の「東京大学」に加え、`suggest` が出した部分語の「大学」でも順位を調べます。両方のビルドで上位1件を取り、JSON の `data.results` で `document_id` が `docs:product.txt` の結果とその `rank` を見ます。
+
+```sh
+dunlin search "東京大学" --build baseline-build --limit 1 --json
+dunlin search "東京大学" --build dict --limit 1 --json
+dunlin search "大学" --build baseline-build --limit 1 --json
+dunlin search "大学" --build dict --limit 1 --json
+```
+
+| 問い合わせ | 基準 `baseline-build` | 辞書を追加した試行 `dict` |
+| --- | --- | --- |
+| 東京大学 | 上位1件の圏外 | 1位 |
+| 大学 | 1位 | 上位1件の圏外 |

@@ -33,6 +33,7 @@
     "docs/acceptance.md",
     "docs/api.md",
     "docs/dunlin-spec.md",
+    "docs/evaluation.md",
     "docs/mcp.md",
     "licenses/*.txt"
   ],

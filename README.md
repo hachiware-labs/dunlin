@@ -164,6 +164,7 @@ transform:
 | 文書 | 内容 |
 |---|---|
 | [MCP と RAG の起動](docs/mcp.md) | 起動手順、モデルの設定、日本語検索とユーザー辞書、接続制限 |
+| [検索評価とユーザー辞書](docs/evaluation.md) | 評価データの登録、基準と試行の比較、語全体と部分語の順位確認 |
 | [Node.js API](docs/api.md) | 索引を直接操作するライブラリとしての使い方 |
 | [受け入れ確認](docs/acceptance.md) | 仕様の受け入れ条件に対する確認結果 |
 | [設計仕様](docs/dunlin-spec.md) | コマンド、設定、評価、Wiki/PARA の仕様の全体 |

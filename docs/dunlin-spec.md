@@ -140,11 +140,23 @@ dunlin init para ./notes
 
 #### 初期化時の OCR 指定
 
-`dunlin config set ocr` で LightOnOCR をユーザー設定に登録する。`--tool lightonocr` でツール名を明示できる。`dunlin config list` で確認し、`dunlin config unset ocr` で解除する。登録内容はモデルの既定値と同じ `~/.dunlin/config.yaml` に保存する。
+OCR の実行方式は次の2つから選ぶ。
 
-`init mcp` は `--ocr` を明示すると OCR を有効にする。ほかの種別は `init` のオプション、ユーザー設定、組み込みの既定値（無効）の順で優先する。
+| ツール | 内容 | 向く環境 |
+| --- | --- | --- |
+| `oar-ocr`（標準） | PaddleOCR のモデルを ONNX Runtime で動かす。Rust から直接呼ぶ | GPU のない環境を含む、すべての環境 |
+| `lightonocr` | LightOnOCR の視覚言語モデルを、管理された Python の実行環境で動かす。Rust から別プロセスとして起動する | GPU があり、精度を優先する環境 |
 
-OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に OCR の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `dunlin add ocr` を実行して準備する。PDF のテキスト層は先に読み、テキスト層のないページや画像の認識に LightOnOCR を使う。
+`dunlin config set ocr` で OCR をユーザー設定に登録する。`--tool oar-ocr` または `--tool lightonocr` で方式を選ぶ。`--tool` を省いた場合は `oar-ocr` を登録する。以前に登録した `tool: lightonocr` はそのまま有効である。`dunlin config list` で確認し、`dunlin config unset ocr` で解除する。登録内容はモデルの既定値と同じ `~/.dunlin/config.yaml` に保存する。
+
+`init mcp` は `--ocr` を明示すると OCR を有効にする。ほかの種別は `init` のオプション、ユーザー設定、組み込みの既定値（無効）の順で優先する。`init --ocr-tool <oar-ocr|lightonocr>` で、その初期化に限って方式を選べる。方式は `--ocr-tool`、ユーザー設定、`oar-ocr` の順で決める。
+
+OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に選んだ方式の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `dunlin add ocr` を実行して準備する。`dunlin add ocr` は、`tools` に記録された方式を準備する。
+
+- PDF のテキスト層は先に読み、テキスト層のないページと画像だけを OCR にかける。
+- 1つのプロジェクトで使う OCR は1つとする。`tools` に2つの方式を書いた場合は検証エラーにする。
+- 方式を切り替えるには、`dunlin remove` で今の方式を外し、`dunlin add` で別の方式を足してから `dunlin build` を実行する。抽出結果の再利用のキーには方式と版を含めるので、OCR にかけた文書だけが読み直される。
+- 以前のプロジェクトの `tools` にある `name: ocr` は、`lightonocr` の旧名として読む。
 
 #### 初期化で作成する項目
 
@@ -2010,7 +2022,9 @@ dunlin serve
 ```bash
 dunlin add --list
 dunlin add hannoy
-dunlin add ocr
+dunlin add ocr          # tools に記録された OCR の方式を準備する
+dunlin add oar-ocr
+dunlin add lightonocr
 dunlin remove hannoy
 ```
 
@@ -2529,8 +2543,8 @@ serve:
 
 | ライブラリ | 用途 | 扱い |
 | --- | --- | --- |
-| `pdfjs-dist`、`@napi-rs/canvas` | PDF の文字層とページ位置の抽出、OCR の前のページの画像化 | JavaScript のまま。Rust の PDF ライブラリは、日本語のフォントの扱いが不十分か、別途 pdfium の導入が要る。同じ結果を追加の導入なしで得られるものが見つかれば移す |
-| `tesseract.js` と言語データ | GPU を使わない OCR | JavaScript のまま。Rust から Tesseract を使うには、利用者の環境に Tesseract 本体の導入が要る |
+| `pdfjs-dist`、`@napi-rs/canvas` | PDF の文字層とページ位置の抽出、OCR の前のページの画像化 | Rust の `pdf_oxide` に置き換え、標準とする。pdfjs との比較の結果は記録として残す（28.9節） |
+| `tesseract.js` と言語データ | GPU を使わない OCR | 外す。GPU を使わない OCR は `oar-ocr`（4.1節）が受け持つ |
 | `@modelcontextprotocol/server` | MCP のサーバー | Rust の公式 SDK（`rmcp`）に置き換える。返却形式（27章）と道具の名前は変えない |
 | `docling.rs`（npm） | Office と PDF の変換 | 中身は Rust なので、crate を直接使えるか確かめる。使えるまでは npm の口から呼ぶ |
 | `@ast-grep/napi` と言語の文法 | コードの宣言の位置 | 中身は Rust。`ast-grep-core` などの crate を直接使う |
@@ -2564,12 +2578,12 @@ serve:
 
 | 段階 | Rust | JavaScript |
 | --- | --- | --- |
-| `source` | 走査、パーサの振り分け（6.7節）、読み込みとハッシュ、キャッシュの判定、Rust で作ったパーサの実行、原本と抽出結果の保存 | PDF の文字層と OCR のパース |
+| `source` | 走査、パーサの振り分け（6.7節）、読み込みとハッシュ、キャッシュの判定、パース（テキスト、PDF、OCR、外部コマンド）、原本と抽出結果の保存 | HTML と Office のパース。どちらも移行が済むまで（28.9節） |
 | `transform` | 正規化とチャンク化、チャンクの保存。`chunk.semantic` の埋め込みも Rust からモデルを呼ぶ | なし |
 | `index` | キーワード索引とベクトル索引の作成。埋め込みも Rust からモデルを呼ぶ | なし |
 | `search` / `ask` / `serve` | 取得、統合、並べ替え、文脈の組み立て、回答の生成、返却形式の組み立て、HTTP と MCP のサーバー | なし |
 | `eval` | 評価データの管理、根拠の位置対応、指標の計算、レポートと比較 | なし |
-| Wiki/PARA | 取り込み、執筆と引用の検証の進行、検査、ページの HTML 化、画面の配信 | PDF の文字層と OCR のパース（`source` と同じ） |
+| Wiki/PARA | 取り込み、執筆と引用の検証の進行、検査、ページの HTML 化、画面の配信 | `source` と同じ |
 
 ### 28.5 Node.js API の範囲
 
@@ -2607,3 +2621,39 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 | チャンクの `searchText` | NFKC の検索用の文字列は索引を作るときだけに使う。保存せず、索引を作るときに計算する案を検討する |
 | `state.sqlite` と `corpus.sqlite` | 段階2で両方とも Rust から開くようになる。1つにまとめるかは、その後に決める |
 | 入口 | 28.2節では npm で配布するため JavaScript の起動役を残した。Rust の実行ファイルを npm で配り、起動役もなくすかは段階6で決める |
+
+### 28.9 段階2の進め方
+
+段階2では、構築（`source`、`transform`、`index`）のモジュールの実行と、段階の進行・記録を Rust のエンジンに移す。範囲が大きいので、次の小段階に分ける。各小段階の終わりで、旧実装と同じ入力に対して段階の識別子、出力、ビルドID、検索結果が変わらないことを差分テストで確かめる。
+
+| 小段階 | 内容 |
+| --- | --- |
+| 2a | Rust から `state.sqlite` を読み書きする部品を作る。`source` 段（走査、振り分け、読み込みとハッシュ、キャッシュ、テキストと Markdown とコードのパース、`loader.command`、原本と抽出結果の保存）を Rust で実行する。PDF は `pdf_oxide` で読み、OCR は `oar-ocr` を Rust から、`lightonocr` を別プロセスとして呼ぶ。HTML と Office は JavaScript の実装を呼び出す |
+| 2b | `transform` 段（`text.normalize`、`chunk.length`、`chunk.structure`、`chunk.semantic`）を Rust で実行する。埋め込みモデルは Rust から HTTP で呼ぶ |
+| 2c | `index` 段（キーワード索引、ベクトル索引、hannoy）と、ビルド・タグ・採用の記録を Rust で実行する |
+| 2d | `build`、`source`、`transform`、`index` の各コマンドの進行（`--from`、`--until`、`--input`、`--tag`、`--config`、`--dry-run`、試行の上限）を Rust に移し、JavaScript の `buildProject` を Rust の口の呼び出しだけにする |
+| 2e | 28.3節のデータの持ち方に移る。抽出結果とチャンクの正本をコーパスにし、`state.sqlite` には識別子だけを置く。28.7節の移行を行う |
+
+#### JavaScript の実装を呼び出す仕組み
+
+- Rust のエンジンは、ワーカースレッドで構築を進める。JavaScript で実装したパーサが要るときは、要求に番号を付けて Node.js のメインスレッドに渡し、結果が届くまでその文書の処理を待つ。
+- JavaScript は、構築を始めるときに「種類、バイト列、ファイル名、引数」を受け取ってパース結果（本文、形式、位置、由来）を返す関数を渡す。結果やエラーは番号を付けて Rust に返す。
+- 中断（利用者の中断、試行の上限）は、待っている要求にも伝える。
+
+#### 2a から 2d の間に変えないもの
+
+- `state.sqlite` の表と、段階の出力・ビルドの記録の形式は変えない。旧実装で作ったプロジェクトをそのまま続けて構築でき、途中の小段階のまま公開しても困らないようにするためである。
+- キャッシュのキー、段階の識別子の計算方法、ビルドIDも変えない。
+- データの持ち方を変えるのは 2e だけとし、識別子が一度だけ変わることをそこで扱う（28.7節）。
+
+#### HTML の抽出
+
+- いまの HTML の抽出は cheerio を使い、その HTML 構文解析器は HTML5 の標準の解析と細部が違う。Rust の HTML ライブラリに移すと、崩れた HTML で抽出結果が変わり得る。
+- 2a では JavaScript の実装のまま呼び出す。Rust への移行は 2e と同時に行い、抽出結果が変わる文書の数を実際の資料で確かめてから決める。
+
+#### PDF と OCR
+
+- PDF の文字層の抽出は `pdf_oxide` を標準とする。文字の並べ方や改行の入れ方が pdfjs と違い、抽出結果が変わり得る。再利用のキーにパーサの名前と版が入っているので、切り替え後の最初の構築では PDF だけが読み直される。
+- 日本語の PDF（横書き、縦書き、表、段組み）で pdfjs と抽出結果を比べ、差のある文書の数と内容、ページ位置の一致、処理時間を記録として `docs/` に残す。比較の結果は、標準を決める条件にはしない。
+- `oar-ocr` は ONNX Runtime とモデルを使う。どちらも本体には含めず、`dunlin add oar-ocr` で準備する（25.4節）。日本語のスキャン文書で認識の精度と速度を測り、標準の方式として十分かを確かめる。
+- `lightonocr` は、今の管理された Python の実行環境とサーバーを、Rust から別プロセスとして起動する。

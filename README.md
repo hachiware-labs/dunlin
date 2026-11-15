@@ -161,13 +161,17 @@ transform:
 
 ## ドキュメント
 
-| 文書 | 内容 |
-|---|---|
-| [MCP と RAG の起動](docs/mcp.md) | 起動手順、モデルの設定、日本語検索とユーザー辞書、接続制限 |
-| [検索評価とユーザー辞書](docs/evaluation.md) | 評価データの登録、基準と試行の比較、語全体と部分語の順位確認 |
-| [Node.js API](docs/api.md) | 索引を直接操作するライブラリとしての使い方 |
-| [受け入れ確認](docs/acceptance.md) | 仕様の受け入れ条件に対する確認結果 |
-| [設計仕様](docs/dunlin-spec.md) | コマンド、設定、評価、Wiki/PARA の仕様の全体 |
+| 目的 | 文書 |
+| --- | --- |
+| サンプル資料で始める | [クイックスタート](docs/quickstart.md) |
+| 検索・回答・ページを使う | [MCP と RAG](docs/mcp.md) · [Wiki と PARA](docs/wiki.md) |
+| 検索を改善する | [検索評価とユーザー辞書](docs/evaluation.md) · [エージェントと試行する](docs/agents.md) |
+| コマンドや設定を調べる | [CLI](docs/cli.md) · [モジュール](docs/modules.md) · [Dunlinfile の既定値](docs/config.md) · [困ったときは](docs/troubleshooting.md) |
+| 仕組みと用途を知る | [ビルドと評価の関係](docs/concepts.md) · [実装構成](docs/architecture.md) · [構成の比較](docs/comparison.md) · [ベンチマーク](docs/benchmarks.md) |
+| Node.js に組み込む | [Node.js API](docs/api.md) |
+| 開発・運用を確認する | [開発と変更の確認](CONTRIBUTING.md) · [変更履歴](CHANGELOG.md) · [セキュリティ](SECURITY.md) · [受け入れ確認](docs/acceptance.md) |
+| ライセンスと通知を調べる | [本体のライセンス状況](LICENSE) · [第三者の通知](THIRD_PARTY_NOTICES.md) |
+| 仕様を調べる | [Dunlin 設計仕様](docs/dunlin-spec.md) |
 
 ## 開発
 

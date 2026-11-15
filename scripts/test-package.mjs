@@ -134,10 +134,10 @@ try {
   );
   await mkdir(rootDir);
   await writeFile(join(rootDir, 'package.json'), JSON.stringify(rootManifest));
-  await copyFile(join(project, 'README.md'), join(rootDir, 'README.md'));
   await cp(join(project, 'examples'), join(rootDir, 'examples'), { recursive: true });
   for (const { path } of bundled.files) {
-    if ((path.startsWith('dist/') && !path.startsWith('dist/tools/') && !path.endsWith('.node')) || /^(tools\/rag|docs|licenses)\//u.test(path)) {
+    const rootDoc = path === 'LICENSE' || /^[^/]+\.md$/u.test(path);
+    if ((path.startsWith('dist/') && !path.startsWith('dist/tools/') && !path.endsWith('.node')) || /^(tools\/rag|docs|licenses)\//u.test(path) || rootDoc) {
       const target = join(rootDir, path);
       await mkdir(dirname(target), { recursive: true });
       await copyFile(join(project, path), target);

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 
 import { Dunlin } from 'dunlin';
 
-import { decodeRemote } from './ingest-files.mjs';
+import { convertOffice } from './parsers/documents.mjs';
 import { lightonModel } from './parsers/catalog.mjs';
 import { lightonServer, managedOcr, managedOcrVersion } from './parsers/lighton-setup.mjs';
 import { oarOcrHome } from './parsers/oar-setup.mjs';
@@ -176,7 +176,7 @@ function parserHost(progress = () => {}) {
     async parse({ kind, name }, bytes) {
       const signal = trialSignal();
       const parsed = kind === 'html' ? await loadHtml(bytes)
-        : await decodeRemote([bytes], undefined, name, { parsers: { documents: { tool: 'docling-rs' } }, keepOriginal: true, signal });
+        : await convertOffice(bytes, name, signal);
       return { content: parsed.content, format: parsed.format, locations: parsed.locations, parser: parsed.parser };
     },
   };

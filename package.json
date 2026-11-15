@@ -67,14 +67,13 @@
     "zod": "4.6.7"
   },
   "optionalDependencies": {
-    "@napi-rs/canvas": "1.1.0",
-    "docling.rs": "2.67.1",
-    "pdfjs-dist": "6.5.438"
+    "docling.rs": "2.67.1"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
     "@napi-rs/cli": "3.10.12",
     "@types/node": "^22.0.0",
+    "pdfjs-dist": "6.5.438",
     "typescript": "5.9.3"
   }
 }

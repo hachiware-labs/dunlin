@@ -2543,11 +2543,11 @@ serve:
 
 | ライブラリ | 用途 | 扱い |
 | --- | --- | --- |
-| `pdfjs-dist`、`@napi-rs/canvas` | PDF の文字層とページ位置の抽出、OCR の前のページの画像化 | Rust の `pdf_oxide` に置き換え、標準とする。pdfjs との比較の結果は記録として残す（28.9節） |
-| `tesseract.js` と言語データ | GPU を使わない OCR | 外す。GPU を使わない OCR は `oar-ocr`（4.1節）が受け持つ |
+| `pdfjs-dist`、`@napi-rs/canvas` | PDF の文字層とページ位置の抽出、OCR の前のページの画像化 | Rust の `pdf_oxide` に置き換えた（段階2a）。pdfjs は比較の記録（28.9節）を再現するベンチマークの開発用の依存にだけ残す |
+| `tesseract.js` と言語データ | GPU を使わない OCR | 外した（段階2a）。GPU を使わない OCR は `oar-ocr`（4.1節）が受け持つ |
 | `@modelcontextprotocol/server` | MCP のサーバー | Rust の公式 SDK（`rmcp`）に置き換える。返却形式（27章）と道具の名前は変えない |
 | `docling.rs`（npm） | Office と PDF の変換 | 中身は Rust なので、crate を直接使えるか確かめる。使えるまでは npm の口から呼ぶ |
-| `@ast-grep/napi` と言語の文法 | コードの宣言の位置 | 中身は Rust。`ast-grep-core` などの crate を直接使う |
+| `@ast-grep/napi` と言語の文法 | コードの宣言の位置 | 旧形式の設定の取り込みでだけ使っていたので、その経路とともに外した（段階2a）。コードの宣言の位置を使う機能を作るときは、`ast-grep-core` などの crate を直接使う |
 | `cheerio` | HTML から本文を取り出す | Rust（`scraper` など）に置き換える |
 | `markdown-it` | Wiki/PARA のページを HTML にする | Rust（すでに使っている `pulldown-cmark`）に置き換える |
 | `yaml` | `Dunlinfile.yaml` と設定の読み書き | Rust に置き換える。行番号付きのエラーを出せるライブラリを選ぶ |
@@ -2604,7 +2604,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 | 3 | 検索モジュール、文脈の組み立て、返却形式、回答の生成と並べ替えのモデル呼び出し、HTTP と MCP のサーバーを Rust に移す | 登録表とモジュールが JavaScript にある |
 | 4 | 評価データ、評価、レポートと比較、試行と採用を Rust に移し、`evaluate.rs` とまとめる | 評価の二重化 |
 | 5 | Wiki/PARA の取り込み、執筆の進行、検査、ページの HTML 化、画面の配信を Rust に移し、`wiki.rs` とまとめる | Wiki の二重化 |
-| 6 | 残った JavaScript のライブラリ（`cheerio`、`markdown-it`、`yaml`、`zod`、`@ast-grep/napi`、`@modelcontextprotocol/server`）を外し、`docling.rs` を crate で使えるか確かめる。コマンドの解釈と表示を Rust に移し、入口を起動役だけにする | JavaScript のライブラリへの依存 |
+| 6 | 残った JavaScript のライブラリ（`cheerio`、`markdown-it`、`yaml`、`zod`、`@modelcontextprotocol/server`）を外し、`docling.rs` を crate で使えるか確かめる。コマンドの解釈と表示を Rust に移し、入口を起動役だけにする | JavaScript のライブラリへの依存 |
 
 ### 28.7 既存プロジェクトの扱い
 

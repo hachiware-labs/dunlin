@@ -8,8 +8,8 @@ import { pathToFileURL } from 'node:url';
 import { Dunlin } from 'dunlin';
 
 import { revision } from '../../../authoring/files.mjs';
-import { decodeRemote, listFiles } from '../../../ingest-files.mjs';
-import { lightonModel } from '../../../parsers/catalog.mjs';
+import { listFiles } from '../../../ingest-files.mjs';
+import { convertOffice } from '../../../parsers/documents.mjs';
 import { managedOcrVersion } from '../../../parsers/lighton-setup.mjs';
 import { commandIdentity, commandVersion, defaultRoutes, parserKind, parseWithCommand, resolveParser } from './project-parsers.mjs';
 import { trialCheckpoint, trialSignal } from '../../../project-trials.mjs';
@@ -219,7 +219,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
         else if (kind === 'pdf') parsed = await loadPdf(bytes);
         else if (kind === 'html') parsed = await loadHtml(bytes);
         else if (kind === 'office') {
-          parsed = await decodeRemote([bytes], undefined, name, { parsers: { documents: { tool: 'docling-rs' } }, keepOriginal: true, signal });
+          parsed = { ...await convertOffice(bytes, name, signal), bytes };
         } else {
           const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
           parsed = { content, format: ['.md', '.markdown'].includes(extension) ? 'markdown' : 'text', bytes };
@@ -262,21 +262,14 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   return groups;
 }
 
-async function loadOcr(bytes) {
-  const { parseOcr } = await import('../../../parsers/ocr.mjs');
-  try {
-    const parsed = await parseOcr(bytes, { tool: 'lightonocr', managed: true, model: lightonModel, lang: 'ja' }, trialSignal());
-    return { ...parsed, bytes, parser: { tool: 'lightonocr', model: lightonModel, lang: 'ja' } };
-  } catch (error) {
-    if (error.code === 'OCR_NOT_PREPARED') throw new Error('Local GPU OCR is not prepared. Run dunlin add ocr.', { cause: error });
-    throw error;
-  }
+// PDF and OCR are read in Rust now, with results that differ on purpose (docs/pdf-extraction.md),
+// so they are not part of this reference.
+async function loadOcr() {
+  throw new Error('OCR is not part of the reference loader');
 }
 
-async function loadPdf(bytes) {
-  const { pdfText } = await import('../../../parsers/documents.mjs');
-  const { content, locations } = await pdfText(bytes, trialSignal());
-  return { content, locations, format: 'text', bytes, parser: { tool: 'pdfjs' } };
+async function loadPdf() {
+  throw new Error('PDF is not part of the reference loader');
 }
 
 async function loadHtml(bytes) {

@@ -11,7 +11,6 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 import { Dunlin } from '../../dist/index.js';
-import { pdfText } from '../../tools/rag/parsers/documents.mjs';
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: { runs: { type: 'string', default: '3' }, show: { type: 'boolean' } } });
 if (positionals.length !== 1) {
@@ -66,6 +65,32 @@ function similarity(a, b) {
     previous = current;
   }
   return 1 - previous[y.length] / Math.max(x.length, y.length);
+}
+
+/** The previous reader: pdfjs text items, one page after another, as Dunlin read them before. */
+async function pdfText(bytes) {
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const task = getDocument({ data: new Uint8Array(bytes), verbosity: 0, isEvalSupported: false, useSystemFonts: true });
+  try {
+    const document = await task.promise;
+    const texts = [];
+    const locations = [];
+    let startLine = 1;
+    for (let number = 1; number <= document.numPages; number++) {
+      const page = await document.getPage(number);
+      const { items } = await page.getTextContent();
+      const text = items.map(({ str, hasEOL }) => str ? str + (hasEOL ? '\n' : ' ') : '').join('').trim();
+      page.cleanup();
+      if (!text) continue;
+      texts.push(text);
+      const endLine = startLine + text.split('\n').length - 1;
+      locations.push({ page: number, range: { startLine, endLine } });
+      startLine = endLine + 2;
+    }
+    return { content: texts.join('\n\n'), locations };
+  } finally {
+    await task.destroy();
+  }
 }
 
 const pages = ({ locations }) => (locations ?? []).map(({ page }) => page).join(',');

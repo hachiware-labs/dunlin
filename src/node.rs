@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use napi::bindgen_prelude::{
-    AsyncTask, Env, Error, Result, Status, Task, ToNapiValue, TypeName, ValueType,
+    AsyncTask, Buffer, Env, Error, Result, Status, Task, ToNapiValue, TypeName, ValueType,
 };
 use napi::sys::{napi_env, napi_value};
 use napi_derive::napi;
@@ -156,6 +156,123 @@ pub fn merge_user_dictionary(
             existing.as_deref().map(Path::new),
             Path::new(&selected),
         )
+    })
+}
+
+#[napi(object)]
+pub struct SourceFileRequest {
+    pub path: String,
+    /// Largest accepted size in bytes.
+    pub limit: f64,
+}
+
+#[napi(object)]
+pub struct SourceFileRead {
+    pub bytes: Option<Buffer>,
+    pub modified_at_ms: Option<f64>,
+    /// `not_file`, `too_large`, `changed` or `io`.
+    pub error: Option<String>,
+    pub message: Option<String>,
+}
+
+/// Reads source files in parallel, stopping before the files that would exceed `max_bytes`.
+/// Each result carries the bytes or the reason for failure; callers request the rest again.
+#[napi]
+pub fn read_source_files(
+    files: Vec<SourceFileRequest>,
+    max_bytes: f64,
+    cancel: &NativeCancellation,
+) -> AsyncTask<Job<Vec<SourceFileRead>>> {
+    use rayon::prelude::*;
+    let cancel = cancel.0.clone();
+    task(move || {
+        cancel.check()?;
+        // Read the longest prefix whose current sizes fit the budget, and at least one file.
+        let sizes: Vec<u64> = files
+            .par_iter()
+            .map(|request| std::fs::metadata(&request.path).map_or(0, |entry| entry.len()))
+            .collect();
+        let mut total = 0;
+        let count = sizes
+            .iter()
+            .take_while(|&&size| {
+                total += size;
+                total as f64 <= max_bytes
+            })
+            .count()
+            .max(1)
+            .min(files.len());
+        files
+            .into_par_iter()
+            .take(count)
+            .map(|request| {
+                cancel.check()?;
+                let read = crate::source_files::read_source_file(
+                    Path::new(&request.path),
+                    request.limit.max(0.0) as u64,
+                );
+                Ok(match read {
+                    Ok(file) => SourceFileRead {
+                        bytes: Some(file.bytes.into()),
+                        modified_at_ms: file.modified_at_ms.map(|value| value as f64),
+                        error: None,
+                        message: None,
+                    },
+                    Err(failure) => {
+                        use crate::source_files::ReadFailure;
+                        let (code, message) = match failure {
+                            ReadFailure::NotFile => ("not_file", None),
+                            ReadFailure::TooLarge => ("too_large", None),
+                            ReadFailure::Changed => ("changed", None),
+                            ReadFailure::Io(message) => ("io", Some(message)),
+                        };
+                        SourceFileRead {
+                            bytes: None,
+                            modified_at_ms: None,
+                            error: Some(code.into()),
+                            message,
+                        }
+                    }
+                })
+            })
+            .collect()
+    })
+}
+
+#[napi(object)]
+pub struct OriginalFile {
+    pub sha256: String,
+    pub bytes: Buffer,
+}
+
+/// Stores originals as `<directory>/<sha256>.bin` in parallel. Returns an error message or
+/// `null` for each file.
+#[napi]
+pub fn store_originals(
+    directory: String,
+    files: Vec<OriginalFile>,
+    cancel: &NativeCancellation,
+) -> AsyncTask<Job<Vec<Option<String>>>> {
+    use rayon::prelude::*;
+    // Copy out of JavaScript memory before leaving the main thread.
+    let files: Vec<(String, Vec<u8>)> = files
+        .into_iter()
+        .map(|file| (file.sha256, file.bytes.to_vec()))
+        .collect();
+    let cancel = cancel.0.clone();
+    task(move || {
+        cancel.check()?;
+        let directory = PathBuf::from(directory);
+        if let Err(message) = crate::source_files::original_directory(&directory) {
+            return Ok(vec![Some(message); files.len()]);
+        }
+        files
+            .par_iter()
+            .map(|(sha256, bytes)| {
+                cancel.check()?;
+                Ok(crate::source_files::store_original(&directory, sha256, bytes).err())
+            })
+            .collect()
     })
 }
 

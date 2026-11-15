@@ -1,11 +1,13 @@
 
-import { extname, join, matchesGlob, relative, sep } from 'node:path';
+import { basename, extname, join, matchesGlob, relative, sep } from 'node:path';
 import { open, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 import { Dunlin } from 'dunlin';
 
-import { listFiles, prepareLocalFile } from './ingest-files.mjs';
+import { revision } from './authoring/files.mjs';
+import { decodeRemote, listFiles } from './ingest-files.mjs';
 import { lightonModel } from './parsers/catalog.mjs';
 import { managedOcrVersion } from './parsers/lighton-setup.mjs';
 import { commandIdentity, commandVersion, defaultRoutes, parserKind, parseWithCommand, resolveParser } from './project-parsers.mjs';
@@ -107,6 +109,12 @@ export async function inventory(sources, previous) {
   return files;
 }
 
+// Native reads cover up to this many files and bytes at a time; originals are stored in batches.
+const readFiles = 256;
+const readBytes = 64 * 1024 * 1024;
+const textLimit = 1024 * 1024;
+const convertedLimit = 16 * textLimit;
+
 export async function loadCorpus(sources, paths, skipped, warnings, db, force, routes = defaultRoutes(), progress = () => {}, root) {
   const excluded = new Set(skipped.map(({ source_id, path }) => JSON.stringify([source_id, path])));
   const groups = [];
@@ -117,7 +125,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
     for (const { file, objectId } of files) {
       if (excluded.has(JSON.stringify([id, objectId]))) continue;
       const route = resolveParser(routes, file, objectId);
-      pending.push({ id, file, objectId, documents, route, kind: parserKind(route, file) });
+      pending.push({ id, file, objectId, documents, route, kind: parserKind(route, file), index: pending.length });
     }
   }
   const ocr = pending.some(({ kind }) => kind === 'ocr');
@@ -128,52 +136,109 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   }
   const saved = db.prepare('SELECT document FROM loaded_files WHERE id = ?');
   const save = db.prepare('INSERT OR IGNORE INTO loaded_files VALUES (?, ?)');
-  // Parsing can wait on OCR or external commands, so rows are buffered and committed between files.
+  const sharedOriginals = join(paths.artifacts, 'originals', 'shared');
+
+  // Rust reads files ahead in batches. Workers take files in order, so reads advance monotonically.
+  const limitFor = (kind) => kind === 'text' ? textLimit : convertedLimit;
+  const ready = new Map();
+  let readFrom = 0;
+  let reading;
+  async function read(index) {
+    while (!ready.has(index)) {
+      reading ??= (async () => {
+        const batch = pending.slice(readFrom, readFrom + readFiles).map(({ file, kind }) => ({ path: file, limit: limitFor(kind) }));
+        const results = await Dunlin.readSourceFiles(batch, readBytes, { signal: trialSignal() });
+        results.forEach((result, offset) => ready.set(readFrom + offset, result));
+        readFrom += results.length;
+      })().finally(() => { reading = undefined; });
+      await reading;
+    }
+    const result = ready.get(index);
+    ready.delete(index);
+    if (result.error === 'too_large') throw new Error(`Source file exceeds ${limitFor(pending[index].kind) / textLimit} MiB`);
+    if (result.error === 'changed') throw new Error('A source file changed while it was being indexed');
+    if (result.error === 'not_file') throw new Error('Expected a local file');
+    if (result.error) throw new Error(result.message ?? 'Could not read the source file');
+    return result;
+  }
+
+  // Originals are stored before the cache rows that refer to them. Parsing can wait on OCR or
+  // external commands, so both are buffered and written between files.
+  let originals = new Map();
+  let originalBytes = 0;
   let rows = [];
   let flushedAt = Date.now();
-  const flush = () => {
-    if (!rows.length) return;
-    const pendingRows = rows;
+  let flushing = Promise.resolve();
+  function flush() {
+    const storing = [...originals];
+    const writing = rows;
+    originals = new Map();
+    originalBytes = 0;
     rows = [];
     flushedAt = Date.now();
-    writeTogether(db, () => { for (const [id, document] of pendingRows) save.run(id, document); });
-  };
+    flushing = flushing.then(async () => {
+      if (storing.length) {
+        const errors = await Dunlin.storeOriginals(sharedOriginals, storing.map(([sha256, { bytes }]) => ({ sha256, bytes })));
+        const failed = errors.findIndex((error) => error);
+        if (failed >= 0) throw Object.assign(new Error('Could not load ' + storing[failed][1].target + '. ' + errors[failed]), { loadTarget: true });
+      }
+      if (writing.length) writeTogether(db, () => { for (const [key, document] of writing) save.run(key, document); });
+    });
+    return flushing;
+  }
+
   let completed = 0;
   progress(completed);
-  const originals = join(paths.artifacts, 'originals');
   // Managed OCR serves one request at a time. Keep its document and trial accounting order.
   const limit = ocr ? 1 : fileConcurrency;
+  let failed = false;
   try {
-    await processFiles(pending, async ({ id, file, objectId, route, kind }) => {
+    await processFiles(pending, async ({ index, id, file, objectId, route, kind }) => {
       trialCheckpoint();
       try {
         const extension = extname(file).toLowerCase();
-        const parsers = kind === 'office' ? { documents: { tool: 'docling-rs' } } : undefined;
         const useOcr = kind === 'ocr';
         const version = versions.get(route);
         const key = kind === 'command'
           ? (hash) => JSON.stringify(['loader.command-v1', id, objectId, hash, commandIdentity(route, version)])
           : (hash) => JSON.stringify(['loader.auto-v1', id, objectId, extension, hash, ...(useOcr ? [managedOcrVersion] : [])]);
-        const decode = kind === 'command' ? (bytes, name) => parseWithCommand(route, bytes, name, { root, version, signal: trialSignal() })
-          : useOcr ? loadOcr : kind === 'pdf' ? loadPdf : kind === 'html' ? loadHtml : undefined;
-        const cache = {
-          read: (hash) => {
-            const row = !force && saved.get(key(hash));
-            return row && JSON.parse(row.document);
-          },
-          write: (hash, doc) => {
-            rows.push([key(hash), JSON.stringify(doc)]);
-            if (rows.length >= flushRows || Date.now() - flushedAt >= flushMs) flush();
-          },
-        };
-        const { input } = await prepareLocalFile(originals, id, file, objectId, parsers, true,
-          trialSignal(), decode, cache,
-          { sharedOriginals: true });
+        const { bytes, modifiedAtMs } = await read(index);
+        const document = { objectId, url: pathToFileURL(file).href, modifiedAtMs: modifiedAtMs ?? undefined };
+        const hash = revision(bytes);
+        const row = !force && saved.get(key(hash));
+        if (row) {
+          progress(++completed);
+          return { ...JSON.parse(row.document), ...document };
+        }
+        const name = basename(file);
+        const signal = trialSignal();
+        let parsed;
+        if (kind === 'command') parsed = await parseWithCommand(route, bytes, name, { root, version, signal });
+        else if (useOcr) parsed = await loadOcr(bytes);
+        else if (kind === 'pdf') parsed = await loadPdf(bytes);
+        else if (kind === 'html') parsed = await loadHtml(bytes);
+        else if (kind === 'office') {
+          parsed = await decodeRemote([bytes], undefined, name, { parsers: { documents: { tool: 'docling-rs' } }, keepOriginal: true, signal });
+        } else {
+          const content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+          parsed = { content, format: ['.md', '.markdown'].includes(extension) ? 'markdown' : 'text', bytes };
+        }
+        if (Buffer.byteLength(parsed.content) > textLimit) throw new Error('Extracted text exceeds 1 MiB');
+        signal?.throwIfAborted();
+        const { content, format, locations, parser } = parsed;
+        const originalSha256 = parsed.bytes && revision(parsed.bytes);
+        if (originalSha256 && !originals.has(originalSha256)) {
+          originals.set(originalSha256, { bytes: parsed.bytes, target: id + ':' + objectId });
+          originalBytes += parsed.bytes.length;
+        }
+        const input = { ...document, content, format, corpus: { locations, parser, originalSha256 } };
+        rows.push([key(hash), JSON.stringify(input)]);
+        if (rows.length >= flushRows || originalBytes >= readBytes || Date.now() - flushedAt >= flushMs) await flush();
         progress(++completed);
         return input;
       } catch (error) {
-        if (error.code === 'TRIAL_LIMIT_REACHED') throw error;
-        throw new Error('Could not load ' + id + ':' + objectId + '. ' + error.message, { cause: error });
+        if (error.code === 'TRIAL_LIMIT_REACHED' || error.loadTarget) throw error;
+        throw Object.assign(new Error('Could not load ' + id + ':' + objectId + '. ' + error.message, { cause: error }), { loadTarget: true });
       }
     }, ({ id, objectId, documents, route }, input) => {
       if (!input.content.trim()) {
@@ -182,9 +247,16 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
       }
       documents.push(input);
     }, limit);
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
     // Keep the files that finished, so a failed or cancelled build can reuse them.
-    flush();
+    try {
+      await flush();
+    } catch (error) {
+      if (!failed) throw error;
+    }
   }
   return groups;
 }

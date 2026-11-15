@@ -6,7 +6,7 @@ import { DunlinError } from './types.js';
 import type {
   ChunkDocument, ChunkOptions, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, OpenOptions, OperationOptions, OptimizationReport, OptimizeOptions, ReadOutcome, RetrievalMethod,
-  RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
+  RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
 } from './types.js';
 
@@ -57,6 +57,8 @@ interface NativeBinding {
   mergeUserDictionary(existing: string | undefined, selected: string, cancel: NativeCancellation): Promise<string>;
   rankVectors(path: string, request: string, cancel: NativeCancellation): Promise<{ i: number; score: number }[]>;
   chunkDocuments(request: string): string;
+  readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
+  storeOriginals(directory: string, files: { sha256: string; bytes: Uint8Array }[], cancel: NativeCancellation): Promise<(string | null)[]>;
   acquireExecutionLock(path: string): { release(): void };
 }
 
@@ -305,6 +307,25 @@ export class Dunlin {
     } catch (error) {
       throw translateNativeError(error);
     }
+  }
+
+  /**
+   * Read local files in parallel. Reading stops before the file that would take the batch past
+   * maxBytes (at least one file is read), so the result can be shorter than files; request the rest again.
+   */
+  static async readSourceFiles(files: readonly { path: string; limit: number }[], maxBytes: number,
+    { signal }: OperationOptions = {}): Promise<SourceFileRead[]> {
+    const requests = files.map(({ path, limit }) => ({ path: absolutePath(path), limit }));
+    return cancellable(signal, (cancel) => native().readSourceFiles(requests, maxBytes, cancel));
+  }
+
+  /**
+   * Store original files as <directory>/<sha256>.bin, keeping an identical existing file.
+   * Returns an error message or null for each file. The caller computes each SHA-256 digest.
+   */
+  static async storeOriginals(directory: string, files: readonly { sha256: string; bytes: Uint8Array }[],
+    { signal }: OperationOptions = {}): Promise<(string | null)[]> {
+    return cancellable(signal, (cancel) => native().storeOriginals(absolutePath(directory), [...files], cancel));
   }
 
   /** Acquire a nonblocking process lock. Closing it releases ownership. */

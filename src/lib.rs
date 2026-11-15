@@ -17,6 +17,8 @@ mod wiki;
 
 #[cfg(all(feature = "node", not(test)))]
 mod node;
+#[cfg(any(feature = "node", test))]
+mod source_files;
 #[cfg(all(feature = "node", not(test)))]
 mod vector;
 

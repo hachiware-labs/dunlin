@@ -81,6 +81,15 @@ export interface LineRange {
   endLine: number;
 }
 
+/** A file read by Dunlin.readSourceFiles: its bytes, or why it could not be read. */
+export interface SourceFileRead {
+  bytes?: Buffer | null;
+  modifiedAtMs?: number | null;
+  /** not_file, too_large, changed (while it was read) or io. */
+  error?: 'not_file' | 'too_large' | 'changed' | 'io' | null;
+  message?: string | null;
+}
+
 /** An evidence range read from its saved document revision. */
 export interface EvidenceExcerpt {
   text: string;

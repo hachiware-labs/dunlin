@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -69,6 +69,8 @@ interface NativeBinding {
   runSource(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   runTransform(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   runIndex(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  runBuild(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  tagBuild(request: string, host: (...args: unknown[]) => void): Promise<string>;
   routeFiles(request: string): string;
   matchesGlob(path: string, pattern: string): boolean;
   readModuleArgs(name: string, args: string): string;
@@ -95,7 +97,7 @@ function native(): NativeBinding {
  * The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. Kinds:
  * `parse` and `progress` for loading, `charge` for counting model requests in the transform stage.
  */
-function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost): (...raw: unknown[]) => void {
+function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<TagBuildHost>): (...raw: unknown[]) => void {
   return (...raw) => {
     const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
     if (kind === 'progress') {
@@ -106,6 +108,7 @@ function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost): (...raw: 
       .then(() => kind === 'charge' ? Promise.resolve(host.charge?.(Number(args))).then(() => null)
         : kind === 'config' ? host.configChanged?.() ?? false
         : kind === 'tool' ? host.indexTool!(args)
+        : kind === 'search_config' ? host.searchConfigId!(JSON.parse(args) as Record<string, unknown>)
         : host.parse!(JSON.parse(args) as LoadCorpusFile, bytes))
       .then((result) => native().completeHostCall(id, configJson(result), null),
         (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
@@ -427,6 +430,21 @@ export class Dunlin {
   static async runIndex(request: IndexStageRequest, host: IndexStageHost = {}, { signal }: OperationOptions = {}): Promise<IndexStageOutcome> {
     const text = await cancellable(signal, (cancel) => native().runIndex(configJson(request), hostCallback(host), cancel));
     return JSON.parse(text) as IndexStageOutcome;
+  }
+
+  /**
+   * Run a project build command: the selected stages with their inputs, the build record, the tag
+   * and the serving build; or, with `dryRun`, what would run. The caller scans and orders sources.
+   */
+  static async runBuild(request: BuildCommandRequest, host: Partial<BuildCommandHost> = {}, { signal }: OperationOptions = {}): Promise<BuildCommandOutcome> {
+    const text = await cancellable(signal, (cancel) => native().runBuild(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as BuildCommandOutcome;
+  }
+
+  /** Name a build with a tag, its search settings and its configuration. */
+  static async tagBuild(request: TagBuildRequest, host: TagBuildHost): Promise<TagBuildOutcome> {
+    const text = await native().tagBuild(configJson(request), hostCallback(host));
+    return JSON.parse(text) as TagBuildOutcome;
   }
 
   /**

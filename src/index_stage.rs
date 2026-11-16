@@ -88,15 +88,15 @@ const EMBED_BATCH: usize = 32;
 const TOOL_OUTPUT_LIMIT: usize = 1024 * 1024;
 const KEYWORD_DIR: &str = ".dunlin-index-v1";
 
-fn text(value: &str) -> ConfigValue {
+pub(crate) fn text(value: &str) -> ConfigValue {
     ConfigValue::String(value.to_owned())
 }
 
-fn number(value: usize) -> ConfigValue {
+pub(crate) fn number(value: usize) -> ConfigValue {
     ConfigValue::Number(value as f64)
 }
 
-fn object(entries: Vec<(&str, ConfigValue)>) -> ConfigValue {
+pub(crate) fn object(entries: Vec<(&str, ConfigValue)>) -> ConfigValue {
     ConfigValue::Object(
         entries
             .into_iter()
@@ -106,12 +106,16 @@ fn object(entries: Vec<(&str, ConfigValue)>) -> ConfigValue {
 }
 
 /// `kind + '-' + sha256(JSON.stringify(value))`
-fn digest(kind: &str, value: &ConfigValue) -> String {
+pub(crate) fn digest(kind: &str, value: &ConfigValue) -> String {
     format!("{kind}-{}", sha256_hex(value.to_js_json().as_bytes()))
 }
 
 /// `object[name] = value` in JavaScript, where `None` is `undefined`, which JSON leaves out.
-fn assign(entries: &mut Vec<(String, ConfigValue)>, name: &str, value: Option<ConfigValue>) {
+pub(crate) fn assign(
+    entries: &mut Vec<(String, ConfigValue)>,
+    name: &str,
+    value: Option<ConfigValue>,
+) {
     match (entries.iter().position(|(key, _)| key == name), value) {
         (Some(index), Some(value)) => entries[index].1 = value,
         (Some(index), None) => {
@@ -122,21 +126,21 @@ fn assign(entries: &mut Vec<(String, ConfigValue)>, name: &str, value: Option<Co
     }
 }
 
-fn field<'a>(value: &'a ConfigValue, name: &str) -> Option<&'a ConfigValue> {
+pub(crate) fn field<'a>(value: &'a ConfigValue, name: &str) -> Option<&'a ConfigValue> {
     value.get(name)
 }
 
-fn string_field<'a>(value: &'a ConfigValue, name: &str) -> Option<&'a str> {
+pub(crate) fn string_field<'a>(value: &'a ConfigValue, name: &str) -> Option<&'a str> {
     value.get(name).and_then(ConfigValue::as_str)
 }
 
 /// `JSON.stringify(value)`, which is `undefined` for `undefined`.
-fn js_json(value: Option<&ConfigValue>) -> Option<String> {
+pub(crate) fn js_json(value: Option<&ConfigValue>) -> Option<String> {
     value.map(ConfigValue::to_js_json)
 }
 
 /// JavaScript truthiness of a JSON value.
-fn truthy(value: Option<&ConfigValue>) -> bool {
+pub(crate) fn truthy(value: Option<&ConfigValue>) -> bool {
     match value {
         None | Some(ConfigValue::Null) => false,
         Some(ConfigValue::Bool(value)) => *value,
@@ -147,14 +151,14 @@ fn truthy(value: Option<&ConfigValue>) -> bool {
     }
 }
 
-fn items(value: Option<&ConfigValue>) -> &[ConfigValue] {
+pub(crate) fn items(value: Option<&ConfigValue>) -> &[ConfigValue] {
     match value {
         Some(ConfigValue::Array(items)) => items,
         _ => &[],
     }
 }
 
-fn sql(error: rusqlite::Error) -> StageError {
+pub(crate) fn sql(error: rusqlite::Error) -> StageError {
     StageError::plain(error.to_string())
 }
 

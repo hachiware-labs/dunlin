@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { createGenerator } from './models.mjs';
-import { chunkCorpus, inventory, parserAssignments, runSourceStage, runTransformStage, scanFolder, unsupportedFiles } from './project-content.mjs';
+import { chunkCorpus, ocrRequest, parserHost, scanFolder } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
 import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
@@ -339,43 +339,24 @@ function latestStageId(db, stage) {
   return db.prepare('SELECT id FROM latest_stage WHERE stage = ?').get(stage)?.id;
 }
 
-async function runSource(db, project, plan, { force, skipUnsupported, warnings }) {
-  const { paths } = project;
+/** The settings of the source stage. Scans and orders the source folders when `scan` is set. */
+async function sourceSettings(project, plan, { scan, ocr }) {
   const parsed = await runModules(plan, { sources: [], parsers: [], reject: false }, {
     scan(input, args, ctx) {
+      if (!scan) return input;
       return scanFolder(input.sources, args, { ...ctx, projectRoot: project.root }).then((sources) => ({ ...input, sources }));
     },
     load(input, { category, ...args }, { name }) {
       return { ...input, parsers: [...input.parsers, { name, category, args }], reject: input.reject || args.unsupported === 'error' };
     },
   });
-  const { sources, reject } = parsed;
-  // Rust routes, loads, computes the stage ID and records the stage (spec 28.9 step 2a).
-  const result = await runSourceStage({ sources, routes: parserRoutes(parsed.parsers), reject, skipUnsupported, force, modules: moduleSettings(plan),
-    ocr: projectOcr(project.config.tools) },
-    paths, project.root);
-  if (result.unsupported) {
-    throw new ProjectError(2, 'UNSUPPORTED_FILES', 'Unsupported files found. Set source.filesystem with.exclude or use --skip-unsupported.', result.unsupported);
-  }
-  warnings.push(...result.warnings);
-  return { output: result.output, reused: result.reused };
-}
-
-/** Rust chunks, calls the embedding model for chunk.semantic and records the stage (spec 28.9 step 2b). */
-async function runTransform(sourceId, plan, force, project) {
-  const semantic = plan.find(({ module }) => module.name === 'chunk.semantic');
-  const embedder = semantic ? embeddingSettings(project.config, semantic.args.model) : null;
-  return runTransformStage({ sourceId, modules: moduleSettings(plan), force, embedder }, project.paths);
-}
-
-async function readUserDictionary(path) {
-  if (!path) return null;
-  try {
-    const bytes = await readFile(path);
-    return { bytes, hash: revision(bytes) };
-  } catch {
-    throw new ProjectError(2, 'USER_DICTIONARY_REQUIRED', 'Could not read the user dictionary CSV at ' + path);
-  }
+  const routes = parserRoutes(parsed.parsers);
+  return {
+    ...(scan && { sources: parsed.sources }), reject: parsed.reject, modules: moduleSettings(plan),
+    routes: routes.map(({ name, category, match, ocr: reads }) => ({ name, category, ...(match && { match }), ocr: reads })),
+    commands: routes.filter(({ category }) => category === 'command').map(({ name, args }) => ({ module: name, args })),
+    ...(ocr && await ocrRequest(projectOcr(project.config.tools))),
+  };
 }
 
 function dictionarySnapshot(paths, hash) {
@@ -400,45 +381,25 @@ function buildConfiguration(project) {
   return configuration;
 }
 
-/** Runs the index stage in Rust on a recorded transform stage and records the build (spec 28.9 step 2c). */
-async function runIndex(project, runId, transformId, { keyword, vector }, { force, activate, tag, generation, warnings, signal }) {
-  const { paths } = project;
-  const embedder = vector ? embeddingSettings(project.config, vector.settings.model) : null;
-  let refused;
-  const answer = (run) => async (...args) => {
-    try {
-      return await run(...args);
-    } catch (error) {
-      refused = error;
-      throw error;
-    }
-  };
-  const host = {
-    charge: answer((bytes) => { chargeTrialApi({ byteLength: bytes }); }),
-    configChanged: answer(async () => buildConfigChanged(project, await readFile(project.configPath, 'utf8'))),
-    indexTool: answer(() => indexToolPath(paths, hannoy)),
-  };
-  let result;
-  try {
-    result = await Dunlin.runIndex({
-      state: paths.state, artifacts: paths.artifacts, corpus: paths.corpus, root: project.root, runId, transformId,
-      keyword, vector, embedder, search: moduleSettings(project.plan.search),
-      rerank: project.plan.search.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, null, args.model)),
-      construction: moduleSettings(project.plan.index), configuration: buildConfiguration(project),
-      force: Boolean(force), activate, tag, generation,
-    }, host, { signal: trialSignal(signal) });
-  } catch (error) {
-    trialCheckpoint();
-    throw error;
-  }
-  if (result.status === 'failed') {
-    if (refused) throw refused;
-    const { code, message, exitCode, data } = result.error;
-    if (exitCode) throw new ProjectError(exitCode, code, message, data ?? null);
-    throw Object.assign(new Error(message), code && { code });
-  }
-  warnings.push(...result.warnings);
-  return result.output;
+/** The settings of the index stage. Resolves the embedding model and the saved configuration when `resolve` is set. */
+async function indexSettings(project, { resolve: resolved }) {
+  const { keyword, vector } = await runModules(project.plan.index, {}, {
+    index: (input, args) => ({ ...input, keyword: args }),
+    indexVector: (input, settings, backend = 'exact') => ({ ...input, vector: { backend, settings } }),
+  });
+  const settings = { keyword, vector, construction: moduleSettings(project.plan.index) };
+  if (!resolved) return settings;
+  return { ...settings, embedder: vector ? embeddingSettings(project.config, vector.settings.model) : null,
+    search: moduleSettings(project.plan.search),
+    rerank: project.plan.search.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, null, args.model)),
+    configuration: buildConfiguration(project) };
+}
+
+/** Rejects with the error a host call threw, or the stage error Rust reported. */
+function stageFailure({ code, message, exitCode, data }, refused) {
+  if (refused) return refused;
+  if (exitCode) return new ProjectError(exitCode, code, message, data ?? null);
+  return Object.assign(new Error(message), code && { code });
 }
 
 async function adoptBuild(project, reference) {
@@ -487,38 +448,21 @@ async function adoptBuild(project, reference) {
 
 async function tagBuild(project, name, ref, move) {
   const db = openState(project.paths);
-  ensureStages(db);
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const selected = ref ?? currentBuild(project.paths).build_id;
-    const build = currentBuild(project.paths, true, selected);
-    if (ref === undefined) build.search = moduleSettings(project.plan.search);
-    const byTag = db.prepare('SELECT config FROM build_config WHERE ref = ?').get('tag:' + ref);
-    const stored = byTag ?? db.prepare('SELECT config FROM build_config WHERE ref = ?').get(build.build_id);
-    if (!stored) throw new ProjectError(3, 'CONFIG_REQUIRED', 'Build the candidate again to save its configuration.');
-    const configuration = JSON.parse(stored.config);
-    if (ref === undefined) {
-      configuration.search = project.config.search;
-      configuration.models = project.config.models;
-    }
-    const existing = db.prepare('SELECT build_id, settings FROM build_tags JOIN tag_search USING (name) WHERE name = ?').get(name);
-    const settings = JSON.stringify(build.search);
-    if (existing && (existing.build_id !== build.build_id || existing.settings !== settings) && !move) {
-      throw new ProjectError(2, 'TAG_EXISTS', 'Use --move to explicitly change an existing tag.');
-    }
-    if (!existing || existing.build_id !== build.build_id || existing.settings !== settings) {
-      db.prepare('INSERT OR REPLACE INTO build_tags VALUES (?, ?)').run(name, build.build_id);
-      db.prepare('INSERT OR REPLACE INTO tag_search VALUES (?, ?)').run(name, settings);
-      db.prepare('INSERT OR REPLACE INTO build_config VALUES (?, ?)').run('tag:' + name, JSON.stringify(configuration));
-      db.prepare('INSERT INTO tag_history (name, previous, target) VALUES (?, ?, ?)').run(name,
-        existing ? JSON.stringify({ build_id: existing.build_id, search: JSON.parse(existing.settings) }) : null,
-        JSON.stringify({ build_id: build.build_id, search: build.search }));
-    }
-    const searchId = searchConfigId(restoreModules(build.search), {}, build, project);
-    db.exec('COMMIT');
-    return { tag: name, build_id: build.build_id, search_config_id: searchId };
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-  finally { db.close(); }
+  try { ensureStages(db); } finally { db.close(); }
+  let refused;
+  const result = await Dunlin.tagBuild({ state: project.paths.state, name, reference: ref, move: Boolean(move),
+    search: moduleSettings(project.plan.search), configSearch: project.config.search, configModels: project.config.models }, {
+    searchConfigId(build) {
+      try {
+        return searchConfigId(restoreModules(build.search), {}, build, project);
+      } catch (error) {
+        refused = error;
+        throw error;
+      }
+    },
+  });
+  if (result.status === 'failed') throw stageFailure(result.error, refused);
+  return result.output;
 }
 
 async function directoryBytes(root) {
@@ -562,111 +506,63 @@ async function statusDetails(state, project, build, evaluation) {
       shared_corpus_logical_bytes: corpus, shared_state_logical_bytes: metadata.size } };
 }
 
-function requiredStage(db, stage) {
-  const output = readStage(db, stage);
-  if (!output) throw new ProjectError(3, 'STAGE_REQUIRED', 'No ' + stage + ' output. Run dunlin ' + stage + ' or dunlin build first.');
-  return output;
-}
-
+/** Runs a build command in Rust (spec 28.9 step 2d). JavaScript scans and orders the sources until step 2e. */
 async function buildProject(project, command, runId, values, warnings) {
   const selected = command === 'build'
     ? stages.slice(values.from === undefined ? 0 : stages.indexOf(values.from), values.until === undefined ? stages.length : stages.indexOf(values.until) + 1)
     : [command];
-  const settings = project.plan;
-  if (values['dry-run']) {
-    const data = { stages: Object.fromEntries(selected.map((stage) => [stage, { modules: moduleSettings(settings[stage]) }])),
-      serving_changed: false };
-    const state = openState(project.paths, true);
-    try {
-      const serving = currentBuild(project.paths, false);
-      const previous = serving ? readStage(state, 'source', serving.source_id) : readStage(state, 'source');
-      const transform = serving && readStage(state, 'transform', serving.transform_id);
-      if (selected[0] === 'source') {
-        let sources = [];
-        for (const { args, name } of settings.source.filter(({ module }) => module.role === 'source')) {
-          sources = await scanFolder(sources, args, { name, projectRoot: project.root });
-        }
-        const routes = parserRoutes(settings.source.filter(({ module }) => module.role === 'parser')
-          .map(({ module, args, name }) => ({ name, category: module.name.split('.')[1], args })));
-        const parsers = parserAssignments(sources, routes);
-        data.skipped = unsupportedFiles(sources, routes);
-        data.commands = routes.filter(({ category }) => category === 'command').map(({ name, args }) =>
-          ({ module: name, command: args.command, ...(args.version_command && { version_command: args.version_command }) }));
-        const skipped = new Set(data.skipped.map(({ source_id, path }) => JSON.stringify([source_id, path])));
-        const sourceArgsChanged = previous?.config_id !== digest('cfg', moduleSettings(settings.source));
-        const transformArgsChanged = transform?.config_id !== digest('cfg', moduleSettings(settings.transform));
-        const config = serving && state.prepare('SELECT config FROM build_config WHERE ref = ?').get(serving.build_id);
-        const dictionary = selected.includes('index') && await readUserDictionary(
-          settings.index.find(({ module }) => module.name === 'index.keyword')?.args.user_dictionary);
-        const indexArgsChanged = !config || JSON.stringify(JSON.parse(config.config).index) !== JSON.stringify(project.config.index)
-          || (serving?.keyword?.dictionary_hash ?? null) !== (dictionary?.hash ?? null);
-        data.files = (await inventory(sources, previous)).map((file) => {
-          const skip = skipped.has(JSON.stringify([file.source_id, file.path]));
-          const changed = values.force || file.change !== 'unchanged';
-          return { ...file, parser: parsers.get(JSON.stringify([file.source_id, file.path])) ?? null, stages: Object.fromEntries(selected.map((stage) => [stage,
-            skip ? 'skip' : file.change === 'deleted' ? 'remove' : changed ? 'run'
-              : stage === 'source' ? sourceArgsChanged ? 'check_cache' : 'reuse'
-              : stage === 'transform' ? sourceArgsChanged || transformArgsChanged ? 'check_cache' : 'reuse'
-              : sourceArgsChanged || transformArgsChanged || indexArgsChanged ? 'check_cache' : 'reuse',
-          ])) };
-        });
-      } else {
-        const fixed = resolveBuildInput(project, values);
-        data.input_id = buildInput(state, stages[stages.indexOf(selected[0]) - 1], fixed).id;
-      }
-    } finally { state.close(); }
-    return data;
-  }
+  const dryRun = Boolean(values['dry-run']);
+  const { paths, plan } = project;
   const start = performance.now();
-  return withExecutionLock(project.paths, async () => {
-    const db = openState(project.paths);
+  const run = async (signal) => {
+    const semantic = plan.transform.find(({ module }) => module.name === 'chunk.semantic');
+    const request = {
+      command, runId: runId ?? undefined, from: values.from, until: values.until, input: values.input, tag: values.tag,
+      candidate: Boolean(values.config), force: Boolean(values.force), skipUnsupported: Boolean(values['skip-unsupported']), dryRun,
+      state: paths.state, artifacts: paths.artifacts, corpus: paths.corpus, root: project.root,
+      source: await sourceSettings(project, plan.source, { scan: selected[0] === 'source', ocr: !dryRun && selected[0] === 'source' }),
+      transform: { modules: moduleSettings(plan.transform),
+        embedder: semantic && !dryRun && selected.includes('transform') ? embeddingSettings(project.config, semantic.args.model) : null },
+      index: await indexSettings(project, { resolve: !dryRun && selected.includes('index') }),
+      configIndex: project.config.index,
+    };
+    request.elapsedMs = performance.now() - start;
+    let refused;
+    const answer = (call) => async (...args) => {
+      try {
+        return await call(...args);
+      } catch (error) {
+        refused = error;
+        throw error;
+      }
+    };
+    const host = {
+      ...parserHost(),
+      charge: answer((bytes) => { chargeTrialApi({ byteLength: bytes }); }),
+      configChanged: answer(async () => buildConfigChanged(project, await readFile(project.configPath, 'utf8'))),
+      indexTool: answer(() => indexToolPath(paths, hannoy)),
+    };
+    let result;
+    try {
+      result = await Dunlin.runBuild(request, host, { signal: trialSignal(signal) });
+    } catch (error) {
+      trialCheckpoint();
+      throw error;
+    }
+    if (result.status === 'failed') throw stageFailure(result.error, refused);
+    warnings.push(...result.warnings);
+    return result.output;
+  };
+  if (dryRun) return run();
+  return withExecutionLock(paths, async () => {
+    const db = openState(paths);
     try {
       ensureStages(db);
-      const run = async (signal) => {
-        const generation = db.prepare('SELECT max(id) AS id FROM adoption_history').get().id;
-        const fixed = resolveBuildInput(project, values);
-        const results = {};
-        let source;
-        for (const stage of selected) {
-          trialCheckpoint();
-          const stageStart = performance.now();
-          if (stage === 'index') {
-            const transformId = inputStageId(db, 'transform', selected.includes('transform') ? null : fixed);
-            const transformed = JSON.parse(db.prepare("SELECT manifest FROM stage_outputs WHERE stage = 'transform' AND id = ?").get(transformId).manifest);
-            if (!selected.includes('transform') && latestStageId(db, 'source') !== transformed.source_id) {
-              warnings.push({ code: 'STALE_STAGE', message: 'Using saved transform output from an earlier source snapshot.' });
-            }
-            const index = await runModules(settings.index, {}, {
-              index: (input, args) => ({ ...input, keyword: args }),
-              indexVector: (input, settings, backend = 'exact') => ({ ...input, vector: { backend, settings } }),
-            });
-            const summary = await runIndex(project, runId, transformId, index, {
-              force: values.force, tag: values.tag, generation, warnings, signal,
-              activate: command === 'build' && values.until === undefined && !values.config && !values.tag,
-            });
-            results.index = { id: summary.build_id, reused: summary.reused, elapsed_ms: Math.round(performance.now() - stageStart) };
-            return { ...summary, stages: results, elapsed_ms: Math.round(performance.now() - start) };
-          }
-          // Rust records both stages.
-          const { output, reused } = stage === 'source'
-            ? await runSource(db, project, settings.source, { force: values.force, skipUnsupported: values['skip-unsupported'], warnings })
-            : await runTransform(source?.id ?? inputStageId(db, 'source', fixed), settings.transform, values.force, project);
-          trialCheckpoint();
-          if (stage === 'source') source = output;
-          results[stage] = { id: output.id, reused, elapsed_ms: Math.round(performance.now() - stageStart) };
-        }
-        return { stages: results, ...(source && { files: source.files, skipped: source.skipped }), serving_changed: false, elapsed_ms: Math.round(performance.now() - start) };
-      };
       return values.tag || values.config ? await runTrial(db, runId, command, project.trialLimits, run) : await run();
     } finally {
       db.close();
     }
   });
-}
-
-function resolveBuildInput(project, { input, from, tag }) {
-  if (input) return currentBuild(project.paths, true, input);
-  return from && tag ? currentBuild(project.paths, false, tag) : null;
 }
 
 function assertSearchIndexes(build, plan) {
@@ -677,21 +573,6 @@ function assertSearchIndexes(build, plan) {
     const required = { 'retrieval.vector': 'exact', 'hannoy.search': 'hannoy' }[module.name];
     if (required && (build.vector.backend ?? 'exact') !== required) throw new ProjectError(2, 'VECTOR_BACKEND_MISMATCH', 'The selected build uses another vector index backend.');
   }
-}
-
-/** The ID of the saved stage that buildInput would read, without reading its payloads. */
-function inputStageId(db, stage, fixed) {
-  const id = fixed ? fixed[stage + '_id'] : latestStageId(db, stage);
-  if (id !== undefined && db.prepare('SELECT 1 FROM stage_outputs WHERE stage = ? AND id = ?').get(stage, id)) return id;
-  if (fixed) throw new ProjectError(3, 'STAGE_REQUIRED', 'Missing saved ' + stage + ' for ' + fixed.build_id + '.');
-  throw new ProjectError(3, 'STAGE_REQUIRED', 'No ' + stage + ' output. Run dunlin ' + stage + ' or dunlin build first.');
-}
-
-function buildInput(db, stage, fixed) {
-  if (!fixed) return requiredStage(db, stage);
-  const snapshot = readStage(db, stage, fixed[stage + '_id']);
-  if (!snapshot) throw new ProjectError(3, 'STAGE_REQUIRED', 'Missing saved ' + stage + ' for ' + fixed.build_id + '.');
-  return snapshot;
 }
 
 function buildConfigChanged(project, input) {

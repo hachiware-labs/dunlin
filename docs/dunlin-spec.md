@@ -2631,7 +2631,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 | 2a | Rust から `state.sqlite` を読み書きする部品を作る。`source` 段（走査、振り分け、読み込みとハッシュ、キャッシュ、テキストと Markdown とコードのパース、`loader.command`、原本と抽出結果の保存）を Rust で実行する。PDF は `pdf_oxide` で読み、OCR は `oar-ocr` を Rust から、`lightonocr` を別プロセスとして呼ぶ。HTML と Office は JavaScript の実装を呼び出す |
 | 2b | `transform` 段（`text.normalize`、`chunk.length`、`chunk.structure`、`chunk.semantic`）を Rust で実行する。埋め込みモデルは Rust から HTTP で呼ぶ |
 | 2c | `index` 段（キーワード索引、ベクトル索引、hannoy）と、ビルド・タグ・採用の記録を Rust で実行する |
-| 2d | `build`、`source`、`transform`、`index` の各コマンドの進行（`--from`、`--until`、`--input`、`--tag`、`--config`、`--dry-run`、試行の上限）を Rust に移し、JavaScript の `buildProject` を Rust の口の呼び出しだけにする |
+| 2d | `build`、`source`、`transform`、`index` の各コマンドの進行（`--from`、`--until`、`--input`、`--tag`、`--config`、`--dry-run`）と `tag` コマンドを Rust に移し、JavaScript の `buildProject` を Rust の口の呼び出しだけにする |
 | 2e | 28.3節のデータの持ち方に移る。抽出結果とチャンクの正本をコーパスにし、`state.sqlite` には識別子だけを置く。28.7節の移行を行う |
 
 #### JavaScript の実装を呼び出す仕組み
@@ -2669,4 +2669,11 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - `index` 段は Rust で実行する。キーワード索引、ベクトル索引（`exact` と hannoy）、埋め込みのキャッシュ（`embeddings` 表）、ビルドの記録（`builds`、`build_runs`、`index_outputs`、`build_search`、`build_config`）を Rust が書く。`--tag` を付けた構築のタグの記録と、採用中のビルドの切り替え（`project`、`serving_generations`）も同じトランザクションで行う。
 - ビルドID、設定ID、`builds` の JSON、`vectors.json`、`vectors.f32`、hannoy のスロットの割り当ては JavaScript の実装と同じにする。既存のビルドはそのまま再利用でき、差分の更新（前のビルドのキーワード索引の写しと hannoy のグラフ）も続けて使える。
 - JavaScript は設定から決まる値だけを渡す。キーワードとベクトルの引数、埋め込みの接続先、検索の設定、ビルドに保存する設定である。構築中に設定ファイルが変わったかの確認、hannoy の版と完全性の検査、試行の上限の計数は、Rust から JavaScript に問い合わせる。hannoy の検査は、道具の管理（`dunlin add`）を Rust に移すときに合わせて移す。
-- 単独の `tag` と `use` のコマンドは、設定ファイルの書き換えと評価の状態の確認を伴うので、2d でコマンドの進行とともに Rust に移す。
+- 単独の `tag` コマンドは 2d で Rust に移した。`use` コマンドは設定ファイルの書き換え（`yaml`、段階6）と評価の状態の確認（段階4）を伴うので、それらとともに移す。
+
+#### コマンドの進行（2d）
+
+- `build`、`source`、`transform`、`index` の進行を Rust で行う。段階の選択（`--from`、`--until`）、入力にするビルドの解決（`--input`、`--from` と `--tag`）、保存済みの段階の読み出しと `STALE_STAGE` の警告、`--tag` と `--config` での採用の扱い、結果の組み立て、`--dry-run` の分析（ファイルごとの変化の判定と、各段階の再利用か再実行か）が含まれる。`tag` コマンドの記録も Rust で行う。
+- JavaScript は設定から決まる値を求めて Rust の口を1回呼ぶ。ソースのフォルダの走査と並べ替えも JavaScript に残す。並べ替えは `localeCompare` で、その順序が段階の識別子に入っているためである。識別子が変わる 2e で、走査とあわせて Rust に移す。
+- 実行ロックと試行の記録（`trial_runs`）は JavaScript が Rust の呼び出しを包んで行う。試行は評価（`eval --build`、`eval --config`）と共通なので、段階4で評価とともに Rust に移す。
+- 埋め込みモデルの接続先は、段階を始める前に解決する。設定が正しくない場合、前の段階を実行する前に失敗する。

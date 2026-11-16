@@ -668,6 +668,17 @@ impl crate::index_stage::IndexHost for JsHost {
     }
 }
 
+impl crate::build_stage::TagHost for JsHost {
+    fn search_config_id(
+        &self,
+        build: &crate::config_value::ConfigValue,
+    ) -> std::result::Result<String, String> {
+        let answer = self.call("search_config", build.to_js_json())?;
+        serde_json::from_str(&answer)
+            .map_err(|_| "JavaScript returned an invalid search configuration ID".into())
+    }
+}
+
 /// `{ status: "failed", error: { code?, message, exitCode?, data? } }`
 fn failed_stage(error: crate::embed::EmbedError) -> String {
     use crate::config_value::ConfigValue;
@@ -686,6 +697,70 @@ fn failed_stage(error: crate::embed::EmbedError) -> String {
         "{{\"status\":\"failed\",\"error\":{}}}",
         ConfigValue::Object(fields).to_js_json()
     )
+}
+
+/// Runs a build command (see `build_stage`): the selected stages with their inputs, or a dry run.
+/// `host(id, kind, args, bytes)` answers `parse`, `progress`, `charge`, `config` and `tool`.
+/// Resolves to `{ status: "done", output, warnings }` or a failed status as `runTransform` does.
+#[napi]
+pub fn run_build<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    use crate::config_value::ConfigValue;
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = JsHost { function };
+        let outcome = serde_json::from_str::<crate::build_stage::BuildRequest>(&request)
+            .map_err(|error| {
+                crate::embed::EmbedError::plain(format!("Invalid build request: {error}"))
+            })
+            .and_then(|request| crate::build_stage::run(request, &host, &cancel));
+        let text = match outcome {
+            Ok(outcome) => format!(
+                "{{\"status\":\"done\",\"output\":{},\"warnings\":{}}}",
+                outcome.output.to_js_json(),
+                ConfigValue::Array(outcome.warnings).to_js_json()
+            ),
+            Err(error) if error.aborted => {
+                deferred.reject(native_error(crate::Error::Aborted));
+                return;
+            }
+            Err(error) => failed_stage(error),
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
+}
+
+/// Names a build with a tag (see `build_stage::tag`). `host` answers `search_config` with the
+/// search configuration ID of a build. Resolves to `{ status: "done", output }` or a failed status.
+#[napi]
+pub fn tag_build<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+) -> Result<Object<'env>> {
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    std::thread::spawn(move || {
+        let host = JsHost { function };
+        let outcome = serde_json::from_str::<crate::build_stage::TagRequest>(&request)
+            .map_err(|error| {
+                crate::embed::EmbedError::plain(format!("Invalid tag request: {error}"))
+            })
+            .and_then(|request| crate::build_stage::tag(&request, &host));
+        let text = match outcome {
+            Ok(output) => format!("{{\"status\":\"done\",\"output\":{}}}", output.to_js_json()),
+            Err(error) => failed_stage(error),
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
 }
 
 /// Runs the `index` stage on a recorded transform stage (see `index_stage`): builds the keyword

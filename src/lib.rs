@@ -22,6 +22,8 @@ mod wiki;
 pub mod yaml_config;
 
 #[cfg(any(feature = "node", test))]
+mod build_stage;
+#[cfg(any(feature = "node", test))]
 mod command_parser;
 #[cfg(any(feature = "node", test))]
 mod embed;

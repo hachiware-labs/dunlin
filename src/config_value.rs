@@ -13,8 +13,9 @@ use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 /// such numbers.
 const NON_FINITE: &str = "$dunlin_nonfinite";
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ConfigValue {
+    #[default]
     Null,
     Bool(bool),
     Number(f64),

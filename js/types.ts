@@ -242,6 +242,64 @@ export type IndexStageOutcome =
     warnings: { code: string; message: string }[] }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } };
 
+/** A build command (`build`, `source`, `transform` or `index`) of a project, run by the engine. */
+export interface BuildCommandRequest {
+  command: 'build' | 'source' | 'transform' | 'index';
+  /** Absent for dry runs. */
+  runId?: string;
+  from?: string;
+  until?: string;
+  /** A build ID or tag whose saved stages feed `from`. */
+  input?: string;
+  tag?: string;
+  /** The settings come from a candidate configuration (`--config`). */
+  candidate?: boolean;
+  force?: boolean;
+  skipUnsupported?: boolean;
+  dryRun?: boolean;
+  /** Milliseconds already spent on the run before this call, such as scanning. */
+  elapsedMs?: number;
+  state: string;
+  artifacts: string;
+  corpus: string;
+  root: string;
+  /** Scanned and ordered sources, routes and the other settings of the source stage. */
+  source: Record<string, unknown> & { modules: unknown };
+  transform: { modules: unknown; embedder?: EmbedderSettings | null };
+  /** The `index` stage settings of IndexStageRequest, without the run, stage and serving fields. */
+  index: Record<string, unknown> & { construction: unknown };
+  /** The `index` section of the configuration, compared by dry runs. */
+  configIndex?: unknown;
+}
+
+export type BuildCommandHost = LoadCorpusHost & IndexStageHost;
+
+export type BuildCommandOutcome =
+  | { status: 'done'; output: Record<string, unknown>; warnings: { code: string; message: string }[] }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } };
+
+/** `dunlin tag`: names a build (the serving build when `reference` is absent). */
+export interface TagBuildRequest {
+  state: string;
+  name: string;
+  reference?: string;
+  move?: boolean;
+  /** `moduleSettings(plan.search)`, for the serving build. */
+  search: unknown;
+  /** The `search` and `models` sections saved with a tag of the serving build. */
+  configSearch?: unknown;
+  configModels?: unknown;
+}
+
+export interface TagBuildHost {
+  /** The search configuration ID of a build, with its saved search settings. */
+  searchConfigId(build: Record<string, unknown>): string | Promise<string>;
+}
+
+export type TagBuildOutcome =
+  | { status: 'done'; output: { tag: string; build_id: string; search_config_id: string } }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+
 /** A configuration diagnostic (spec 26.8). */
 export interface ConfigDiagnostic {
   code: string;

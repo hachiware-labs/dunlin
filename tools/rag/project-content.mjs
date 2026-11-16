@@ -88,7 +88,7 @@ export async function inventory(sources, previous) {
  * The OCR fields of a load request. lightonocr keeps its former cache key part, so its results stay
  * valid; oar-ocr adds its name and version.
  */
-async function ocrRequest(ocr) {
+export async function ocrRequest(ocr) {
   if (ocr?.tool === 'oar-ocr') return { ocrVersion: 'oar-ocr@' + ocr.version, ocrTool: 'oar-ocr', ocrHome: oarOcrHome() };
   // Rust starts the managed server when a page needs OCR. Without it, those files fail with a hint.
   const managed = ocr ? await managedOcr({ required: false }) : undefined;
@@ -189,7 +189,7 @@ export async function runTransformStage({ sourceId, modules, force, embedder = n
 }
 
 /** Rust reads, hashes, caches, runs loader.command and stores. It calls back here for the parsers that are still in JavaScript. */
-function parserHost(progress = () => {}) {
+export function parserHost(progress = () => {}) {
   return {
     progress,
     async parse({ kind, name }, bytes) {

@@ -2663,3 +2663,10 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - `chunk.semantic` の埋め込みモデルは Rust から HTTP で呼ぶ（Ollama の `api/embed`、OpenAI の `embeddings`）。要求の本文は JavaScript の実装と同じ JSON にし、ベクトルの検査と正規化も同じ順で計算する。キャッシュのキー、段階の識別子、チャンクの結合結果は変わらない。
 - 接続先の URL、API キー、`max_input_bytes` は JavaScript が `models` から解決して渡す。HTTPS の検証には Mozilla のルート証明書（Node.js の `fetch` の既定と同じ）を使う。リダイレクトは追わず、環境変数のプロキシも使わない（`fetch` と同じ）。1回の要求は120秒で打ち切る。
 - 試行の上限（API の要求数と送信量）は、送る前に JavaScript に問い合わせて数える。上限の記録は段階4で評価とともに Rust に移す。
+
+#### 索引の作成とビルドの記録（2c）
+
+- `index` 段は Rust で実行する。キーワード索引、ベクトル索引（`exact` と hannoy）、埋め込みのキャッシュ（`embeddings` 表）、ビルドの記録（`builds`、`build_runs`、`index_outputs`、`build_search`、`build_config`）を Rust が書く。`--tag` を付けた構築のタグの記録と、採用中のビルドの切り替え（`project`、`serving_generations`）も同じトランザクションで行う。
+- ビルドID、設定ID、`builds` の JSON、`vectors.json`、`vectors.f32`、hannoy のスロットの割り当ては JavaScript の実装と同じにする。既存のビルドはそのまま再利用でき、差分の更新（前のビルドのキーワード索引の写しと hannoy のグラフ）も続けて使える。
+- JavaScript は設定から決まる値だけを渡す。キーワードとベクトルの引数、埋め込みの接続先、検索の設定、ビルドに保存する設定である。構築中に設定ファイルが変わったかの確認、hannoy の版と完全性の検査、試行の上限の計数は、Rust から JavaScript に問い合わせる。hannoy の検査は、道具の管理（`dunlin add`）を Rust に移すときに合わせて移す。
+- 単独の `tag` と `use` のコマンドは、設定ファイルの書き換えと評価の状態の確認を伴うので、2d でコマンドの進行とともに Rust に移す。

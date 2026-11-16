@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -68,6 +68,7 @@ interface NativeBinding {
   scanSource(request: string, cancel: NativeCancellation): Promise<string>;
   runSource(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   runTransform(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  runIndex(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   routeFiles(request: string): string;
   matchesGlob(path: string, pattern: string): boolean;
   readModuleArgs(name: string, args: string): string;
@@ -94,7 +95,7 @@ function native(): NativeBinding {
  * The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. Kinds:
  * `parse` and `progress` for loading, `charge` for counting model requests in the transform stage.
  */
-function hostCallback(host: Partial<LoadCorpusHost> & TransformStageHost): (...raw: unknown[]) => void {
+function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost): (...raw: unknown[]) => void {
   return (...raw) => {
     const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
     if (kind === 'progress') {
@@ -102,7 +103,9 @@ function hostCallback(host: Partial<LoadCorpusHost> & TransformStageHost): (...r
       return;
     }
     Promise.resolve()
-      .then(() => kind === 'charge' ? (host.charge?.(Number(args)), null)
+      .then(() => kind === 'charge' ? Promise.resolve(host.charge?.(Number(args))).then(() => null)
+        : kind === 'config' ? host.configChanged?.() ?? false
+        : kind === 'tool' ? host.indexTool!(args)
         : host.parse!(JSON.parse(args) as LoadCorpusFile, bytes))
       .then((result) => native().completeHostCall(id, configJson(result), null),
         (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
@@ -414,6 +417,16 @@ export class Dunlin {
   static async runTransform(request: TransformStageRequest, host: TransformStageHost = {}, { signal }: OperationOptions = {}): Promise<TransformStageOutcome> {
     const text = await cancellable(signal, (cancel) => native().runTransform(configJson(request), hostCallback(host), cancel));
     return JSON.parse(text) as TransformStageOutcome;
+  }
+
+  /**
+   * Run the `index` stage on a recorded transform stage: build the keyword index and the vector
+   * index in a new build directory (or reuse a saved build), embedding chunks through the
+   * `embeddings` cache, and record the build, its tag and the serving build in state.sqlite.
+   */
+  static async runIndex(request: IndexStageRequest, host: IndexStageHost = {}, { signal }: OperationOptions = {}): Promise<IndexStageOutcome> {
+    const text = await cancellable(signal, (cancel) => native().runIndex(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as IndexStageOutcome;
   }
 
   /**

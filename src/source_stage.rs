@@ -301,7 +301,7 @@ fn save(state: &str, output: &ConfigValue, force: bool) -> Result<bool, String> 
 }
 
 /// `new Date().toISOString()`
-fn iso_now() -> String {
+pub(crate) fn iso_now() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();

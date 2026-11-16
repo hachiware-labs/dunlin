@@ -26,6 +26,8 @@ mod command_parser;
 #[cfg(any(feature = "node", test))]
 mod embed;
 #[cfg(any(feature = "node", test))]
+mod index_stage;
+#[cfg(any(feature = "node", test))]
 mod lighton;
 #[cfg(all(feature = "node", not(test)))]
 mod node;

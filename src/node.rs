@@ -623,9 +623,9 @@ impl crate::source_load::Host for JsHost {
     }
 }
 
-impl crate::embed::Charge for JsHost {
-    /// Asks JavaScript to count a model request against the trial limits, and waits for it.
-    fn charge(&self, bytes: usize) -> std::result::Result<(), String> {
+impl JsHost {
+    /// Calls the JavaScript host and waits for its JSON answer.
+    fn call(&self, kind: &str, args: String) -> std::result::Result<String, String> {
         use napi::threadsafe_function::ThreadsafeFunctionCallMode;
         let id = NEXT_HOST_CALL.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -634,12 +634,7 @@ impl crate::embed::Charge for JsHost {
             .map_err(|_| "Could not register the host call".to_owned())?
             .insert(id, sender);
         let status = self.function.call(
-            (
-                id,
-                "charge".into(),
-                bytes.to_string(),
-                Buffer::from(Vec::new()),
-            ),
+            (id, kind.into(), args, Buffer::from(Vec::new())),
             ThreadsafeFunctionCallMode::Blocking,
         );
         if status != Status::Ok {
@@ -651,8 +646,86 @@ impl crate::embed::Charge for JsHost {
         receiver
             .recv()
             .map_err(|_| "JavaScript stopped".to_owned())?
-            .map(|_| ())
     }
+}
+
+impl crate::embed::Charge for JsHost {
+    /// Asks JavaScript to count a model request against the trial limits, and waits for it.
+    fn charge(&self, bytes: usize) -> std::result::Result<(), String> {
+        self.call("charge", bytes.to_string()).map(|_| ())
+    }
+}
+
+impl crate::index_stage::IndexHost for JsHost {
+    fn config_changed(&self) -> std::result::Result<bool, String> {
+        let answer = self.call("config", String::new())?;
+        serde_json::from_str(&answer).map_err(|_| "JavaScript returned an invalid answer".into())
+    }
+
+    fn index_tool(&self) -> std::result::Result<String, String> {
+        let answer = self.call("tool", "hannoy".into())?;
+        serde_json::from_str(&answer).map_err(|_| "JavaScript returned an invalid tool path".into())
+    }
+}
+
+/// `{ status: "failed", error: { code?, message, exitCode?, data? } }`
+fn failed_stage(error: crate::embed::EmbedError) -> String {
+    use crate::config_value::ConfigValue;
+    let mut fields = Vec::new();
+    if let Some(code) = error.code {
+        fields.push(("code".into(), ConfigValue::String(code.into())));
+    }
+    fields.push(("message".into(), ConfigValue::String(error.message)));
+    if let Some(exit) = error.exit_code {
+        fields.push(("exitCode".into(), ConfigValue::Number(f64::from(exit))));
+    }
+    if let Some(data) = error.data {
+        fields.push(("data".into(), data));
+    }
+    format!(
+        "{{\"status\":\"failed\",\"error\":{}}}",
+        ConfigValue::Object(fields).to_js_json()
+    )
+}
+
+/// Runs the `index` stage on a recorded transform stage (see `index_stage`): builds the keyword
+/// and vector indexes in a new build directory, or reuses a saved build, and records the build.
+/// `host(id, kind, args, bytes)` answers `charge`, `config` (whether the configuration file
+/// changed) and `tool` (the verified hannoy path). Resolves to `{ status: "done", output,
+/// warnings }` or a failed status as `runTransform` does.
+#[napi]
+pub fn run_index<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    use crate::config_value::ConfigValue;
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = JsHost { function };
+        let outcome = serde_json::from_str::<crate::index_stage::IndexRequest>(&request)
+            .map_err(|error| {
+                crate::embed::EmbedError::plain(format!("Invalid index request: {error}"))
+            })
+            .and_then(|request| crate::index_stage::run(&request, &host, &cancel));
+        let text = match outcome {
+            Ok(outcome) => format!(
+                "{{\"status\":\"done\",\"output\":{},\"warnings\":{}}}",
+                outcome.summary.to_js_json(),
+                ConfigValue::Array(outcome.warnings).to_js_json()
+            ),
+            Err(error) if error.aborted => {
+                deferred.reject(native_error(crate::Error::Aborted));
+                return;
+            }
+            Err(error) => failed_stage(error),
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
 }
 
 /// Runs the `transform` stage on a recorded source stage (see `transform_stage`): chunks, calls the
@@ -667,7 +740,6 @@ pub fn run_transform<'env>(
     host: Function<'env, HostArgs, Unknown<'static>>,
     cancel: &NativeCancellation,
 ) -> Result<Object<'env>> {
-    use crate::config_value::ConfigValue;
     let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
@@ -688,20 +760,7 @@ pub fn run_transform<'env>(
                 deferred.reject(native_error(crate::Error::Aborted));
                 return;
             }
-            Err(error) => {
-                let mut fields = Vec::new();
-                if let Some(code) = error.code {
-                    fields.push(("code".into(), ConfigValue::String(code.into())));
-                }
-                fields.push(("message".into(), ConfigValue::String(error.message)));
-                if let Some(exit) = error.exit_code {
-                    fields.push(("exitCode".into(), ConfigValue::Number(f64::from(exit))));
-                }
-                format!(
-                    "{{\"status\":\"failed\",\"error\":{}}}",
-                    ConfigValue::Object(fields).to_js_json()
-                )
-            }
+            Err(error) => failed_stage(error),
         };
         deferred.resolve(move |_| Ok(text));
     });

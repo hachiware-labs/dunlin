@@ -54,6 +54,8 @@ pub struct EmbedError {
     /// The process exit code for a coded error.
     pub exit_code: Option<u8>,
     pub aborted: bool,
+    /// Details for the command result, as `ProjectError` data.
+    pub data: Option<ConfigValue>,
 }
 
 impl EmbedError {
@@ -63,6 +65,7 @@ impl EmbedError {
             message: message.into(),
             exit_code: None,
             aborted: false,
+            data: None,
         }
     }
 
@@ -72,6 +75,21 @@ impl EmbedError {
             message: message.into(),
             exit_code: Some(exit_code),
             aborted: false,
+            data: None,
+        }
+    }
+
+    /// An error of the native engine: its code, without an exit code of its own.
+    pub fn native(error: crate::Error) -> Self {
+        if matches!(error, crate::Error::Aborted) {
+            return Self::aborted();
+        }
+        Self {
+            code: Some(error.code()),
+            message: error.to_string(),
+            exit_code: None,
+            aborted: false,
+            data: None,
         }
     }
 
@@ -81,6 +99,7 @@ impl EmbedError {
             message: "Aborted".into(),
             exit_code: None,
             aborted: true,
+            data: None,
         }
     }
 }

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, cp, link, lstat, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -20,10 +19,10 @@ import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, eva
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
-import { buildVectorIndex, embeddingSettings, fuseResults, releaseVectorMetadata, vectorBackend, vectorModel, vectorSearch } from './project-vectors.mjs';
+import { embeddingSettings, fuseResults, releaseVectorMetadata, vectorBackend, vectorModel, vectorSearch } from './project-vectors.mjs';
 import { changeTool, listedTools, projectOcr, toolsCatalog } from './project-tools.mjs';
-import { checkIndexTool, hannoy } from './project-index-tool.mjs';
-import { checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage } from './project-trials.mjs';
+import { checkIndexTool, hannoy, indexToolPath } from './project-index-tool.mjs';
+import { chargeTrialApi, checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage } from './project-trials.mjs';
 import { answerModel, answerQuestion, answerText } from './project-answer.mjs';
 import { configureGlobal, initialSettings } from './project-global.mjs';
 import { serveRagHttp } from './project-rag-http.mjs';
@@ -383,55 +382,8 @@ function dictionarySnapshot(paths, hash) {
   return join(paths.artifacts, 'dictionaries', hash + '.csv');
 }
 
-async function copyIndexSnapshot(source, target) {
-  const keywordDir = '.dunlin-index-v1';
-  const from = join(source, keywordDir);
-  const to = join(target, keywordDir);
-  const options = { recursive: true, mode: constants.COPYFILE_FICLONE,
-    filter: (path) => !path.endsWith('-shm') && !/vectors\.(json|f32)$/u.test(path) && basename(path) !== 'hannoy' };
-  await cp(source, target, { ...options, filter: (path) => path !== from && options.filter(path) });
-
-  await mkdir(to);
-  for (const entry of await readdir(from, { withFileTypes: true })) {
-    const input = join(from, entry.name);
-    const output = join(to, entry.name);
-    // Tantivy writes these completed segment components once. Metadata, delete bitsets, and locks get their own copies.
-    if (entry.isFile() && /^[0-9a-f]{32}\.(?:idx|pos|term|store|fast|fieldnorm)$/u.test(entry.name)) {
-      try {
-        await link(input, output);
-        continue;
-      } catch (error) {
-        if (!['EACCES', 'EINVAL', 'EMLINK', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'EXDEV'].includes(error.code)) throw error;
-      }
-    }
-    await cp(input, output, options);
-  }
-  await chmod(to, (await lstat(from)).mode);
-}
-
-async function runIndex(db, project, runId, transformed, { keyword: args, vector: vectorArgs }, { force, activate, tag, generation, warnings, signal }) {
-  const { paths } = project;
-  const source = readStage(db, 'source', transformed.source_id);
-  if (!source) throw new ProjectError(3, 'STAGE_REQUIRED', 'The source output referenced by transform is missing. Run dunlin build.');
-  const embedder = vectorArgs ? vectorModel(project.config, vectorArgs.settings.model) : null;
-  const dictionary = await readUserDictionary(args?.user_dictionary);
-  const japanese = args?.tokenizer === 'lindera';
-  const keyword = japanese ? { tokenizer: 'lindera', dictionary_hash: dictionary?.hash ?? null } : args;
-  const indexConfigId = digest('cfg', [japanese ? 'index.lindera-ipadic-v1' : 'index.keyword-v2', keyword,
-    ...(embedder ? ['index.vector-v1', vectorArgs, embedder.identity] : [])]);
-  const configId = digest('cfg', [source.config_id, transformed.config_id, indexConfigId, moduleSettings(project.plan.search),
-    project.plan.search.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, null, args.model))]);
-  const buildKey = digest('bld', [transformed.id, indexConfigId]);
-  const search = moduleSettings(project.plan.search);
-  const cached = embedder && db.prepare('SELECT build_id FROM index_outputs WHERE key = ?').get(buildKey);
-  let buildId = cached?.build_id ?? buildKey;
-  const saved = db.prepare('SELECT manifest FROM builds WHERE id = ?').get(buildId);
-  let manifest = saved && JSON.parse(saved.manifest);
-  const backend = vectorArgs && vectorBackend(vectorArgs.backend, paths);
-  const reused = Boolean(!force && manifest && await Dunlin.inspectIndex(join(paths.artifacts, manifest.index))
-    && (!embedder || await exists(join(paths.artifacts, manifest.index, 'vectors.json'))
-      && (manifest.vector?.count === 0 || await exists(join(paths.artifacts, manifest.index, backend.file)))));
-  const previous = db.prepare('SELECT build_id FROM project WHERE id = 1').get().build_id;
+/** The configuration saved with a build: secrets removed and paths relative to the project root. */
+function buildConfiguration(project) {
   const configuration = safeConfig(project.config);
   if (project.configRoot !== project.root) {
     for (const [stage, name, arg] of [['source', 'source.filesystem', 'path'], ['index', 'index.keyword', 'user_dictionary']]) {
@@ -445,119 +397,48 @@ async function runIndex(db, project, runId, transformed, { keyword: args, vector
       }
     }
   }
-  const existingTag = tag && db.prepare('SELECT build_id FROM build_tags WHERE name = ?').get(tag);
-  const tagSettings = tag && db.prepare('SELECT settings FROM tag_search WHERE name = ?').get(tag);
-  if (existingTag && (tagSettings?.settings !== JSON.stringify(search) || reused && existingTag.build_id !== buildId)) {
-    throw new ProjectError(2, 'TAG_EXISTS', 'Build tag already names a different configuration: ' + tag);
-  }
-  const location = join(paths.artifacts, runId);
-  let created = false;
-  let committed = false;
-  let changed = false;
-  try {
-    if (dictionary) {
-      const snapshot = dictionarySnapshot(paths, dictionary.hash);
-      await mkdir(dirname(snapshot), { recursive: true });
-      if (!await exists(snapshot)) await atomicWrite(snapshot, dictionary.bytes);
-    }
-    if (!reused) {
-      await mkdir(location);
-      created = true;
-      const active = db.prepare('SELECT manifest FROM builds WHERE id = ?').get(previous);
-      const prior = active && JSON.parse(active.manifest);
-      const baseline = !force && prior?.shared_corpus && JSON.stringify(prior.keyword) === JSON.stringify(keyword)
-        && await Dunlin.inspectIndex(join(paths.artifacts, prior.index));
-      if (baseline) {
-        await copyIndexSnapshot(join(paths.artifacts, prior.index), location);
-      }
-      const database = await Dunlin.open(location, { corpusBackend: 'sqlite', corpusDirectory: paths.corpus, ...keywordOptions(keyword, paths) })
-        .catch((error) => {
-          if (dictionary && error.code === 'INVALID_ARGUMENT') throw new ProjectError(2, 'INVALID_USER_DICTIONARY',
-            'Could not load ' + args.user_dictionary + '. ' + error.message);
-          throw error;
-        });
-      let vector;
-      try {
-        const unused = new Set(Object.keys(baseline ? baseline.sources : {}));
-        for (const [group, [id, documents]] of source.groups.entries()) {
-          trialCheckpoint();
-          const input = documents.map((document, i) => ({ ...document, chunks: transformed.chunks[group][i] }));
-          if (baseline) await database.syncDocuments(id, input, { signal });
-          else await database.replaceDocuments(id, input, { signal });
-          unused.delete(id);
-        }
-        for (const id of unused) await database.removeSource(id, { signal });
-        if (embedder) {
-          const compatible = !force && prior?.vector?.backend === vectorArgs.backend && prior.vector.ef_construction === vectorArgs.settings.ef_construction;
-          const index = vectorBackend(vectorArgs.backend, paths, { settings: vectorArgs.settings,
-            baseline: compatible ? join(paths.artifacts, prior.index) : null, signal });
-          vector = await buildVectorIndex(db, database, location, source, transformed, embedder, force, index, signal);
-          vector.ef_construction = vectorArgs.settings.ef_construction;
-        }
-      } finally {
-        await database.close();
-      }
-      const { searchableDocuments } = await Dunlin.inspectIndex(location);
-      if (!searchableDocuments) {
-        throw new ProjectError(3, 'NO_SEARCHABLE_DOCUMENTS', 'No searchable documents. Add UTF-8 text or Markdown files and run dunlin build.', {
-          files: source.files, documents: 0, skipped: source.skipped,
-        });
-      }
-      if (vector) buildId = digest('bld', [buildKey, vector.output]);
-      manifest = {
-        build_id: buildId, index: runId, files: source.files, documents: searchableDocuments,
-        skipped: source.skipped, source_id: source.id, transform_id: transformed.id, keyword, vector, config_id: configId,
-        construction: { source: source.modules, transform: transformed.modules, index: moduleSettings(project.plan.index) }, shared_corpus: true,
-      };
-    }
-    trialCheckpoint();
-    db.exec('BEGIN IMMEDIATE');
+  return configuration;
+}
+
+/** Runs the index stage in Rust on a recorded transform stage and records the build (spec 28.9 step 2c). */
+async function runIndex(project, runId, transformId, { keyword, vector }, { force, activate, tag, generation, warnings, signal }) {
+  const { paths } = project;
+  const embedder = vector ? embeddingSettings(project.config, vector.settings.model) : null;
+  let refused;
+  const answer = (run) => async (...args) => {
     try {
-      const currentTag = tag && db.prepare('SELECT build_id, settings FROM build_tags JOIN tag_search USING (name) WHERE name = ?').get(tag);
-      if (currentTag && (currentTag.build_id !== buildId || currentTag.settings !== JSON.stringify(search))) {
-        throw new ProjectError(2, 'TAG_EXISTS', 'Build tag already names a different configuration: ' + tag);
-      }
-      if (!reused) {
-        db.prepare('INSERT INTO builds VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET manifest = excluded.manifest')
-          .run(buildId, JSON.stringify(manifest));
-      }
-      if (embedder) db.prepare('INSERT OR REPLACE INTO index_outputs VALUES (?, ?)').run(buildKey, buildId);
-      if (activate && (generation !== db.prepare('SELECT max(id) AS id FROM adoption_history').get().id
-        || buildConfigChanged(project, await readFile(project.configPath, 'utf8')))) {
-        warnings.push({ code: 'ADOPTION_CHANGED', message: 'The adopted configuration changed during the build. The serving build was kept.' });
-      } else if (activate) {
-        db.prepare('UPDATE project SET build_id = ? WHERE id = 1').run(buildId);
-        db.prepare('INSERT INTO serving_generations VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET build_id = excluded.build_id')
-          .run(generation ?? 0, buildId);
-        changed = previous !== buildId || !reused;
-      }
-      db.prepare('INSERT OR IGNORE INTO build_search VALUES (?, ?)').run(buildId, JSON.stringify(search));
-      db.prepare('INSERT OR IGNORE INTO build_config VALUES (?, ?)').run(buildId, JSON.stringify(configuration));
-      if (tag && !currentTag) {
-        db.prepare('INSERT INTO build_tags VALUES (?, ?)').run(tag, buildId);
-        db.prepare('INSERT INTO tag_search VALUES (?, ?)').run(tag, JSON.stringify(search));
-        db.prepare('INSERT INTO build_config VALUES (?, ?)').run('tag:' + tag, JSON.stringify(configuration));
-        db.prepare('INSERT INTO tag_history (name, previous, target) VALUES (?, ?, ?)').run(tag, null,
-          JSON.stringify({ build_id: buildId, search }));
-      }
-      db.prepare('INSERT INTO build_runs VALUES (?, ?, ?, ?)').run(runId, buildId, configId, new Date().toISOString());
-      db.exec('COMMIT');
-      committed = true;
+      return await run(...args);
     } catch (error) {
-      db.exec('ROLLBACK');
+      refused = error;
       throw error;
     }
-    const { index: _, ...summary } = manifest;
-    return { ...summary, config_id: configId, serving_changed: changed, reused };
-  } finally {
-    if (created && !committed) {
-      const root = await realpath(project.root);
-      const target = await realpath(location);
-      if (target === join(root, '.dunlin', 'artifacts', runId)) {
-        await rm(target, { recursive: true, force: true, maxRetries: 3 });
-      }
-    }
+  };
+  const host = {
+    charge: answer((bytes) => { chargeTrialApi({ byteLength: bytes }); }),
+    configChanged: answer(async () => buildConfigChanged(project, await readFile(project.configPath, 'utf8'))),
+    indexTool: answer(() => indexToolPath(paths, hannoy)),
+  };
+  let result;
+  try {
+    result = await Dunlin.runIndex({
+      state: paths.state, artifacts: paths.artifacts, corpus: paths.corpus, root: project.root, runId, transformId,
+      keyword, vector, embedder, search: moduleSettings(project.plan.search),
+      rerank: project.plan.search.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, null, args.model)),
+      construction: moduleSettings(project.plan.index), configuration: buildConfiguration(project),
+      force: Boolean(force), activate, tag, generation,
+    }, host, { signal: trialSignal(signal) });
+  } catch (error) {
+    trialCheckpoint();
+    throw error;
   }
+  if (result.status === 'failed') {
+    if (refused) throw refused;
+    const { code, message, exitCode, data } = result.error;
+    if (exitCode) throw new ProjectError(exitCode, code, message, data ?? null);
+    throw Object.assign(new Error(message), code && { code });
+  }
+  warnings.push(...result.warnings);
+  return result.output;
 }
 
 async function adoptBuild(project, reference) {
@@ -750,7 +631,8 @@ async function buildProject(project, command, runId, values, warnings) {
           trialCheckpoint();
           const stageStart = performance.now();
           if (stage === 'index') {
-            const transformed = buildInput(db, 'transform', selected.includes('transform') ? null : fixed);
+            const transformId = inputStageId(db, 'transform', selected.includes('transform') ? null : fixed);
+            const transformed = JSON.parse(db.prepare("SELECT manifest FROM stage_outputs WHERE stage = 'transform' AND id = ?").get(transformId).manifest);
             if (!selected.includes('transform') && latestStageId(db, 'source') !== transformed.source_id) {
               warnings.push({ code: 'STALE_STAGE', message: 'Using saved transform output from an earlier source snapshot.' });
             }
@@ -758,7 +640,7 @@ async function buildProject(project, command, runId, values, warnings) {
               index: (input, args) => ({ ...input, keyword: args }),
               indexVector: (input, settings, backend = 'exact') => ({ ...input, vector: { backend, settings } }),
             });
-            const summary = await runIndex(db, project, runId, transformed, index, {
+            const summary = await runIndex(project, runId, transformId, index, {
               force: values.force, tag: values.tag, generation, warnings, signal,
               activate: command === 'build' && values.until === undefined && !values.config && !values.tag,
             });

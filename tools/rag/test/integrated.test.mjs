@@ -162,7 +162,7 @@ test('reuses vector metadata per open index and ranks all rows when positions ar
     }));
     const bytes = Buffer.alloc(entries.length * 8);
     for (const i of [0, 2]) bytes.writeFloatLE(1, i * 8);
-    await backend.build(directory, { entries }, bytes);
+    await writeFile(join(directory, 'vectors.f32'), bytes);
     await writeFile(join(directory, 'vectors.json'), JSON.stringify({ identity, dimensions: 2, entries }));
   }
 

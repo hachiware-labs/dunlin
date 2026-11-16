@@ -189,12 +189,58 @@ export interface TransformStageRequest {
 
 /** Counts each model request (its JSON body size in bytes) against trial limits. Throw to stop the stage. */
 export interface TransformStageHost {
-  charge?(bytes: number): void;
+  charge?(bytes: number): void | Promise<void>;
 }
 
 export type TransformStageOutcome =
   | { status: 'done'; output: Record<string, unknown> & { id: string; key: string; config_id: string; source_id: string; chunks: unknown[][][] }; reused: boolean }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+
+/** The `index` stage of a project build: indexes a recorded transform stage and records the build. */
+export interface IndexStageRequest {
+  /** state.sqlite of the project. */
+  state: string;
+  /** `.dunlin/artifacts`: build directories and dictionary snapshots. */
+  artifacts: string;
+  /** The shared corpus directory. */
+  corpus: string;
+  /** The project root. A failed build removes its directory only inside it. */
+  root: string;
+  runId: string;
+  transformId: string;
+  /** The `index.keyword` arguments. */
+  keyword?: Record<string, unknown> | null;
+  /** `{ backend, settings }` of `index.vector` or `hannoy.index`. */
+  vector?: { backend: 'exact' | 'hannoy'; settings: Record<string, unknown> } | null;
+  embedder?: EmbedderSettings | null;
+  /** `moduleSettings(plan.search)`, saved with the build. */
+  search: unknown;
+  /** The model settings of rerank modules, part of the configuration ID. */
+  rerank: unknown[];
+  /** `moduleSettings(plan.index)`. */
+  construction: unknown;
+  /** The configuration saved with the build. */
+  configuration: unknown;
+  force?: boolean;
+  /** Make the build the serving build. */
+  activate?: boolean;
+  tag?: string;
+  /** `max(adoption_history.id)` when the build started. */
+  generation?: number | null;
+}
+
+/** Answers the `index` stage's questions. Throw to stop the stage. */
+export interface IndexStageHost extends TransformStageHost {
+  /** Whether the configuration file changed since the build started. */
+  configChanged?(): boolean | Promise<boolean>;
+  /** The path of the installed hannoy tool, after its integrity check. */
+  indexTool?(name: string): string | Promise<string>;
+}
+
+export type IndexStageOutcome =
+  | { status: 'done'; output: Record<string, unknown> & { build_id: string; config_id: string; serving_changed: boolean; reused: boolean };
+    warnings: { code: string; message: string }[] }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } };
 
 /** A configuration diagnostic (spec 26.8). */
 export interface ConfigDiagnostic {

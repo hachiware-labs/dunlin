@@ -542,7 +542,7 @@ fn length_chunks(
 }
 
 /// `String.prototype.trim()` leaves nothing: JavaScript white space and line terminators only.
-fn js_blank(value: &str) -> bool {
+pub(crate) fn js_blank(value: &str) -> bool {
     value.chars().all(|c| {
         matches!(
             c,
@@ -696,7 +696,10 @@ fn semantic_chunks(
 }
 
 /// A recorded transform stage with its chunks, or `None`.
-fn read_transform(connection: &Connection, id: &str) -> Result<Option<ConfigValue>, StageError> {
+pub(crate) fn read_transform(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<ConfigValue>, StageError> {
     let manifest: Option<String> = connection
         .query_row(
             "SELECT manifest FROM stage_outputs WHERE stage = 'transform' AND id = ?",

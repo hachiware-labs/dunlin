@@ -83,6 +83,11 @@ export async function checkIndexTool(paths, tool) {
   await verified(join(paths.data, 'tools', tool.name, tool.version, platform), tool);
 }
 
+/** The path of the installed tool, after its version and integrity check. */
+export async function indexToolPath(paths, tool) {
+  return (await verified(join(paths.data, 'tools', tool.name, tool.version, platform), tool)).path;
+}
+
 export async function openIndexTool(paths, tool, signal) {
   const { path } = await verified(join(paths.data, 'tools', tool.name, tool.version, platform), tool);
   const execute = (operation, request = {}) => call(path, { operation, ...request }, signal);

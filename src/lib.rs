@@ -24,6 +24,8 @@ pub mod yaml_config;
 #[cfg(any(feature = "node", test))]
 mod command_parser;
 #[cfg(any(feature = "node", test))]
+mod embed;
+#[cfg(any(feature = "node", test))]
 mod lighton;
 #[cfg(all(feature = "node", not(test)))]
 mod node;
@@ -39,6 +41,8 @@ mod source_load;
 mod source_scan;
 #[cfg(any(feature = "node", test))]
 mod source_stage;
+#[cfg(any(feature = "node", test))]
+mod transform_stage;
 #[cfg(all(feature = "node", not(test)))]
 mod vector;
 

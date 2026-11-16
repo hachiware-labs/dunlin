@@ -14,13 +14,13 @@ import { z } from 'zod';
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { createGenerator } from './models.mjs';
-import { chunkCorpus, inventory, parserAssignments, runSourceStage, scanFolder, unsupportedFiles, writeTogether } from './project-content.mjs';
+import { chunkCorpus, inventory, parserAssignments, runSourceStage, runTransformStage, scanFolder, unsupportedFiles } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
 import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
-import { buildVectorIndex, fuseResults, releaseVectorMetadata, semanticChunks, vectorBackend, vectorModel, vectorSearch } from './project-vectors.mjs';
+import { buildVectorIndex, embeddingSettings, fuseResults, releaseVectorMetadata, vectorBackend, vectorModel, vectorSearch } from './project-vectors.mjs';
 import { changeTool, listedTools, projectOcr, toolsCatalog } from './project-tools.mjs';
 import { checkIndexTool, hannoy } from './project-index-tool.mjs';
 import { checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage } from './project-trials.mjs';
@@ -340,33 +340,6 @@ function latestStageId(db, stage) {
   return db.prepare('SELECT id FROM latest_stage WHERE stage = ?').get(stage)?.id;
 }
 
-/** Records a transform stage. Rust records the source stage. */
-function saveStage(db, stage, output, reused) {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    if (!reused) {
-      const manifest = { ...output, payloads: 1 };
-      const insert = db.prepare('INSERT OR IGNORE INTO stage_payloads VALUES (?, ?)');
-      const put = (value) => {
-        const json = JSON.stringify(value);
-        const key = revision(json);
-        insert.run(key, json);
-        return key;
-      };
-      if (stage === 'transform') manifest.chunks = output.chunks.map((group) => group.map(put));
-      db.prepare('INSERT OR IGNORE INTO stage_outputs VALUES (?, ?, ?)').run(stage, output.id, JSON.stringify(manifest));
-    }
-    db.prepare('INSERT INTO latest_stage VALUES (?, ?) ON CONFLICT(stage) DO UPDATE SET id = excluded.id').run(stage, output.id);
-    if (stage === 'transform' && output.key !== output.id) {
-      db.prepare('INSERT OR REPLACE INTO transform_outputs VALUES (?, ?)').run(output.key, output.id);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
 async function runSource(db, project, plan, { force, skipUnsupported, warnings }) {
   const { paths } = project;
   const parsed = await runModules(plan, { sources: [], parsers: [], reject: false }, {
@@ -389,28 +362,11 @@ async function runSource(db, project, plan, { force, skipUnsupported, warnings }
   return { output: result.output, reused: result.reused };
 }
 
-async function runTransform(db, source, plan, force, project) {
+/** Rust chunks, calls the embedding model for chunk.semantic and records the stage (spec 28.9 step 2b). */
+async function runTransform(sourceId, plan, force, project) {
   const semantic = plan.find(({ module }) => module.name === 'chunk.semantic');
-  const embedder = semantic && vectorModel(project.config, semantic.args.model);
-  const config_id = digest('cfg', embedder ? [moduleSettings(plan), embedder.identity] : moduleSettings(plan));
-  const id = digest('trn', [source.id, config_id]);
-  const latest = semantic && db.prepare('SELECT output_id FROM transform_outputs WHERE key = ?').get(id);
-  const saved = !force && readStage(db, 'transform', latest?.output_id ?? id);
-  if (saved) return { output: saved, reused: true };
-  const read = db.prepare('SELECT chunks FROM document_chunks WHERE id = ?');
-  const write = db.prepare(force && semantic ? 'INSERT OR REPLACE INTO document_chunks VALUES (?, ?)' : 'INSERT OR IGNORE INTO document_chunks VALUES (?, ?)');
-  const cache = {
-    hash: revision,
-    read: (key) => { const row = !force && read.get(key); return row && JSON.parse(row.chunks); },
-    write: (key, value) => write.run(key, JSON.stringify(value)),
-    together: (run) => writeTogether(db, run),
-  };
-  const chunks = await runModules(plan, { groups: source.groups }, {
-    chunk: (input, args) => chunkCorpus(input, args, cache),
-    chunkSemantic: (input, args) => semanticChunks(input, args, embedder, cache, trialSignal()),
-  });
-  const outputId = semantic ? digest('trn', [id, chunks]) : id;
-  return { output: { id: outputId, key: id, config_id, source_id: source.id, modules: moduleSettings(plan), chunks }, reused: false };
+  const embedder = semantic ? embeddingSettings(project.config, semantic.args.model) : null;
+  return runTransformStage({ sourceId, modules: moduleSettings(plan), force, embedder }, project.paths);
 }
 
 async function readUserDictionary(path) {
@@ -809,11 +765,11 @@ async function buildProject(project, command, runId, values, warnings) {
             results.index = { id: summary.build_id, reused: summary.reused, elapsed_ms: Math.round(performance.now() - stageStart) };
             return { ...summary, stages: results, elapsed_ms: Math.round(performance.now() - start) };
           }
+          // Rust records both stages.
           const { output, reused } = stage === 'source'
             ? await runSource(db, project, settings.source, { force: values.force, skipUnsupported: values['skip-unsupported'], warnings })
-            : await runTransform(db, source ?? buildInput(db, 'source', fixed), settings.transform, values.force, project);
+            : await runTransform(source?.id ?? inputStageId(db, 'source', fixed), settings.transform, values.force, project);
           trialCheckpoint();
-          if (stage !== 'source') saveStage(db, stage, output, reused);
           if (stage === 'source') source = output;
           results[stage] = { id: output.id, reused, elapsed_ms: Math.round(performance.now() - stageStart) };
         }
@@ -839,6 +795,14 @@ function assertSearchIndexes(build, plan) {
     const required = { 'retrieval.vector': 'exact', 'hannoy.search': 'hannoy' }[module.name];
     if (required && (build.vector.backend ?? 'exact') !== required) throw new ProjectError(2, 'VECTOR_BACKEND_MISMATCH', 'The selected build uses another vector index backend.');
   }
+}
+
+/** The ID of the saved stage that buildInput would read, without reading its payloads. */
+function inputStageId(db, stage, fixed) {
+  const id = fixed ? fixed[stage + '_id'] : latestStageId(db, stage);
+  if (id !== undefined && db.prepare('SELECT 1 FROM stage_outputs WHERE stage = ? AND id = ?').get(stage, id)) return id;
+  if (fixed) throw new ProjectError(3, 'STAGE_REQUIRED', 'Missing saved ' + stage + ' for ' + fixed.build_id + '.');
+  throw new ProjectError(3, 'STAGE_REQUIRED', 'No ' + stage + ' output. Run dunlin ' + stage + ' or dunlin build first.');
 }
 
 function buildInput(db, stage, fixed) {

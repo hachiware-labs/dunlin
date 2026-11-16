@@ -33,11 +33,14 @@ pulldown-cmark = { version = "0.13", default-features = false }
 rayon = { version = "1", optional = true }
 rusqlite = { version = "0.41.1", default-features = false, features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# float_roundtrip: parse numbers as JSON.parse does, so values from JavaScript and model APIs match.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.11.1"
 tantivy = { version = "0.27", default-features = false, features = ["mmap", "lz4-compression"] }
 unicode-segmentation = "1.13"
 url = "2"
+# Embedding model calls from the transform stage. Mozilla roots, as Node.js fetch uses by default.
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 walkdir = "2"
 yaml-rust2 = { version = "0.13.0", default-features = false }
 

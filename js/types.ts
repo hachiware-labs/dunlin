@@ -168,6 +168,34 @@ export type SourceStageOutcome =
   | { status: 'done'; output: Record<string, unknown> & { id: string; config_id: string }; reused: boolean; warnings: LoadedCorpus['warnings'] }
   | { status: 'unsupported'; stats: { files: number; skipped: { source_id: string; path: string; reason: string }[] } };
 
+/** An embedding model for `chunk.semantic`, resolved from `models`: the full endpoint URL and key. */
+export interface EmbedderSettings {
+  provider: 'ollama' | 'openai';
+  model: string;
+  url: string;
+  apiKey?: string;
+  maxInputBytes?: number;
+}
+
+/** The `transform` stage of a recorded `source` stage (spec 28.9 step 2b). */
+export interface TransformStageRequest {
+  state: string;
+  sourceId: string;
+  force?: boolean;
+  /** `moduleSettings(plan)` for the transform stage. */
+  modules: unknown[];
+  embedder?: EmbedderSettings | null;
+}
+
+/** Counts each model request (its JSON body size in bytes) against trial limits. Throw to stop the stage. */
+export interface TransformStageHost {
+  charge?(bytes: number): void;
+}
+
+export type TransformStageOutcome =
+  | { status: 'done'; output: Record<string, unknown> & { id: string; key: string; config_id: string; source_id: string; chunks: unknown[][][] }; reused: boolean }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+
 /** A configuration diagnostic (spec 26.8). */
 export interface ConfigDiagnostic {
   code: string;

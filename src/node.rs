@@ -623,6 +623,91 @@ impl crate::source_load::Host for JsHost {
     }
 }
 
+impl crate::embed::Charge for JsHost {
+    /// Asks JavaScript to count a model request against the trial limits, and waits for it.
+    fn charge(&self, bytes: usize) -> std::result::Result<(), String> {
+        use napi::threadsafe_function::ThreadsafeFunctionCallMode;
+        let id = NEXT_HOST_CALL.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        host_calls()
+            .lock()
+            .map_err(|_| "Could not register the host call".to_owned())?
+            .insert(id, sender);
+        let status = self.function.call(
+            (
+                id,
+                "charge".into(),
+                bytes.to_string(),
+                Buffer::from(Vec::new()),
+            ),
+            ThreadsafeFunctionCallMode::Blocking,
+        );
+        if status != Status::Ok {
+            if let Ok(mut calls) = host_calls().lock() {
+                calls.remove(&id);
+            }
+            return Err("Could not call JavaScript".into());
+        }
+        receiver
+            .recv()
+            .map_err(|_| "JavaScript stopped".to_owned())?
+            .map(|_| ())
+    }
+}
+
+/// Runs the `transform` stage on a recorded source stage (see `transform_stage`): chunks, calls the
+/// embedding model for `chunk.semantic` and records the stage in `state.sqlite`. `host(id, kind,
+/// args, bytes)` answers `charge` calls, which count model requests against the trial limits.
+/// Resolves to `{ status: "done", output, reused }` or `{ status: "failed", error: { code?,
+/// message, exitCode? } }`.
+#[napi]
+pub fn run_transform<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    use crate::config_value::ConfigValue;
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = JsHost { function };
+        let outcome = serde_json::from_str::<crate::transform_stage::TransformRequest>(&request)
+            .map_err(|error| {
+                crate::embed::EmbedError::plain(format!("Invalid transform request: {error}"))
+            })
+            .and_then(|request| crate::transform_stage::run(&request, &host, &cancel));
+        let text = match outcome {
+            Ok(outcome) => format!(
+                "{{\"status\":\"done\",\"output\":{},\"reused\":{}}}",
+                serde_json::to_string(&outcome.output).unwrap_or_default(),
+                outcome.reused
+            ),
+            Err(error) if error.aborted => {
+                deferred.reject(native_error(crate::Error::Aborted));
+                return;
+            }
+            Err(error) => {
+                let mut fields = Vec::new();
+                if let Some(code) = error.code {
+                    fields.push(("code".into(), ConfigValue::String(code.into())));
+                }
+                fields.push(("message".into(), ConfigValue::String(error.message)));
+                if let Some(exit) = error.exit_code {
+                    fields.push(("exitCode".into(), ConfigValue::Number(f64::from(exit))));
+                }
+                format!(
+                    "{{\"status\":\"failed\",\"error\":{}}}",
+                    ConfigValue::Object(fields).to_js_json()
+                )
+            }
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
+}
+
 /// Loads source files for the `source` stage (see `source_load`). `host(id, kind, args, bytes)`
 /// parses the kinds Rust does not read and answers with `completeHostCall`. Resolves to
 /// `{ documents, warnings }` as JSON.

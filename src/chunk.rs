@@ -40,7 +40,7 @@ pub struct ChunkDocument {
     pub boundaries: Vec<usize>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TextChunk {
     pub heading: String,

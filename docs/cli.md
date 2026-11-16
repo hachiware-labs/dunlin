@@ -7,8 +7,8 @@
 ## 初期化と設定
 
 ```text
-dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--json]
-dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config set ocr [--tool lightonocr] | dunlin config unset <embedding|llm|ocr> [--json]
+dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]
+dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config set ocr [--tool oar-ocr|lightonocr] | dunlin config unset <embedding|llm|ocr> [--json]
 dunlin validate [--project <directory>] [--config <file>] [--json]
 dunlin defaults [--apply <section>] [--project <directory>] [--json]
 dunlin modules <list|describe <name>> [--project <directory>] [--json]

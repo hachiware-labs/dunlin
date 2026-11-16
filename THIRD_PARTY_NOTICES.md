@@ -14,8 +14,10 @@
 | 範囲 | 主なコンポーネントとメタデータ上のライセンス |
 | --- | --- |
 | Rust のネイティブアドオン | Tantivy、NAPI-RS、rusqlite、pulldown-cmark は MIT。Rayon と memmap2 は MIT または Apache-2.0 |
+| 文書の読み取りと OCR（ネイティブアドオン） | pdf_oxide、ort、image は MIT または Apache-2.0。oar-ocr は Apache-2.0。ONNX Runtime と OCR のモデルは `dunlin add oar-ocr` で取得し、それぞれの配布条件に従う |
+| 埋め込みモデルの呼び出し（ネイティブアドオン） | ureq は MIT または Apache-2.0。rustls は Apache-2.0、ISC、MIT のいずれか。ring は Apache-2.0 と ISC。rustls-webpki は ISC。webpki-roots（Mozilla のルート証明書）は CDLA-Permissive-2.0 |
 | 近似ベクトル索引の補助バイナリ | hannoy、heed は MIT。その他の依存は `tools/hannoy/Cargo.lock` で版を特定 |
 | npm の実行時に解決する依存 | MCP TypeScript SDK の `@modelcontextprotocol/server` は Apache-2.0。cheerio、markdown-it、zod は MIT。yaml は ISC |
-| 文書処理の任意依存と追加セットアップ | `pdfjs-dist` は Apache-2.0、`docling.rs` と `@napi-rs/canvas` は MIT。追加で取得するモデルや実行環境はそれぞれの配布条件を参照 |
+| 文書処理の任意依存と追加セットアップ | `docling.rs` は MIT。追加で取得するモデルや実行環境はそれぞれの配布条件を参照 |
 
 対象プラットフォームごとの依存全体は、`Cargo.lock`、`tools/hannoy/Cargo.lock`、`package-lock.json` から確認します。配布前の棚卸しでは `cargo metadata --locked --features node`、hannoy 側の `cargo metadata --locked --manifest-path tools/hannoy/Cargo.toml`、`npm ls --all --omit=dev` と各依存の通知本文を照合します。この表は主な依存への入口です。

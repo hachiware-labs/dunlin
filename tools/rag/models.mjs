@@ -53,36 +53,46 @@ export function createGenerator(provider, model, baseUrl, apiKey, { maxInputByte
   }
 }
 
-export function createEmbedder(provider, model, baseUrl, apiKey, { maxInputBytes } = {}) {
+/**
+ * Resolves an embedding model to `{ provider, model, url, apiKey }`: the full endpoint URL and the
+ * key to send. The transform stage passes this to Rust, which makes the requests (spec 28.9 step 2b).
+ */
+export function embeddingEndpoint(provider, model, baseUrl, apiKey) {
   if (provider === 'ollama') {
-    const url = endpoint(baseUrl ?? process.env.OLLAMA_BASE_URL ?? ollamaBase, 'api/embed');
+    return { provider, model, url: endpoint(baseUrl ?? process.env.OLLAMA_BASE_URL ?? ollamaBase, 'api/embed').href, apiKey };
+  }
+  if (provider === 'openai') {
+    return { provider, model, url: endpoint(baseUrl ?? process.env.OPENAI_BASE_URL ?? openaiBase, 'embeddings').href, apiKey: apiKey ?? openaiKey() };
+  }
+  throw new Error('Expected --embedding-provider ollama or openai');
+}
+
+/** An embedder for settings from `embeddingEndpoint`. */
+export function embedderFor({ provider, model, url, apiKey, maxInputBytes }) {
+  const identity = [provider, model, url];
+  if (provider === 'ollama') {
     return {
-      identity: [provider, model, url.href],
+      identity,
       async embed(input, signal) {
         const result = await post('Ollama embeddings', url, apiKey, { model, input, truncate: false }, signal, maxInputBytes);
         return result.embeddings;
       },
     };
   }
-  if (provider === 'openai') {
-    const url = endpoint(baseUrl ?? process.env.OPENAI_BASE_URL ?? openaiBase, 'embeddings');
-    const key = apiKey ?? openaiKey();
-    return {
-      identity: [provider, model, url.href],
-      async embed(input, signal) {
-        const result = await post('OpenAI embeddings', url, key, { model, input, encoding_format: 'float' }, signal, maxInputBytes);
-        const vectors = [];
-        for (const { index, embedding } of result.data ?? []) {
-          if (!Number.isSafeInteger(index) || index < 0 || index >= input.length || vectors[index] !== undefined) {
-            throw new Error('OpenAI returned an invalid embedding index');
-          }
-          vectors[index] = embedding;
+  return {
+    identity,
+    async embed(input, signal) {
+      const result = await post('OpenAI embeddings', url, apiKey, { model, input, encoding_format: 'float' }, signal, maxInputBytes);
+      const vectors = [];
+      for (const { index, embedding } of result.data ?? []) {
+        if (!Number.isSafeInteger(index) || index < 0 || index >= input.length || vectors[index] !== undefined) {
+          throw new Error('OpenAI returned an invalid embedding index');
         }
-        return vectors;
-      },
-    };
-  }
-  throw new Error('Expected --embedding-provider ollama or openai');
+        vectors[index] = embedding;
+      }
+      return vectors;
+    },
+  };
 }
 
 function openaiKey() {

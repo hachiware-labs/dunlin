@@ -5,9 +5,8 @@ import { Dunlin } from 'dunlin';
 
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { revision } from './authoring/files.mjs';
-import { createEmbedder } from './models.mjs';
+import { embedderFor, embeddingEndpoint } from './models.mjs';
 import { embedBatch } from './vectors.mjs';
-import { chunkCorpus } from './project-content.mjs';
 import { hannoy, openIndexTool } from './project-index-tool.mjs';
 import { trialCheckpoint } from './project-trials.mjs';
 
@@ -15,59 +14,18 @@ function error(code, message) {
   return Object.assign(new Error(message), { code, exitCode: code === 'VECTOR_REQUIRED' ? 3 : 2 });
 }
 
-export function vectorModel(config, name) {
+/** The embedding model `name` under `models`, resolved for requests: `{ provider, model, url, apiKey, maxInputBytes }`. */
+export function embeddingSettings(config, name) {
   const model = Object.hasOwn(config.models ?? {}, name) && config.models[name];
   if (model?.kind !== 'embedding' || !model.model) throw error('VECTOR_MODEL_REQUIRED', 'Define an embedding model under models.');
   try {
-    return createEmbedder(model.provider, resolveConfigValue(model.model, 'model'), resolveConfigValue(model.base_url, 'base_url'),
-      resolveApiKey(model.api_key_env, 'model'), { maxInputBytes: model.max_input_bytes });
+    return { ...embeddingEndpoint(model.provider, resolveConfigValue(model.model, 'model'), resolveConfigValue(model.base_url, 'base_url'),
+      resolveApiKey(model.api_key_env, 'model')), ...(model.max_input_bytes !== undefined && { maxInputBytes: model.max_input_bytes }) };
   } catch { throw error('INVALID_VECTOR_MODEL', 'Check the embedding provider, model, endpoint and environment references.'); }
 }
 
-export async function semanticChunks(input, { max_chars, sentence_chars, similarity }, embedder, cache, signal) {
-  const passages = chunkCorpus(input, { size: sentence_chars, overlap: 0 });
-  const output = [];
-  for (const [group, [, documents]] of input.groups.entries()) {
-    const chunks = [];
-    for (const [i, { content, format }] of documents.entries()) {
-      const parts = passages[group][i];
-      const key = revision(JSON.stringify(['chunk.semantic-v1', embedder.identity, max_chars, sentence_chars, similarity, input.unicode, format, revision(content)]));
-      const saved = cache.read(key);
-      if (saved) { chunks.push(saved); continue; }
-      const bytes = Buffer.from(content);
-      const text = parts.map((part) => part.searchText ?? bytes.subarray(part.byteRange.start, part.byteRange.end).toString());
-      const vectors = [];
-      const nonempty = text.map((part, index) => ({ part, index })).filter(({ part }) => part.trim());
-      for (let offset = 0; offset < nonempty.length; offset += 32) {
-        const batch = nonempty.slice(offset, offset + 32);
-        const response = await embedBatch(embedder, batch.map(({ part }) => part), signal);
-        for (const [j, { index }] of batch.entries()) vectors[index] = response[j];
-      }
-      const dimension = vectors.find(Boolean)?.length;
-      if (vectors.some((vector) => vector.length !== dimension)) throw error('VECTOR_DIMENSIONS', 'Embedding dimensions differ within the document.');
-      const merged = [];
-      let length = 0;
-      for (const [j, part] of parts.entries()) {
-        const width = [...bytes.subarray(part.byteRange.start, part.byteRange.end).toString()].length;
-        const previous = merged.at(-1);
-        const related = vectors[j] && vectors[j - 1]
-          && vectors[j].reduce((sum, n, coordinate) => sum + n * vectors[j - 1][coordinate], 0) >= similarity;
-        if (previous && length + width <= max_chars && related) {
-          previous.range.endLine = part.range.endLine;
-          previous.byteRange.end = part.byteRange.end;
-          if (input.unicode === 'nfkc') previous.searchText += text[j];
-          length += width;
-        } else {
-          merged.push({ ...part, range: { ...part.range }, byteRange: { ...part.byteRange } });
-          length = width;
-        }
-      }
-      cache.write(key, merged);
-      chunks.push(merged);
-    }
-    output.push(chunks);
-  }
-  return output;
+export function vectorModel(config, name) {
+  return embedderFor(embeddingSettings(config, name));
 }
 
 export async function buildVectorIndex(state, database, path, source, transformed, embedder, force, backend, signal) {

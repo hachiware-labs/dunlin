@@ -2657,3 +2657,9 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - 日本語の PDF（横書き、縦書き、表、段組み）で pdfjs と抽出結果を比べ、差のある文書の数と内容、ページ位置の一致、処理時間を記録として `docs/pdf-extraction.md` に残す。比較の結果は、標準を決める条件にはしない。
 - `oar-ocr` は ONNX Runtime とモデルを使う。どちらも本体には含めず、`dunlin add oar-ocr` で準備する（25.4節）。日本語のスキャン文書で認識の精度と速度を測り、標準の方式として十分かを確かめる。
 - `lightonocr` は、今の管理された Python の実行環境とサーバーを、Rust から別プロセスとして起動する。
+
+#### 埋め込みモデルの呼び出し（2b）
+
+- `chunk.semantic` の埋め込みモデルは Rust から HTTP で呼ぶ（Ollama の `api/embed`、OpenAI の `embeddings`）。要求の本文は JavaScript の実装と同じ JSON にし、ベクトルの検査と正規化も同じ順で計算する。キャッシュのキー、段階の識別子、チャンクの結合結果は変わらない。
+- 接続先の URL、API キー、`max_input_bytes` は JavaScript が `models` から解決して渡す。HTTPS の検証には Mozilla のルート証明書（Node.js の `fetch` の既定と同じ）を使う。リダイレクトは追わず、環境変数のプロキシも使わない（`fetch` と同じ）。1回の要求は120秒で打ち切る。
+- 試行の上限（API の要求数と送信量）は、送る前に JavaScript に問い合わせて数える。上限の記録は段階4で評価とともに Rust に移す。

@@ -10,22 +10,9 @@ import { lightonModel } from './parsers/catalog.mjs';
 import { lightonServer, managedOcr, managedOcrVersion } from './parsers/lighton-setup.mjs';
 import { oarOcrHome } from './parsers/oar-setup.mjs';
 import { defaultRoutes, routeFiles } from './project-parsers.mjs';
-import { trialCheckpoint, trialSignal } from './project-trials.mjs';
+import { chargeTrialApi, trialCheckpoint, trialSignal } from './project-trials.mjs';
 
 const fileConcurrency = 4;
-
-/** Runs synchronous writes in one savepoint, which also works inside an open transaction. */
-export function writeTogether(db, run) {
-  db.exec('SAVEPOINT dunlin_cache');
-  try {
-    run();
-    db.exec('RELEASE dunlin_cache');
-  } catch (error) {
-    db.exec('ROLLBACK TO dunlin_cache');
-    db.exec('RELEASE dunlin_cache');
-    throw error;
-  }
-}
 
 async function processFiles(files, prepare, record, limit = fileConcurrency) {
   const results = new Array(files.length);
@@ -167,6 +154,38 @@ export async function runSourceStage({ sources, routes, reject, skipUnsupported,
   }
   return result.status === 'unsupported' ? { unsupported: result.stats }
     : { output: result.output, reused: result.reused, warnings: result.warnings };
+}
+
+/**
+ * Runs the transform stage in Rust (spec 28.9 step 2b): chunking, the chunk cache, embedding calls for
+ * chunk.semantic and the stage record. Model requests count against trial limits here.
+ * Returns `{ output, reused }`.
+ */
+export async function runTransformStage({ sourceId, modules, force, embedder = null }, paths) {
+  let refused;
+  const host = {
+    charge(bytes) {
+      try {
+        chargeTrialApi({ byteLength: bytes });
+      } catch (error) {
+        refused = error;
+        throw error;
+      }
+    },
+  };
+  let result;
+  try {
+    result = await Dunlin.runTransform({ state: paths.state, sourceId, force: Boolean(force), modules, embedder }, host, { signal: trialSignal() });
+  } catch (error) {
+    trialCheckpoint();
+    throw error;
+  }
+  if (result.status === 'failed') {
+    if (refused) throw refused;
+    const { code, message, exitCode } = result.error;
+    throw Object.assign(new Error(message), code && { code, exitCode });
+  }
+  return { output: result.output, reused: result.reused };
 }
 
 /** Rust reads, hashes, caches, runs loader.command and stores. It calls back here for the parsers that are still in JavaScript. */

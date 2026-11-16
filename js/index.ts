@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -67,6 +67,7 @@ interface NativeBinding {
   completeHostCall(id: number, result: string | null, error: string | null): void;
   scanSource(request: string, cancel: NativeCancellation): Promise<string>;
   runSource(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  runTransform(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   routeFiles(request: string): string;
   matchesGlob(path: string, pattern: string): boolean;
   readModuleArgs(name: string, args: string): string;
@@ -89,8 +90,11 @@ function native(): NativeBinding {
   }
 }
 
-/** The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. */
-function hostCallback(host: LoadCorpusHost): (...raw: unknown[]) => void {
+/**
+ * The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. Kinds:
+ * `parse` and `progress` for loading, `charge` for counting model requests in the transform stage.
+ */
+function hostCallback(host: Partial<LoadCorpusHost> & TransformStageHost): (...raw: unknown[]) => void {
   return (...raw) => {
     const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
     if (kind === 'progress') {
@@ -98,7 +102,8 @@ function hostCallback(host: LoadCorpusHost): (...raw: unknown[]) => void {
       return;
     }
     Promise.resolve()
-      .then(() => host.parse(JSON.parse(args) as LoadCorpusFile, bytes))
+      .then(() => kind === 'charge' ? (host.charge?.(Number(args)), null)
+        : host.parse!(JSON.parse(args) as LoadCorpusFile, bytes))
       .then((result) => native().completeHostCall(id, configJson(result), null),
         (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
   };
@@ -399,6 +404,16 @@ export class Dunlin {
   static async runSource(request: SourceStageRequest, host: LoadCorpusHost, { signal }: OperationOptions = {}): Promise<SourceStageOutcome> {
     const text = await cancellable(signal, (cancel) => native().runSource(configJson(request), hostCallback(host), cancel));
     return JSON.parse(text) as SourceStageOutcome;
+  }
+
+  /**
+   * Run the `transform` stage on a recorded `source` stage (spec 28.9 step 2b): chunk, call the
+   * embedding model for `chunk.semantic`, and record the stage in `state.sqlite`. Failures of the
+   * stage resolve to `{ status: "failed", error }`.
+   */
+  static async runTransform(request: TransformStageRequest, host: TransformStageHost = {}, { signal }: OperationOptions = {}): Promise<TransformStageOutcome> {
+    const text = await cancellable(signal, (cancel) => native().runTransform(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as TransformStageOutcome;
   }
 
   /**

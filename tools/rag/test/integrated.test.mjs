@@ -237,6 +237,17 @@ test('enforces trial counters and time without blocking short operations', { tim
   config.trial_limits = { max_api_input_bytes: 1 };
   await writeFile(configPath, stringify(config));
   assert.equal((await failure(4, 'build', '--from', 'index', '--config', candidatePath)).data.limit, 'max_api_input_bytes');
+  // chunk.semantic calls the model from Rust, which asks JavaScript to count each request first.
+  const semanticPath = join(root, 'kb', 'semantic.yaml');
+  await writeFile(semanticPath, stringify({ ...candidate, transform: { modules: [config.transform.modules[0],
+    { use: 'chunk.semantic', with: { model: 'local', max_chars: 100, sentence_chars: 50, similarity: 0.5 } }] } }));
+  for (const [limit, maximum] of [['max_api_requests', 0], ['max_api_input_bytes', 1]]) {
+    config.trial_limits = { [limit]: maximum };
+    await writeFile(configPath, stringify(config));
+    const refused = await failure(4, 'build', '--from', 'transform', '--config', semanticPath);
+    assert.equal(refused.errors[0].code, 'TRIAL_LIMIT_REACHED');
+    assert.equal(refused.data.limit, limit);
+  }
   assert.equal(calls.length, 0);
   const used = (await json('status')).data.trials.usage.elapsed_ms;
   config.trial_limits = { max_elapsed_ms: used + 1300 };

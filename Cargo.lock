@@ -970,6 +970,7 @@ dependencies = [
  "tantivy",
  "tempfile",
  "unicode-segmentation",
+ "ureq",
  "url",
  "walkdir",
  "yaml-rust2",

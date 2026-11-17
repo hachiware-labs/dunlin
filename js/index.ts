@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, McpHost, McpSearchArguments, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -76,6 +76,7 @@ interface NativeBinding {
   routeFiles(request: string): string;
   searchConfigId(request: string): string;
   answerQuestion(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  serveProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   matchesGlob(path: string, pattern: string): boolean;
   readModuleArgs(name: string, args: string): string;
   readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
@@ -101,11 +102,20 @@ function native(): NativeBinding {
  * The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. Kinds:
  * `parse` and `progress` for loading, `charge` for counting model requests in the transform stage.
  */
-function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<TagBuildHost> & Partial<ProjectSearchHost> & Partial<McpHost>): (...raw: unknown[]) => void {
+function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<TagBuildHost> & Partial<ProjectSearchHost> & Partial<McpHost>
+  & Partial<ServeProjectHost>): (...raw: unknown[]) => void {
   return (...raw) => {
     const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
     if (kind === 'progress') {
       host.progress?.(Number(args));
+      return;
+    }
+    if (kind === 'listening') {
+      host.listening?.(JSON.parse(args) as { port?: number; buildId: string });
+      return;
+    }
+    if (kind === 'opened') {
+      host.opened?.(JSON.parse(args) as string);
       return;
     }
     Promise.resolve()
@@ -113,6 +123,7 @@ function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<T
         : kind === 'config' ? host.configChanged?.() ?? false
         : kind === 'tool' ? host.indexTool!(args)
         : kind === 'search_config' ? host.searchConfigId!(JSON.parse(args) as Record<string, unknown>)
+        : kind === 'search_models' ? host.searchModels!(JSON.parse(args) as Record<string, unknown>)
         : kind === 'mcp_search' ? host.mcpSearch!(JSON.parse(args) as McpSearchArguments)
         : kind === 'mcp_read' ? host.mcpRead!(JSON.parse(args) as Evidence)
         : host.parse!(JSON.parse(args) as LoadCorpusFile, bytes))
@@ -475,6 +486,17 @@ export class Dunlin {
   }
 
   /**
+   * Serve a project (spec 28.10 step 3c): HTTP with /v1/search, /v1/responses and /mcp, or MCP over
+   * stdio, on the serving build and the builds that replace it. Settles when the server stops: when
+   * `signal` aborts, or when the client closes standard input.
+   */
+  static async serveProject(request: ServeProjectRequest, host: ServeProjectHost, { signal }: OperationOptions = {}): Promise<
+    { status: 'done' } | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } }> {
+    const text = await cancellable(signal, (cancel) => native().serveProject(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as { status: 'done' } | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+  }
+
+  /**
    * The search configuration ID (spec 28.10): a digest of the search plan, the request overrides,
    * the keyword dictionary, the vector model and the reranking models. Evaluation reports compare it.
    */
@@ -743,13 +765,6 @@ export class Dunlin {
         await closed.catch(() => {});
       },
     };
-  }
-
-  async createMcpHttpHandler(search: NonNullable<McpOptions['search']>, maxRequestBodySize: number): Promise<McpHttpHandle> {
-    this.#requireDatabase();
-    const { serveHttpMcp } = await import('./mcp.js');
-    this.#requireDatabase();
-    return serveHttpMcp(this, search, maxRequestBodySize);
   }
 
   close(): Promise<void> {

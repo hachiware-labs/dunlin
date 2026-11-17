@@ -629,6 +629,15 @@ impl crate::source_load::Host for JsHost {
 }
 
 impl JsHost {
+    /// Tells the JavaScript host something without waiting for it.
+    fn notify(&self, kind: &str, args: String) {
+        use napi::threadsafe_function::ThreadsafeFunctionCallMode;
+        self.function.call(
+            (0, kind.into(), args, Buffer::from(Vec::new())),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+    }
+
     /// Calls the JavaScript host and waits for its JSON answer.
     fn call(&self, kind: &str, args: String) -> std::result::Result<String, String> {
         use napi::threadsafe_function::ThreadsafeFunctionCallMode;
@@ -679,19 +688,44 @@ impl crate::search_stage::SearchHost for JsHost {
     }
 }
 
+impl crate::serve::ServeHost for JsHost {
+    fn search_models(
+        &self,
+        build: &crate::config_value::ConfigValue,
+    ) -> std::result::Result<crate::config_value::ConfigValue, String> {
+        let answer = self.call("search_models", build.to_js_json())?;
+        serde_json::from_str(&answer).map_err(|_| "JavaScript returned invalid models".into())
+    }
+
+    fn listening(&self, address: &crate::config_value::ConfigValue) {
+        self.notify("listening", address.to_js_json());
+    }
+
+    fn opened(&self, directory: &str) {
+        self.notify(
+            "opened",
+            crate::config_value::ConfigValue::String(directory.into()).to_js_json(),
+        );
+    }
+}
+
+/// The search and read functions a caller passes to `Dunlin.serveMcp`.
 impl crate::mcp::McpHost for JsHost {
     fn search(
         &self,
         arguments: &crate::config_value::ConfigValue,
+        _cancel: &crate::Cancellation,
     ) -> std::result::Result<String, String> {
         self.call("mcp_search", arguments.to_js_json())
     }
 
     fn read(
         &self,
-        evidence: &crate::config_value::ConfigValue,
+        evidence: &Evidence,
+        _cancel: &crate::Cancellation,
     ) -> std::result::Result<String, String> {
-        self.call("mcp_read", evidence.to_js_json())
+        let evidence = serde_json::to_string(evidence).map_err(|error| error.to_string())?;
+        self.call("mcp_read", evidence)
     }
 }
 
@@ -808,6 +842,45 @@ fn with_module(mut text: String, module: Option<String>) -> String {
         ));
     }
     text
+}
+
+/// Serves a project (see `serve`) until the client closes standard input or `cancel` aborts.
+/// `host` answers `search_models`, `tool` and `charge`, and hears `listening` once the server is
+/// ready. Resolves to `{ status: "done" }` or a failed status.
+#[napi]
+pub fn serve_project<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = Arc::new(JsHost { function });
+        let outcome = serde_json::from_str::<crate::serve::ServeRequest>(&request)
+            .map_err(|error| {
+                crate::embed::EmbedError::plain(format!("Invalid serve request: {error}"))
+            })
+            .and_then(|request| {
+                let stdio = request.settings.transport == "stdio";
+                let search_only = request.project_type == "rag";
+                let serving = Arc::new(crate::serve::Serving::open(request, host)?);
+                if stdio {
+                    crate::serve::serve_stdio(serving, search_only, &cancel)
+                } else {
+                    crate::serve::serve_http(serving, &cancel)
+                }
+                .map_err(crate::embed::EmbedError::plain)
+            });
+        let text = match outcome {
+            Ok(()) => "{\"status\":\"done\"}".to_owned(),
+            Err(error) => failed_stage(error),
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
 }
 
 /// Names a build with a tag (see `build_stage::tag`). `host` answers `search_config` with the

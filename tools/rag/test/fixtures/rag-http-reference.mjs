@@ -1,7 +1,10 @@
+// The JavaScript HTTP server of RAG projects before it moved to Rust (spec 28.10 step 3c):
+// /v1/search, /v1/responses and /mcp on listenHttp. Kept to check that the Rust server answers the
+// same requests in the same way. Copied from project-rag-http.mjs.
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
-import { HttpError, listenHttp, sendJson } from './project-serving.mjs';
+import { HttpError, listenHttp, sendJson } from '../../project-serving.mjs';
 
 const queryText = z.string().refine((query) => Boolean(query.trim()));
 const searchRequest = z.strictObject({
@@ -19,7 +22,7 @@ const answerRequest = z.strictObject({
   model: queryText.optional(), stream: z.literal(false).optional(), store: z.literal(false).optional(), background: z.literal(false).optional(),
 });
 
-export async function serveRagHttp(settings, { search, answer, model, mcp }) {
+export async function referenceServeRagHttp(settings, { search, answer, model, mcp }) {
   const enabled = new Set(settings.endpoints);
   return listenHttp(settings, async (request, response, context) => {
     const { signal, url } = context;

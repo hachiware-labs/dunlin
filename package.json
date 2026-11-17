@@ -22,7 +22,6 @@
     "dist/*.js",
     "dist/index.d.ts",
     "dist/types.d.ts",
-    "dist/mcp.d.ts",
     "dist/native.cjs",
     "dist/*.node",
     "dist/tools/*",
@@ -60,7 +59,6 @@
     "bench": "node benches/keyword.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.4.0",
     "cheerio": "1.2.0",
     "markdown-it": "15.0.3",
     "yaml": "2.9.0",
@@ -71,6 +69,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "@napi-rs/cli": "3.10.12",
     "@types/node": "^22.0.0",
     "pdfjs-dist": "6.5.438",

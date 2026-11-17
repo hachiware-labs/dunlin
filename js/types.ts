@@ -708,8 +708,28 @@ export interface McpHost {
   mcpRead(evidence: Evidence): Promise<ReadOutcome>;
 }
 
-export interface McpHttpHandle extends McpHandle {
-  fetch(request: Request): Promise<Response>;
+/** A project to serve (spec 28.10 step 3c): the validated serve section, paths, plans and answer model. */
+export interface ServeProjectRequest {
+  projectType: 'mcp' | 'rag';
+  settings: Record<string, unknown>;
+  /** The token of `auth: token`, read from its environment variable. */
+  token?: string | null;
+  paths: { state: string; artifacts: string; corpus: string };
+  /** `moduleSettings(plan.search)` and `moduleSettings(plan.ask)`. */
+  search: unknown[];
+  ask?: unknown[];
+  model?: GeneratorSettings | null;
+}
+
+/** What serving asks of a project's JavaScript. */
+export interface ServeProjectHost extends TransformStageHost {
+  indexTool?(name: string): string | Promise<string>;
+  /** `{ embedders, rerankers, rerankModels }` for a build, or `{ error }`. */
+  searchModels(build: Record<string, unknown>): Record<string, unknown>;
+  /** The server listens: the port for HTTP, and the serving build. */
+  listening?(address: { port?: number; buildId: string }): void;
+  /** The server opened the index directory of a build. */
+  opened?(directory: string): void;
 }
 
 export type DunlinErrorCode =

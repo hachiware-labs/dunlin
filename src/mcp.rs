@@ -3,8 +3,9 @@
 //! The tools, their input schemas, argument checks and results are the ones the JavaScript server
 //! published. Without a host, the tools run on the open index: `knowledge.search` (keyword search),
 //! `knowledge.read`, `knowledge.explore` and `knowledge.wiki_get`. A project server passes a host
-//! instead: `knowledge.search` runs the project search plan and `knowledge.read` reads from the
-//! serving build or an earlier one, both in JavaScript until the HTTP server moves too.
+//! instead (`serve::Serving`): `knowledge.search` runs the project search plan and `knowledge.read`
+//! reads from the serving build or an earlier one. The HTTP server answers `/mcp` with the same
+//! tools through `tools_json` and `call_json`.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,13 +22,13 @@ use serde_json::Value;
 use crate::config_value::ConfigValue;
 use crate::{Cancellation, Evidence, ExploreOptions, KnowledgeBase};
 
-/// The project search and read, which JavaScript runs for a project server.
+/// The project search and read of a project server.
 pub trait McpHost: Send + Sync {
     /// Runs `knowledge.search` with `{ query, limit?, sourceIds?, budgetChars? }` and returns its
     /// result as JSON text, or the error message.
-    fn search(&self, arguments: &ConfigValue) -> Result<String, String>;
+    fn search(&self, arguments: &ConfigValue, cancel: &Cancellation) -> Result<String, String>;
     /// Reads evidence and returns `{ content, evidence }` as JSON text, or the error message.
-    fn read(&self, evidence: &ConfigValue) -> Result<String, String>;
+    fn read(&self, evidence: &Evidence, cancel: &Cancellation) -> Result<String, String>;
 }
 
 const SCHEMA: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -318,7 +319,7 @@ fn join(path: &str, name: &str) -> String {
     }
 }
 
-fn valid_source_id(id: &str) -> bool {
+pub(crate) fn valid_source_id(id: &str) -> bool {
     (1..=64).contains(&id.len())
         && id
             .bytes()
@@ -514,13 +515,13 @@ impl McpServer {
                         .get("budgetChars")
                         .or_else(|| arguments.get("budget_chars")),
                 );
-                host.search(&ConfigValue::Object(options))
+                host.search(&ConfigValue::Object(options), cancel)
             }
             ("knowledge.read", Some(host)) => {
-                let evidence: ConfigValue =
-                    serde_json::from_str(&arguments["evidence"].to_string())
-                        .map_err(|error| error.to_string())?;
-                host.read(&evidence)
+                evidence_limits(&arguments["evidence"])?;
+                let evidence: Evidence = serde_json::from_value(arguments["evidence"].clone())
+                    .map_err(|_| "Expected source evidence from search".to_owned())?;
+                host.read(&evidence, cancel)
             }
             ("knowledge.search", None) => {
                 let query = string("query");
@@ -576,6 +577,59 @@ impl McpServer {
             }
             _ => Err(format!("Tool {name} not found")),
         }
+    }
+}
+
+fn string_json(text: &str) -> String {
+    ConfigValue::String(text.to_owned()).to_js_json()
+}
+
+fn error_json(message: &str) -> String {
+    format!(
+        r#"{{"content":[{{"type":"text","text":{}}}],"isError":true}}"#,
+        string_json(message)
+    )
+}
+
+impl McpServer {
+    /// The `tools/list` result as the JavaScript server wrote it, keys in its order.
+    pub fn tools_json(&self) -> String {
+        let tools: Vec<String> = self
+            .tools()
+            .iter()
+            .map(|(tool, schema)| {
+                format!(
+                    r#"{{"name":{},"description":{},"inputSchema":{schema},"annotations":{{"readOnlyHint":true}}}}"#,
+                    string_json(&tool.name),
+                    string_json(tool.description.as_deref().unwrap_or_default())
+                )
+            })
+            .collect();
+        format!(r#"{{"tools":[{}]}}"#, tools.join(","))
+    }
+
+    /// The `tools/call` result as JSON text, or the message of the JSON-RPC error for an unknown
+    /// tool. Blocking: the caller runs it off the async runtime.
+    pub fn call_json(
+        &self,
+        name: &str,
+        input: Option<&serde_json::Map<String, Value>>,
+        cancel: &Cancellation,
+    ) -> Result<String, String> {
+        let Some((_, schema)) = self.tools().into_iter().find(|(tool, _)| tool.name == name) else {
+            return Err(format!("Tool {name} not found"));
+        };
+        let checked = match arguments(name, &schema, input) {
+            Ok(checked) => checked,
+            Err(message) => return Ok(error_json(&message)),
+        };
+        Ok(match self.run(name, &checked, cancel) {
+            Ok(text) => format!(
+                r#"{{"content":[{{"type":"text","text":{}}}],"structuredContent":{text}}}"#,
+                string_json(&text)
+            ),
+            Err(message) => error_json(&message),
+        })
     }
 }
 

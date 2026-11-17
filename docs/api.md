@@ -196,7 +196,7 @@ for (const { id, changes } of affected) {
 
 ## Node.js API から MCP を提供する
 
-`kb.serveMcp()` は、直接開いた索引を stdio で公開します。既定のツールは `knowledge.search`、`knowledge.read`、`knowledge.explore`、`knowledge.wiki_get` です。`@modelcontextprotocol/server` と `zod` は `dunlin` の依存パッケージです。Dunlinfile を使う場合は CLI の起動手順を参照してください。[CLI の起動手順](mcp.md) · [MCP TypeScript SDK v2](https://ts.sdk.modelcontextprotocol.io/v2/)
+`kb.serveMcp()` は、直接開いた索引を stdio で公開します。既定のツールは `knowledge.search`、`knowledge.read`、`knowledge.explore`、`knowledge.wiki_get` です。サーバーは `dunlin` の Rust の部分（MCP の Rust SDK）で動くので、別のパッケージは要りません。Dunlinfile を使う場合は CLI の起動手順を参照してください。[CLI の起動手順](mcp.md)
 
 ```js
 import { Dunlin } from 'dunlin';

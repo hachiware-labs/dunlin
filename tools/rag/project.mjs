@@ -3,6 +3,7 @@ import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises
 import { once } from 'node:events';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { channel } from 'node:diagnostics_channel';
 import { parseArgs } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +25,6 @@ import { checkIndexTool, hannoy, indexToolPath } from './project-index-tool.mjs'
 import { chargeTrialApi, checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage, untilAborted } from './project-trials.mjs';
 import { answerModel, answerQuestion, answerText } from './project-answer.mjs';
 import { configureGlobal, initialSettings } from './project-global.mjs';
-import { serveRagHttp } from './project-rag-http.mjs';
 import { isSearchProject, serveAddress, serveCredential, withServeOverrides } from './project-serving.mjs';
 import { constructionStages as stages, describeModules, moduleSettings, parseConfig, ragTemplate, restoreModules,
   runModules, validateRag, wikiTemplate, writeTemplate } from './project-modules.mjs';
@@ -568,16 +568,6 @@ async function buildProject(project, command, runId, values, warnings) {
   });
 }
 
-function assertSearchIndexes(build, plan) {
-  for (const { module } of plan) {
-    if (['retrieval.vector', 'hannoy.search'].includes(module.name) && !build.vector || module.name === 'retrieval.keyword' && !build.keyword) {
-      throw new ProjectError(3, 'INDEX_REQUIRED', 'The selected build has no index for ' + module.name + '.');
-    }
-    const required = { 'retrieval.vector': 'exact', 'hannoy.search': 'hannoy' }[module.name];
-    if (required && (build.vector.backend ?? 'exact') !== required) throw new ProjectError(2, 'VECTOR_BACKEND_MISMATCH', 'The selected build uses another vector index backend.');
-  }
-}
-
 function buildConfigChanged(project, input) {
   if (revision(input) === project.configDigest) return false;
   const config = normalizeProjectType(parseConfig(input).config);
@@ -621,13 +611,10 @@ function searchConfigId(plan, options = {}, build, project) {
 }
 
 /**
- * Runs a search plan in Rust (spec 28.10). JavaScript resolves the models. Returns
- * `{ output, context, contextStop }`: the format of spec 27.1, the evidence of each context excerpt
- * and why the context stopped.
+ * The models a search plan uses on a build, resolved for Rust: `{ embedders, rerankers, rerankModels }`.
+ * A model that cannot be resolved stops the module that uses it.
  */
-async function searchProject(database, build, plan, query, project, options = {}) {
-  const { limit, sourceIds, budgetChars } = options;
-  const signal = trialSignal(options.signal);
+function searchModels(plan, build, project) {
   const models = build.search_models ?? project.config.models;
   const embedders = {};
   for (const { module, args } of plan) {
@@ -650,6 +637,18 @@ async function searchProject(database, build, plan, query, project, options = {}
       rerankers[args.model] = { error: { code: error.code, message: error.message, exitCode: error.exitCode } };
     }
   }
+  return { embedders, rerankers, rerankModels };
+}
+
+/**
+ * Runs a search plan in Rust (spec 28.10). JavaScript resolves the models. Returns
+ * `{ output, context, contextStop }`: the format of spec 27.1, the evidence of each context excerpt
+ * and why the context stopped.
+ */
+async function searchProject(database, build, plan, query, project, options = {}) {
+  const { limit, sourceIds, budgetChars } = options;
+  const signal = trialSignal(options.signal);
+  const { embedders, rerankers, rerankModels } = searchModels(plan, build, project);
   let refused;
   const answer = (call) => async (...args) => {
     try {
@@ -717,114 +716,45 @@ async function waitForHttp(server, type, host) {
   }
 }
 
+const indexOpens = channel('dunlin:index-open');
+
+/**
+ * Serves a project in Rust (spec 28.10 step 3c): HTTP with /v1/search, /v1/responses and /mcp, or MCP
+ * over stdio. JavaScript resolves the settings and models and prints where it listens.
+ */
 async function serveProject(project, settings) {
   const type = project.config.init.type;
-  const state = openState(project.paths, true);
-  const indexes = new Map();
-  let handle;
-  async function closeIndex({ opening }) {
-    const database = await opening.catch(() => null);
-    if (!database) return;
-    await database.close();
-  }
+  const http = settings.transport === 'http';
+  if (http) serveCredential(settings);
+  const token = http && settings.access.auth.type === 'token' ? process.env[settings.access.auth.token_env] : null;
+  const model = http && settings.endpoints.includes('responses') ? answerModel(project, { optional: true }) : null;
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
   try {
-    const initial = state.prepare(`SELECT manifest, coalesce((SELECT max(id) FROM adoption_history), 0) AS generation
-      FROM project JOIN builds ON builds.id = project.build_id WHERE project.id = 1`).get();
-    if (!initial) throw new ProjectError(3, 'BUILD_REQUIRED', 'No searchable build. Run dunlin build first.');
-    const build = JSON.parse(initial.manifest);
-    assertSearchIndexes(build, project.plan.search);
-    const model = settings.endpoints?.includes('responses') ? answerModel(project, { optional: true }) : null;
-    const database = await openBuild(project.paths, build);
-    indexes.set(build.index, { opening: Promise.resolve(database), users: 0 });
-    const usesKeyword = project.plan.search.some(({ module }) => module.name === 'retrieval.keyword');
-    const usesVector = project.plan.search.some(({ module }) => ['retrieval.vector', 'hannoy.search'].includes(module.name));
-    const activeBuild = state.prepare(`SELECT manifest FROM serving_generations JOIN builds ON builds.id = serving_generations.build_id
-      WHERE serving_generations.id = ?`);
-    let compatible = build;
-    function closeUnusedIndex(index) {
-      const entry = indexes.get(index);
-      if (entry?.users === 0 && index !== compatible.index) {
-        indexes.delete(index);
-        return closeIndex(entry);
-      }
-    }
-    async function withActive(callback) {
-      const row = activeBuild.get(initial.generation);
-      const current = row ? JSON.parse(row.manifest) : build;
-      const keywordChanged = usesKeyword && JSON.stringify(current.keyword) !== JSON.stringify(build.keyword);
-      const vectorChanged = usesVector && (current.vector?.identity !== build.vector?.identity
-        || (current.vector?.backend ?? 'exact') !== (build.vector?.backend ?? 'exact'));
-      const previousIndex = compatible.index;
-      if (!keywordChanged && !vectorChanged) compatible = current;
-      const selected = compatible;
-      let entry = indexes.get(selected.index);
-      if (!entry) {
-        const opening = openBuild(project.paths, selected).catch((error) => {
-          indexes.delete(selected.index);
-          throw error;
-        });
-        entry = { opening, users: 0 };
-        indexes.set(selected.index, entry);
-      }
-      // Concurrent requests share the open and keep their index until the callback finishes.
-      entry.users++;
-      try {
-        return await callback(await entry.opening, selected);
-      } finally {
-        entry.users--;
-        if (previousIndex !== selected.index || selected.index !== compatible.index) {
-          await Promise.all([closeUnusedIndex(previousIndex), closeUnusedIndex(selected.index)]);
+    const result = await Dunlin.serveProject({
+      projectType: type, settings, token, paths: project.paths, search: moduleSettings(project.plan.search),
+      ask: project.plan.ask ? moduleSettings(project.plan.ask) : [], model: model?.settings ?? null,
+    }, {
+      charge() {},
+      indexTool: () => indexToolPath(project.paths, hannoy),
+      searchModels(build) {
+        try {
+          return searchModels(project.plan.search, build, project);
+        } catch (error) {
+          return { error: { code: error.code, message: error.message, exitCode: error.exitCode } };
         }
-      }
-    }
-    const search = (query, options) => withActive((db, active) =>
-      projectSearchJson(db, active, project.plan.search, query, project, options));
-    if (settings.transport === 'http') {
-      handle = settings.endpoints.includes('mcp') ? await database.createMcpHttpHandler(search, settings.limits.max_request_bytes) : null;
-      const server = await serveRagHttp(settings, { search, model: model?.model, mcp: handle,
-        answer: (query, signal) => withActive(async (db, active) => {
-          const result = await projectSearchJson(db, active, project.plan.search, query, project, { signal });
-          return answerQuestion(project, result, query, model, signal);
-        }),
-      });
-      await waitForHttp(server, type, settings.host);
-    } else {
-      handle = await database.serveMcp({
-        transport: 'stdio', search, searchOnly: type === 'rag',
-        read: async (evidence, options) => {
-          try {
-            return await withActive((db) => db.read(evidence, options));
-          } catch (error) {
-            if (!['STALE_EVIDENCE', 'NOT_FOUND'].includes(error.code)) throw error;
-            const state = openState(project.paths, true);
-            let builds;
-            try { builds = state.prepare('SELECT manifest FROM builds ORDER BY rowid DESC').all(); }
-            finally { state.close(); }
-            for (const { manifest } of builds) {
-              const candidate = JSON.parse(manifest);
-              const archived = await openBuild(project.paths, candidate).catch(() => null);
-              if (!archived) continue;
-              try {
-                return await archived.read(evidence, options);
-              } catch (failure) {
-                if (!['STALE_EVIDENCE', 'NOT_FOUND'].includes(failure.code)) throw failure;
-              } finally {
-                await archived.close();
-              }
-            }
-            throw error;
-          }
-        },
-      });
-      console.error('Dunlin MCP stdio (' + build.build_id + ')');
-      await handle.closed;
-    }
+      },
+      listening: ({ port, buildId }) => console.error(port === undefined ? 'Dunlin MCP stdio (' + buildId + ')'
+        : 'Dunlin ' + type + ': ' + serveAddress(settings.host, port) + '/'),
+      // For tracing, as diagnostics_channel subscribers see it: `{ path }` of each index opened.
+      opened: (path) => indexOpens.publish({ path }),
+    }, { signal: controller.signal });
+    if (result.status === 'failed') throw stageFailure(result.error);
   } finally {
-    try { await handle?.close(); }
-    finally {
-      state.close();
-      await Promise.all([...indexes.values()].map(closeIndex));
-    }
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
   }
 }
 

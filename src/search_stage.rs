@@ -182,7 +182,7 @@ fn module_args(module: &ConfigValue) -> ConfigValue {
 }
 
 /// `assertSearchIndexes`: every retrieval module has its index in the build.
-fn assert_indexes(build: &ConfigValue, plan: &[ConfigValue]) -> Result<(), StageError> {
+pub(crate) fn assert_indexes(build: &ConfigValue, plan: &[ConfigValue]) -> Result<(), StageError> {
     for module in plan {
         let name = module_use(module);
         let vector = field(build, "vector");

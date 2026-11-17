@@ -147,13 +147,9 @@ test('shares one RAG search payload, grounded answers and live index across CLI,
   const openLog = join(kb.cwd, 'index-opens.log');
   const traceOpens = join(kb.cwd, 'trace-index-opens.mjs');
   await writeFile(traceOpens, `
-    import { appendFile } from 'node:fs/promises';
-    import { Dunlin } from ${JSON.stringify(import.meta.resolve('dunlin'))};
-    const open = Dunlin.open;
-    Dunlin.open = async function (path, options) {
-      await appendFile(${JSON.stringify(openLog)}, path + '\\n');
-      return open.call(this, path, options);
-    };
+    import { subscribe } from 'node:diagnostics_channel';
+    import { appendFileSync } from 'node:fs';
+    subscribe('dunlin:index-open', ({ path }) => appendFileSync(${JSON.stringify(openLog)}, path + '\\n'));
   `);
   const base = await start({ ...kb, nodeArgs: ['--import', pathToFileURL(traceOpens).href] }, '--port', '0');
   const mcp = new Client({ name: 'http-test', version: '1.0.0' });

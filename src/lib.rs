@@ -43,6 +43,8 @@ mod ocr;
 mod pdf_text;
 #[cfg(any(feature = "node", test))]
 mod search_stage;
+#[cfg(all(feature = "node", not(test)))]
+mod serve;
 #[cfg(any(feature = "node", test))]
 mod source_files;
 #[cfg(any(feature = "node", test))]

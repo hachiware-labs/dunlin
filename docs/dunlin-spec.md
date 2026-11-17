@@ -2545,7 +2545,7 @@ serve:
 | --- | --- | --- |
 | `pdfjs-dist`、`@napi-rs/canvas` | PDF の文字層とページ位置の抽出、OCR の前のページの画像化 | Rust の `pdf_oxide` に置き換えた（段階2a）。pdfjs は比較の記録（28.9節）を再現するベンチマークの開発用の依存にだけ残す |
 | `tesseract.js` と言語データ | GPU を使わない OCR | 外した（段階2a）。GPU を使わない OCR は `oar-ocr`（4.1節）が受け持つ |
-| `@modelcontextprotocol/server` | MCP のサーバー | Rust の公式 SDK（`rmcp`）に置き換える。返却形式（27章）と道具の名前は変えない |
+| `@modelcontextprotocol/server` | MCP のサーバー | Rust の公式 SDK（`rmcp`）と Rust の HTTP サーバーに置き換えた（段階3c）。返却形式（27章）と道具の名前は変えない。旧サーバーと比べるテストの基準にだけ、開発用の依存として残す |
 | `docling.rs`（npm） | Office と PDF の変換 | 中身は Rust なので、crate を直接使えるか確かめる。使えるまでは npm の口から呼ぶ |
 | `@ast-grep/napi` と言語の文法 | コードの宣言の位置 | 旧形式の設定の取り込みでだけ使っていたので、その経路とともに外した（段階2a）。コードの宣言の位置を使う機能を作るときは、`ast-grep-core` などの crate を直接使う |
 | `cheerio` | HTML から本文を取り出す | Rust（`scraper` など）に置き換える |
@@ -2605,7 +2605,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 | 3 | 検索モジュール、文脈の組み立て、返却形式、回答の生成と並べ替えのモデル呼び出し、HTTP と MCP のサーバーを Rust に移す | 登録表とモジュールが JavaScript にある |
 | 4 | 評価データ、評価、レポートと比較、試行と採用を Rust に移し、`evaluate.rs` とまとめる | 評価の二重化 |
 | 5 | Wiki/PARA の取り込み、執筆の進行、検査、ページの HTML 化、画面の配信を Rust に移し、`wiki.rs` とまとめる | Wiki の二重化 |
-| 6 | 残った JavaScript のライブラリ（`cheerio`、`markdown-it`、`yaml`、`zod`、`@modelcontextprotocol/server`）を外し、`docling.rs` を crate で使えるか確かめる。コマンドの解釈と表示を Rust に移し、入口を起動役だけにする | JavaScript のライブラリへの依存 |
+| 6 | 残った JavaScript のライブラリ（`cheerio`、`markdown-it`、`yaml`、`zod`）を外し、`docling.rs` を crate で使えるか確かめる。コマンドの解釈と表示を Rust に移し、入口を起動役だけにする | JavaScript のライブラリへの依存 |
 
 ### 28.7 既存プロジェクトの扱い
 
@@ -2735,9 +2735,14 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - MCP は公式の Rust SDK（`rmcp`）を使い、stdio と HTTP の2つの接続方式を出す。HTTP は `rmcp` が使う非同期の実行環境（tokio）と HTTP のライブラリで受ける。どのライブラリを使うかは、配布物の大きさと構築の時間を測ってから決める。
 - 27.3節の `/v1/responses` と `/v1/search` も同じ HTTP のサーバーで受ける。接続先と送信元の確認、合言葉、要求の大きさの上限は、いまの JavaScript の実装（`project-serving.mjs`）と同じ規則にする。
 - Wiki/PARA の `serve` も同じ HTTP の部品を使うが、画面の配信とあわせて段階5で移す。それまでは JavaScript の実装が残る。
-- Node.js API の `serveMcp` と `createMcpHttpHandler` は、Rust のサーバーを起動する口に置き換える（28.5節）。
+- Node.js API の `serveMcp` は Rust のサーバーを起動する口にした。`createMcpHttpHandler` は外し、プロジェクトの提供には `Dunlin.serveProject` を足した（28.5節）。
 - 3c は2回に分ける。先に stdio の MCP（MCP 種別の `serve` と、Node.js API の `serveMcp`）を移し、次に HTTP のサーバー（`/v1/search`、`/v1/responses`、`/mcp`）と提供中のビルドの切り替えを移す。
 - stdio の MCP は `rmcp` と tokio で動かす。追加した依存で、配布物は約 2.4 MB（2.5%）大きくなった。
 - MCP 種別の `serve` では、HTTP を移すまでは、`knowledge.search` と `knowledge.read` が JavaScript の検索と読み出し（提供中のビルドの切り替えと、以前のビルドからの読み出し）を呼ぶ。Node.js API の `serveMcp` で検索を渡さない場合は、4つの道具（`knowledge.search`、`knowledge.read`、`knowledge.explore`、`knowledge.wiki_get`）を Rust が索引に対して実行する。
 - 道具の入力は Rust で検査し、旧サーバーと同じ文言（zod の文言）で返す。JSON-RPC の応答のキーの順と、`structuredContent` のキーの順は SDK によって違うが、値は同じである。
-- 旧サーバーを写した基準（テストの `mcp-reference.mjs`）と同じ要求を送り、道具の一覧と入力の形、結果、入力の誤り、範囲外の読み出し、知らない道具への答えが一致することを確かめる。`@modelcontextprotocol/server` は HTTP の `/mcp` が使うので、3c の後半まで残る。
+- 旧サーバーを写した基準（テストの `mcp-reference.mjs`）と同じ要求を送り、道具の一覧と入力の形、結果、入力の誤り、範囲外の読み出し、知らない道具への答えが一致することを確かめる。`@modelcontextprotocol/server` は、3c の後半で HTTP の `/mcp` も移したので、テストの基準だけが使う開発用の依存にした。
+- 3c の後半では、`serve` のすべてを Rust で行う。提供中のビルドの切り替え（起動時の採用の世代で置き換わったビルドを、キーワードとベクトルの設定が同じあいだ使う。索引はビルドごとに一度だけ開き、使わなくなったら閉じる）、プロジェクトの検索と回答、以前のビルドからの読み出し、HTTP のサーバーが含まれる。JavaScript は、設定とモデルの解決（ビルドごとに Rust から問い合わせる）と、待ち受けた場所の表示だけを行う。
+- HTTP のサーバーは hyper と tokio で動かす。配布物はさらに約 0.6 MB 大きくなった（3c 全体で約 3.0 MB、3.1%）。接続先と送信元の確認、CORS、合言葉、同時接続の上限、要求の大きさの上限、時間切れ、エラーの本文は、旧サーバーと同じ規則にした。応答は `Content-Length` 付きで返し、旧サーバーの `Transfer-Encoding: chunked` とは違う。
+- `/mcp` は、TypeScript SDK の状態を持たない方式と同じに答える。要求ごとに結果を1つのイベントとする server-sent events で返し、受け付ける形式、`Content-Type`、JSON の誤り、空の一括要求、プロトコルの版の誤りには、同じ状態コードと JSON-RPC のエラーを返す。
+- 開いた索引ごとに、Node.js の `diagnostics_channel` の `dunlin:index-open` に `{ path }` を知らせる。購読者がいないときは何もしない。
+- 旧サーバーを写した基準（テストの `rag-http-reference.mjs`）を同じプロジェクトで並べて起動し、49通りの要求（検索、回答、MCP、接続先・送信元・合言葉・パス・大きさの誤り、CORS の事前確認）に、同じ状態コード、ヘッダー、本文で答えることを確かめる。

@@ -2736,3 +2736,8 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - 27.3節の `/v1/responses` と `/v1/search` も同じ HTTP のサーバーで受ける。接続先と送信元の確認、合言葉、要求の大きさの上限は、いまの JavaScript の実装（`project-serving.mjs`）と同じ規則にする。
 - Wiki/PARA の `serve` も同じ HTTP の部品を使うが、画面の配信とあわせて段階5で移す。それまでは JavaScript の実装が残る。
 - Node.js API の `serveMcp` と `createMcpHttpHandler` は、Rust のサーバーを起動する口に置き換える（28.5節）。
+- 3c は2回に分ける。先に stdio の MCP（MCP 種別の `serve` と、Node.js API の `serveMcp`）を移し、次に HTTP のサーバー（`/v1/search`、`/v1/responses`、`/mcp`）と提供中のビルドの切り替えを移す。
+- stdio の MCP は `rmcp` と tokio で動かす。追加した依存で、配布物は約 2.4 MB（2.5%）大きくなった。
+- MCP 種別の `serve` では、HTTP を移すまでは、`knowledge.search` と `knowledge.read` が JavaScript の検索と読み出し（提供中のビルドの切り替えと、以前のビルドからの読み出し）を呼ぶ。Node.js API の `serveMcp` で検索を渡さない場合は、4つの道具（`knowledge.search`、`knowledge.read`、`knowledge.explore`、`knowledge.wiki_get`）を Rust が索引に対して実行する。
+- 道具の入力は Rust で検査し、旧サーバーと同じ文言（zod の文言）で返す。JSON-RPC の応答のキーの順と、`structuredContent` のキーの順は SDK によって違うが、値は同じである。
+- 旧サーバーを写した基準（テストの `mcp-reference.mjs`）と同じ要求を送り、道具の一覧と入力の形、結果、入力の誤り、範囲外の読み出し、知らない道具への答えが一致することを確かめる。`@modelcontextprotocol/server` は HTTP の `/mcp` が使うので、3c の後半まで残る。

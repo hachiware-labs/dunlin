@@ -34,6 +34,8 @@ mod index_stage;
 #[cfg(any(feature = "node", test))]
 mod lighton;
 #[cfg(all(feature = "node", not(test)))]
+mod mcp;
+#[cfg(all(feature = "node", not(test)))]
 mod node;
 #[cfg(any(feature = "node", test))]
 mod ocr;

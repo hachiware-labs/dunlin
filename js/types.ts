@@ -690,6 +690,22 @@ export interface McpOptions {
 
 export interface McpHandle {
   close(): Promise<void>;
+  /** Settles when the client closes the connection. */
+  closed?: Promise<void>;
+}
+
+/** The `knowledge.search` arguments a project answers: one spelling of each option. */
+export interface McpSearchArguments {
+  query: string;
+  limit?: number;
+  sourceIds?: string[];
+  budgetChars?: number;
+}
+
+/** What a Rust MCP server asks of a project's JavaScript. */
+export interface McpHost {
+  mcpSearch(arguments_: McpSearchArguments): Promise<Record<string, unknown>>;
+  mcpRead(evidence: Evidence): Promise<ReadOutcome>;
 }
 
 export interface McpHttpHandle extends McpHandle {

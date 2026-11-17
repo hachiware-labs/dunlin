@@ -679,6 +679,22 @@ impl crate::search_stage::SearchHost for JsHost {
     }
 }
 
+impl crate::mcp::McpHost for JsHost {
+    fn search(
+        &self,
+        arguments: &crate::config_value::ConfigValue,
+    ) -> std::result::Result<String, String> {
+        self.call("mcp_search", arguments.to_js_json())
+    }
+
+    fn read(
+        &self,
+        evidence: &crate::config_value::ConfigValue,
+    ) -> std::result::Result<String, String> {
+        self.call("mcp_read", evidence.to_js_json())
+    }
+}
+
 impl crate::build_stage::TagHost for JsHost {
     fn search_config_id(
         &self,
@@ -1463,6 +1479,44 @@ impl NativeDatabase {
                 Err(failure) => with_module(failed_stage(failure.error), failure.module),
             };
             deferred.resolve(move |_| Ok(text));
+        });
+        Ok(promise)
+    }
+
+    /// Serves MCP on standard input and output (see `mcp`) until the client closes it or `cancel`
+    /// aborts. With `project`, `host` answers `mcp_search` and `mcp_read`; `searchOnly` publishes
+    /// only `knowledge.search`.
+    #[napi]
+    pub fn serve_mcp<'env>(
+        &self,
+        env: &'env Env,
+        request: String,
+        host: Function<'env, HostArgs, Unknown<'static>>,
+        cancel: &NativeCancellation,
+    ) -> Result<Object<'env>> {
+        let options: Value = serde_json::from_str(&request)
+            .map_err(|_| native_error(crate::Error::Invalid("Invalid MCP options")))?;
+        let database = self.database()?;
+        let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+        let (deferred, promise) = env.create_deferred::<(), _>()?;
+        let cancel = cancel.0.clone();
+        std::thread::spawn(move || {
+            let host: Option<Arc<dyn crate::mcp::McpHost>> = options["project"]
+                .as_bool()
+                .unwrap_or(false)
+                .then(|| Arc::new(JsHost { function }) as Arc<dyn crate::mcp::McpHost>);
+            let server = crate::mcp::McpServer::new(
+                database,
+                host,
+                options["searchOnly"].as_bool().unwrap_or(false),
+            );
+            match crate::mcp::serve_stdio(server, &cancel) {
+                Ok(()) => deferred.resolve(|_| Ok(())),
+                Err(message) => deferred.reject(Error::new(
+                    Status::GenericFailure,
+                    format!("IO_ERROR|{message}"),
+                )),
+            }
         });
         Ok(promise)
     }

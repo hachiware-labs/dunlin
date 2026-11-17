@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, McpHost, McpSearchArguments, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -42,6 +42,7 @@ interface NativeDatabase {
   read(evidence: string, cancel: NativeCancellation): Promise<ReadOutcome>;
   describeEvidence(evidence: string, cancel: NativeCancellation): Promise<(EvidenceExcerpt | null)[]>;
   searchProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  serveMcp(options: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<void>;
   wikiBuild(options: string, cancel: NativeCancellation): Promise<WikiPage>;
   wikiGet(id: string, cancel: NativeCancellation): Promise<WikiPage | null>;
   wikiAffected(sourceId: string | undefined, cancel: NativeCancellation): Promise<WikiImpact[]>;
@@ -100,7 +101,7 @@ function native(): NativeBinding {
  * The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. Kinds:
  * `parse` and `progress` for loading, `charge` for counting model requests in the transform stage.
  */
-function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<TagBuildHost> & Partial<ProjectSearchHost>): (...raw: unknown[]) => void {
+function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<TagBuildHost> & Partial<ProjectSearchHost> & Partial<McpHost>): (...raw: unknown[]) => void {
   return (...raw) => {
     const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
     if (kind === 'progress') {
@@ -112,6 +113,8 @@ function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<T
         : kind === 'config' ? host.configChanged?.() ?? false
         : kind === 'tool' ? host.indexTool!(args)
         : kind === 'search_config' ? host.searchConfigId!(JSON.parse(args) as Record<string, unknown>)
+        : kind === 'mcp_search' ? host.mcpSearch!(JSON.parse(args) as McpSearchArguments)
+        : kind === 'mcp_read' ? host.mcpRead!(JSON.parse(args) as Evidence)
         : host.parse!(JSON.parse(args) as LoadCorpusFile, bytes))
       .then((result) => native().completeHostCall(id, configJson(result), null),
         (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
@@ -715,19 +718,31 @@ export class Dunlin {
     return JSON.parse(text) as ProjectSearchOutcome;
   }
 
+  /**
+   * Serve MCP on standard input and output in Rust (spec 28.10 step 3c). Without `search`, the tools
+   * search, read, explore and read Wiki pages of this index. With `search` (and `read`), a project
+   * answers `knowledge.search` and `knowledge.read` itself. `closed` settles when the client closes
+   * standard input.
+   */
   async serveMcp({ transport, search, read, searchOnly }: McpOptions = { transport: 'stdio' }): Promise<McpHandle> {
-    this.#requireDatabase();
+    const database = this.#requireDatabase();
     if (transport !== 'stdio') {
       throw new DunlinError('INVALID_ARGUMENT', 'The supported MCP transport is stdio');
     }
-    const { serveStdioMcp } = await import('./mcp.js').catch((error: unknown) => {
-      if (error instanceof Error && 'code' in error && error.code === 'ERR_MODULE_NOT_FOUND') {
-        throw new DunlinError('MCP_UNAVAILABLE', 'Install @modelcontextprotocol/server and zod to enable MCP');
-      }
-      throw error;
-    });
-    this.#requireDatabase();
-    return serveStdioMcp(this, search, read, searchOnly);
+    const cancel = new (native().NativeCancellation)();
+    const host: McpHost = {
+      mcpSearch: ({ query, ...options }) => search!(query, options),
+      mcpRead: (evidence) => read ? read(evidence, {}) : this.read(evidence),
+    };
+    const closed = database.serveMcp(JSON.stringify({ project: Boolean(search), searchOnly: Boolean(searchOnly) }), hostCallback(host), cancel)
+      .catch((error: unknown) => { throw translateNativeError(error); });
+    return {
+      closed,
+      close: async () => {
+        cancel.abort();
+        await closed.catch(() => {});
+      },
+    };
   }
 
   async createMcpHttpHandler(search: NonNullable<McpOptions['search']>, maxRequestBodySize: number): Promise<McpHttpHandle> {

@@ -1,9 +1,8 @@
 import { createMcpHandler, McpServer } from '@modelcontextprotocol/server';
-import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 
 import type { Dunlin } from './index.js';
-import type { McpHandle, McpHttpHandle, McpOptions } from './types.js';
+import type { McpHttpHandle, McpOptions } from './types.js';
 
 const evidence = z.object({
   source: z.object({
@@ -19,10 +18,6 @@ const evidence = z.object({
 });
 
 const sourceIds = z.array(z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/u)).min(1).max(100).optional();
-
-export function serveStdioMcp(database: Dunlin, search: McpOptions['search'], read: McpOptions['read'], searchOnly = false): McpHandle {
-  return serveStdio(() => knowledgeServer(database, search, read, searchOnly));
-}
 
 export function serveHttpMcp(database: Dunlin, search: NonNullable<McpOptions['search']>, maxRequestBodySize: number): McpHttpHandle {
   return createMcpHandler(() => knowledgeServer(database, search, undefined, true), {

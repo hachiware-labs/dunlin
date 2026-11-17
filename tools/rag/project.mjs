@@ -789,7 +789,6 @@ async function serveProject(project, settings) {
       });
       await waitForHttp(server, type, settings.host);
     } else {
-      const ended = new Promise((resolve) => process.stdin.once('end', resolve));
       handle = await database.serveMcp({
         transport: 'stdio', search, searchOnly: type === 'rag',
         read: async (evidence, options) => {
@@ -818,7 +817,7 @@ async function serveProject(project, settings) {
         },
       });
       console.error('Dunlin MCP stdio (' + build.build_id + ')');
-      await ended;
+      await handle.closed;
     }
   } finally {
     try { await handle?.close(); }

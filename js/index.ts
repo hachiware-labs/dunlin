@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectRerankRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -41,6 +41,7 @@ interface NativeDatabase {
   getDocument(sourceId: string, objectId: string, cancel: NativeCancellation): Promise<ReadOutcome | null>;
   read(evidence: string, cancel: NativeCancellation): Promise<ReadOutcome>;
   describeEvidence(evidence: string, cancel: NativeCancellation): Promise<(EvidenceExcerpt | null)[]>;
+  searchProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   wikiBuild(options: string, cancel: NativeCancellation): Promise<WikiPage>;
   wikiGet(id: string, cancel: NativeCancellation): Promise<WikiPage | null>;
   wikiAffected(sourceId: string | undefined, cancel: NativeCancellation): Promise<WikiImpact[]>;
@@ -72,6 +73,7 @@ interface NativeBinding {
   runBuild(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   tagBuild(request: string, host: (...args: unknown[]) => void): Promise<string>;
   routeFiles(request: string): string;
+  searchConfigId(request: string): string;
   matchesGlob(path: string, pattern: string): boolean;
   readModuleArgs(name: string, args: string): string;
   readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
@@ -97,7 +99,7 @@ function native(): NativeBinding {
  * The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. Kinds:
  * `parse` and `progress` for loading, `charge` for counting model requests in the transform stage.
  */
-function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<TagBuildHost>): (...raw: unknown[]) => void {
+function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<TagBuildHost> & Partial<ProjectSearchHost>): (...raw: unknown[]) => void {
   return (...raw) => {
     const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
     if (kind === 'progress') {
@@ -109,6 +111,7 @@ function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<T
         : kind === 'config' ? host.configChanged?.() ?? false
         : kind === 'tool' ? host.indexTool!(args)
         : kind === 'search_config' ? host.searchConfigId!(JSON.parse(args) as Record<string, unknown>)
+        : kind === 'rerank' ? host.rerank!(JSON.parse(args) as ProjectRerankRequest)
         : host.parse!(JSON.parse(args) as LoadCorpusFile, bytes))
       .then((result) => native().completeHostCall(id, configJson(result), null),
         (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
@@ -460,6 +463,18 @@ export class Dunlin {
   }
 
   /**
+   * The search configuration ID (spec 28.10): a digest of the search plan, the request overrides,
+   * the keyword dictionary, the vector model and the reranking models. Evaluation reports compare it.
+   */
+  static searchConfigId(settings: Omit<ProjectSearchRequest, 'query' | 'directory' | 'embedders'>): string {
+    try {
+      return native().searchConfigId(configJson(settings));
+    } catch (error) {
+      throw translateNativeError(error);
+    }
+  }
+
+  /**
    * Route files to parser modules (spec 6.7): the first route whose patterns and formats claim the
    * file, with loader.auto last. Returns the route name and decoding kind, or nulls, for each file.
    */
@@ -680,6 +695,15 @@ export class Dunlin {
   async describeEvidence(evidence: readonly Evidence[], { signal }: OperationOptions = {}): Promise<(EvidenceExcerpt | null)[]> {
     const input = evidence.map(evidenceInput);
     return this.#run(signal, (database, cancel) => database.describeEvidence(JSON.stringify(input), cancel));
+  }
+
+  /**
+   * Run a project search plan (spec 28.10 step 3a): retrieval, fusion, reranking through `host`,
+   * context assembly and the returned format of spec 27.1.
+   */
+  async searchProject(request: ProjectSearchRequest, host: ProjectSearchHost = {}, { signal }: OperationOptions = {}): Promise<ProjectSearchOutcome> {
+    const text = await this.#run(signal, (database, cancel) => database.searchProject(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as ProjectSearchOutcome;
   }
 
   async serveMcp({ transport, search, read, searchOnly }: McpOptions = { transport: 'stdio' }): Promise<McpHandle> {

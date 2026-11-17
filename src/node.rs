@@ -33,8 +33,12 @@ impl NativeCancellation {
     }
 }
 
+/// An open index, with the vector metadata its searches read once.
 #[napi]
-pub struct NativeDatabase(Option<Arc<KnowledgeBase>>);
+pub struct NativeDatabase(
+    Option<Arc<KnowledgeBase>>,
+    Arc<crate::search_stage::VectorCache>,
+);
 
 #[napi]
 pub struct NativeExecutionLock(Option<File>);
@@ -104,15 +108,16 @@ pub fn open_native(
                 .and_then(|options| options.user_dictionary.as_deref())
                 .map(Path::new),
         };
-        Ok(NativeDatabase(Some(Arc::new(
-            KnowledgeBase::open_with_options(
+        Ok(NativeDatabase(
+            Some(Arc::new(KnowledgeBase::open_with_options(
                 Path::new(&path),
                 backend,
                 corpus_path.as_deref().map(Path::new),
                 keyword,
                 &cancel,
-            )?,
-        ))))
+            )?)),
+            Arc::default(),
+        ))
     })
 }
 
@@ -668,6 +673,20 @@ impl crate::index_stage::IndexHost for JsHost {
     }
 }
 
+impl crate::search_stage::SearchHost for JsHost {
+    fn index_tool(&self) -> std::result::Result<String, String> {
+        crate::index_stage::IndexHost::index_tool(self)
+    }
+
+    fn rerank(
+        &self,
+        request: &crate::config_value::ConfigValue,
+    ) -> std::result::Result<Vec<usize>, String> {
+        let answer = self.call("rerank", request.to_js_json())?;
+        serde_json::from_str(&answer).map_err(|_| "JavaScript returned an invalid order".into())
+    }
+}
+
 impl crate::build_stage::TagHost for JsHost {
     fn search_config_id(
         &self,
@@ -948,6 +967,14 @@ pub fn scan_source(request: String, cancel: &NativeCancellation) -> AsyncTask<Jo
             Err(message) => Ok(serde_json::json!({ "error": message }).to_string()),
         }
     })
+}
+
+/// The search configuration ID of a plan, its request overrides and models (see `search_stage`).
+#[napi]
+pub fn search_config_id(request: String) -> Result<String> {
+    let settings: crate::search_stage::SearchSettings = serde_json::from_str(&request)
+        .map_err(|_| native_error(crate::Error::Invalid("Invalid search settings")))?;
+    Ok(crate::search_stage::search_config_id(&settings, true))
 }
 
 /// Routes files to parser modules. Returns `[{ route, kind }]` as JSON, in input order.
@@ -1353,6 +1380,64 @@ impl NativeDatabase {
         let database = self.database()?;
         let cancel = cancel.0.clone();
         Ok(task(move || json(database.wiki_regenerate(&id, &cancel)?)))
+    }
+
+    /// Runs a project search plan (see `search_stage`). `host(id, kind, args, bytes)` answers
+    /// `charge`, `tool` and `rerank`. Resolves to `{ status: "done", output, context, contextStop }`
+    /// or `{ status: "failed", error: { code?, message, exitCode?, module? } }`.
+    #[napi]
+    pub fn search_project<'env>(
+        &self,
+        env: &'env Env,
+        request: String,
+        host: Function<'env, HostArgs, Unknown<'static>>,
+        cancel: &NativeCancellation,
+    ) -> Result<Object<'env>> {
+        use crate::config_value::ConfigValue;
+        let database = self.database()?;
+        let vectors = self.1.clone();
+        let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+        let (deferred, promise) = env.create_deferred::<String, _>()?;
+        let cancel = cancel.0.clone();
+        std::thread::spawn(move || {
+            let host = JsHost { function };
+            let outcome = serde_json::from_str::<crate::search_stage::SearchRequest>(&request)
+                .map_err(|error| crate::search_stage::SearchFailure {
+                    error: crate::embed::EmbedError::plain(format!(
+                        "Invalid search request: {error}"
+                    )),
+                    module: None,
+                })
+                .and_then(|request| {
+                    crate::search_stage::run(&database, &vectors, &request, &host, &cancel)
+                });
+            let text = match outcome {
+                Ok(outcome) => format!(
+                    "{{\"status\":\"done\",\"output\":{},\"context\":{},\"contextStop\":\"{}\"}}",
+                    outcome.output.to_js_json(),
+                    ConfigValue::Array(outcome.context).to_js_json(),
+                    outcome.context_stop
+                ),
+                Err(failure) if failure.error.aborted => {
+                    deferred.reject(native_error(crate::Error::Aborted));
+                    return;
+                }
+                Err(failure) => {
+                    let mut text = failed_stage(failure.error);
+                    if let Some(module) = failure.module {
+                        // `{"status":"failed","error":{...}}`: add the module inside the error.
+                        text.truncate(text.len() - 2);
+                        text.push_str(&format!(
+                            ",\"module\":{}}}}}",
+                            ConfigValue::String(module).to_js_json()
+                        ));
+                    }
+                    text
+                }
+            };
+            deferred.resolve(move |_| Ok(text));
+        });
+        Ok(promise)
     }
 
     #[napi]

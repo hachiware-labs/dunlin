@@ -8,16 +8,16 @@ use crate::{Cancellation, Error, Result};
 
 #[derive(Deserialize)]
 pub(crate) struct Search {
-    needle: Vec<f64>,
-    positions: Option<Vec<usize>>,
-    rows: usize,
-    limit: usize,
+    pub needle: Vec<f64>,
+    pub positions: Option<Vec<usize>>,
+    pub rows: usize,
+    pub limit: usize,
 }
 
 #[derive(Serialize)]
 pub(crate) struct Hit {
-    i: usize,
-    score: f64,
+    pub i: usize,
+    pub score: f64,
 }
 
 const LANES: usize = 8;

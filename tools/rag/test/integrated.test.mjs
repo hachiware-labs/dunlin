@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -12,8 +12,6 @@ import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
 
 import { Dunlin } from 'dunlin';
-import { revision } from '../authoring/files.mjs';
-import { vectorBackend, vectorSearch } from '../project-vectors.mjs';
 
 const runNode = promisify(execFile);
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
@@ -145,51 +143,18 @@ test('builds exact vector and hybrid search using the configured chunk ranges', 
   assert.ok(!(await json('modules', 'list')).data.some(({ name }) => name === 'hannoy.index'));
 });
 
-test('reuses vector metadata per open index and ranks all rows when positions are omitted', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-vector-metadata-'));
+test('ranks all rows when positions are omitted', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'dunlin-vector-rank-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const embedder = { identity: ['test', 'local'], embed: async () => [[1, 0]] };
-  const identity = revision(JSON.stringify(embedder.identity));
-  const build = { vector: { identity } };
-  const backend = vectorBackend('exact');
-  const database = {};
-  const search = (directory, index, sourceIds) => vectorSearch(directory, build, embedder, 'query', {
-    database: index, backend, max: 3, sourceIds,
-  });
-  async function writeIndex(directory, label) {
-    const entries = ['docs', 'other', 'docs'].map((sourceId, i) => ({
-      title: `${label}-${i}`, evidence: { source: { sourceId } },
-    }));
-    const bytes = Buffer.alloc(entries.length * 8);
-    for (const i of [0, 2]) bytes.writeFloatLE(1, i * 8);
-    await writeFile(join(directory, 'vectors.f32'), bytes);
-    await writeFile(join(directory, 'vectors.json'), JSON.stringify({ identity, dimensions: 2, entries }));
-  }
-
-  await writeIndex(root, 'original');
+  const bytes = Buffer.alloc(3 * 8);
+  for (const i of [0, 2]) bytes.writeFloatLE(1, i * 8);
   const file = join(root, 'vectors.f32');
+  await writeFile(file, bytes);
   const options = { needle: [1, 0], rows: 3, limit: 3 };
   const explicit = await Dunlin.rankVectors(file, { ...options, positions: [2, 1, 0] });
   assert.deepEqual(await Dunlin.rankVectors(file, options), explicit);
   assert.deepEqual(explicit.map(({ i }) => i), [0, 2, 1]);
   assert.deepEqual(await Dunlin.rankVectors(file, { ...options, positions: [] }), []);
-
-  const [all, filtered] = await Promise.all([search(root, database), search(root, database, ['docs'])]);
-  assert.equal(all.totalHits, 3);
-  assert.equal(filtered.totalHits, 2);
-  assert.deepEqual(filtered.hits, all.hits.slice(0, 2));
-  await rm(join(root, 'vectors.json'));
-  assert.deepEqual(await search(root, database), all);
-  assert.deepEqual(await search(root, database, ['docs']), filtered);
-  assert.deepEqual((await search(root, database, ['missing'])).hits, []);
-
-  const next = join(root, 'next');
-  const nextDatabase = {};
-  await mkdir(next);
-  await assert.rejects(search(next, nextDatabase), { code: 'ENOENT' });
-  await writeIndex(next, 'updated');
-  assert.equal((await search(next, nextDatabase)).hits[0].title, 'updated-0');
-  assert.equal((await search(root, database)).hits[0].title, 'original-0');
 });
 
 test('enforces trial counters and time without blocking short operations', { timeout: 35_000 }, async (t) => {

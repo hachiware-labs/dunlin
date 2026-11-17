@@ -1389,7 +1389,7 @@ fn hannoy_build(
     if let Some(ef_construction) = build.ef_construction {
         request.push(("ef_construction", ef_construction.clone()));
     }
-    let response = call_tool(&tool, &object(request).to_js_json(), build.cancel);
+    let response = call_tool(&tool, &object(request).to_js_json(), "build", build.cancel);
     let _ = std::fs::remove_file(&file);
     let response = response?;
     let count = |name: &str| response.get(name).and_then(serde_json::Value::as_f64);
@@ -1442,9 +1442,11 @@ fn compatible_graph(
 }
 
 /// Runs the index tool with a JSON request on standard input and reads its JSON response.
-fn call_tool(
+/// `operation` names the request in the failure message.
+pub(crate) fn call_tool(
     path: &str,
     request: &str,
+    operation: &str,
     cancel: &Cancellation,
 ) -> Result<serde_json::Value, StageError> {
     let failed = |code: &'static str, message: &str| StageError::coded(code, message, 1);
@@ -1533,7 +1535,7 @@ fn call_tool(
     if !status.is_some_and(|status| status.success()) {
         return Err(failed(
             "TOOL_EXECUTION",
-            "The index tool failed during build.",
+            &format!("The index tool failed during {operation}."),
         ));
     }
     serde_json::from_slice(&output)

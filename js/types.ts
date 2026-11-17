@@ -302,6 +302,42 @@ export interface TagBuildHost {
   searchConfigId(build: Record<string, unknown>): string | Promise<string>;
 }
 
+/** A project search (spec 28.10 step 3a): the search plan of a build and the request's overrides. */
+export interface ProjectSearchRequest {
+  /** `moduleSettings(plan)` of the search stage. */
+  plan: unknown[];
+  query: string;
+  limit?: number;
+  budgetChars?: number;
+  sourceIds?: readonly string[];
+  /** The build manifest. */
+  build: Record<string, unknown>;
+  /** The build's index directory. */
+  directory: string;
+  /** Embedding models by name: resolved settings, or `{ error: { code, message, exitCode } }`. */
+  embedders?: Record<string, EmbedderSettings | { error: { code?: string; message: string; exitCode?: number } }>;
+  /** The resolved model of each `rerank.model`, in plan order, for the search configuration ID. */
+  rerankModels?: unknown[];
+}
+
+/** The candidates `rerank.model` orders: the first `candidates` hits. */
+export interface ProjectRerankRequest {
+  model: string;
+  query: string;
+  hits: { title: string; evidence: Evidence }[];
+}
+
+export interface ProjectSearchHost extends TransformStageHost {
+  /** The path of the installed hannoy tool, after its integrity check. */
+  indexTool?(name: string): string | Promise<string>;
+  /** Orders the hits with the reranking model and returns their 1-based IDs in the new order. */
+  rerank?(request: ProjectRerankRequest): number[] | Promise<number[]>;
+}
+
+export type ProjectSearchOutcome =
+  | { status: 'done'; output: Record<string, unknown>; context: Evidence[]; contextStop: string }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; module?: string } };
+
 export type TagBuildOutcome =
   | { status: 'done'; output: { tag: string; build_id: string; search_config_id: string } }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };

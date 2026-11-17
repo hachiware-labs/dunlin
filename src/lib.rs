@@ -38,6 +38,8 @@ mod ocr;
 #[cfg(any(feature = "node", test))]
 mod pdf_text;
 #[cfg(any(feature = "node", test))]
+mod search_stage;
+#[cfg(any(feature = "node", test))]
 mod source_files;
 #[cfg(any(feature = "node", test))]
 mod source_load;
@@ -49,7 +51,7 @@ mod source_stage;
 mod stage_store;
 #[cfg(any(feature = "node", test))]
 mod transform_stage;
-#[cfg(all(feature = "node", not(test)))]
+#[cfg(any(feature = "node", test))]
 mod vector;
 
 use std::path::{Path, PathBuf};

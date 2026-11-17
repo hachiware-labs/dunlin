@@ -2688,3 +2688,45 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - ソースのフォルダの走査と並べ替えは Rust で行う。並べ替えは `objectId` の符号位置の順とし、OS や言語の設定に左右されない。JavaScript の `localeCompare` の順とは、大文字と小文字、記号、数字の並びが違う。並びは段階の識別子に入るが、識別子が一度変わる 2e で合わせて変える。
 - 3,000文書（各40行）の構築で 2d と比べた。`state.sqlite` と `corpus.sqlite` の合計は 67 MB から 31 MB に減った。変更のない再構築は 0.90 秒から 0.80 秒に、初回の構築はほぼ同じ（3.3 秒と 3.4 秒）だった。1文書を変えた再構築は 1.20 秒から 1.01 秒に縮んだ。
 - 旧実装を基準にした段階ごとの差分テスト（`source`、`transform`、`index`、コマンドの進行）は、記録の形が変わったので外した。代わりに、2d の実装で作ったプロジェクトの記録を移し、パーサを呼ばずに構築できることと、検索結果が変わらないことを確かめる。
+
+### 28.10 段階3の進め方
+
+段階3では、検索の側（`search`、`ask`、`serve`）のモジュールの実行と結果の組み立てを Rust のエンジンに移す。範囲が大きいので、次の小段階に分ける。各小段階の終わりで、旧実装と同じビルドと質問に対して、検索結果、返却形式、`search_config_id`、モデルへの要求の本文が変わらないことを差分テストで確かめる。
+
+| 小段階 | 内容 |
+| --- | --- |
+| 3a | 検索の実行を Rust に移す。`query.normalize`、`retrieval.keyword`、`retrieval.vector`、`hannoy.search`、`fusion.rrf`、`context.assemble`、`search_config_id` の計算、27.1節の返却形式の組み立てが含まれる。`search` コマンド、`serve` の検索、評価の検索は、Rust の口を1回呼ぶ。`rerank.model` は JavaScript の実装を呼び出す |
+| 3b | 生成モデルの呼び出しを Rust に移す。OpenAI の `responses`、Ollama の `api/chat`、Strata の `chat/completions` を Rust から HTTP で呼ぶ。`rerank.model` と `answer.generate`、27.2節の返却形式を Rust で組み立てる。`ask` コマンドと `/v1/responses` の回答は Rust の口を呼ぶ |
+| 3c | HTTP と MCP のサーバーを Rust に移す。27.3節の口、接続先と送信元の確認、合言葉、要求の大きさの上限、提供中のビルドの切り替え（12章）、MCP の道具（`knowledge.search`、`knowledge.read`）を Rust で動かす。MCP は `rmcp` を使い、`@modelcontextprotocol/server` を外す。`serve` は Rust の口を1回呼ぶ |
+
+#### 3a から 3c の間に変えないもの
+
+- 検索結果の順位、スコア、範囲、文脈の組み立て（区切り、見出し、出典の行、切り詰め、止まった理由）、27.1節と27.2節の返却形式、エラーの番号と終了コード。
+- `search_config_id` の計算方法。評価レポートの比較の条件に入っているため、変えると以前のレポートと比べられなくなる。
+- モデルへの要求の本文（指示、入力の JSON、出力の形を決める JSON Schema、温度などの引数）。同じ要求を送り、モデルの応答の扱いも同じにする。
+- MCP の道具の名前、入力の形、返却の内容（27章）と、HTTP の口の状態コードとエラーの本文。
+
+#### 検索の実行（3a）
+
+- Rust の口は、ビルドの記録、検索のモジュールの設定、問い合わせ、上書きの指定（`limit`、`budget_chars`、`source_ids`）を受け取り、27.1節の返却形式を返す。`search` コマンド、`serve`、評価（`eval`）は同じ口を使う。評価そのものは段階4で移すが、検索は 3a から Rust で動く。
+- 埋め込みモデルの接続先、並べ替えのモデルの設定は、段階2と同じく JavaScript が `models` から解決して渡す。`search_config_id` の計算に入る値も同じものを使う。
+- `hannoy.search` は、索引の道具（`dunlin add hannoy`）を Rust から別プロセスとして呼ぶ。いまと同じく検索ごとに1回起動し、道具の検査（版と完全性）も同じ規則で行う。
+- `rerank.model` は、2a の JavaScript のパーサと同じく、番号を付けた要求で JavaScript に渡す。候補の本文は Rust が読んで渡す。
+- 試行の上限（モデルへの要求の数と送信量）は、段階2と同じく送る前に JavaScript に問い合わせて数える。
+- 検索は開いた索引の口（Node.js API の `searchProject`）で行う。`vectors.json` は開いた索引ごとに一度だけ読み、索引を閉じると捨てる。`search_config_id` も Rust の計算（`Dunlin.searchConfigId`）を `status`、`tag`、`use` が使う。
+- 評価は、返却形式の `results` の根拠と、文脈の各抜粋の根拠、文脈が止まった理由（`budget` などの内部の値）を受け取って、これまでと同じ記録を作る。
+- `rerank.model` のモデルの設定は、`search_config_id` に入るため検索を始める前に解決する。設定が正しくない場合のエラーは、これまでと同じ番号と文言だが、モジュール名（`rerank.model`）が付かない。
+- 旧実装を写した基準（テストの `search-reference.mjs`）と、同じビルドと問い合わせで比べる。キーワード、`exact` のベクトル、hannoy、統合、並べ替え、上書きの指定、エラーについて、返却の JSON の文字列（値とキーの順）が一致することを確かめる。
+
+#### 生成モデルの呼び出し（3b）
+
+- 要求の本文と JSON Schema は、いまの JavaScript の実装（zod から作った JSON Schema を含む）と同じ文字列にする。差分テストでは、テスト用のモデルのサーバーが受け取った本文を比べる。
+- 接続、証明書、リダイレクト、プロキシ、打ち切りの時間は、2b の埋め込みモデルの呼び出しと同じ扱いにする。
+- 評価データの生成（`eval-data generate`）と Wiki/PARA の執筆も生成モデルを使うが、それぞれ段階4と段階5で移す。それまでは JavaScript の実装が残る。
+
+#### サーバー（3c）
+
+- MCP は公式の Rust SDK（`rmcp`）を使い、stdio と HTTP の2つの接続方式を出す。HTTP は `rmcp` が使う非同期の実行環境（tokio）と HTTP のライブラリで受ける。どのライブラリを使うかは、配布物の大きさと構築の時間を測ってから決める。
+- 27.3節の `/v1/responses` と `/v1/search` も同じ HTTP のサーバーで受ける。接続先と送信元の確認、合言葉、要求の大きさの上限は、いまの JavaScript の実装（`project-serving.mjs`）と同じ規則にする。
+- Wiki/PARA の `serve` も同じ HTTP の部品を使うが、画面の配信とあわせて段階5で移す。それまでは JavaScript の実装が残る。
+- Node.js API の `serveMcp` と `createMcpHttpHandler` は、Rust のサーバーを起動する口に置き換える（28.5節）。

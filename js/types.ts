@@ -318,21 +318,37 @@ export interface ProjectSearchRequest {
   embedders?: Record<string, EmbedderSettings | { error: { code?: string; message: string; exitCode?: number } }>;
   /** The resolved model of each `rerank.model`, in plan order, for the search configuration ID. */
   rerankModels?: unknown[];
+  /** The chat models of `rerank.model` by name: resolved settings, or `{ error }`. */
+  rerankers?: Record<string, GeneratorSettings | { error: { code?: string; message: string; exitCode?: number } }>;
 }
 
-/** The candidates `rerank.model` orders: the first `candidates` hits. */
-export interface ProjectRerankRequest {
+/** A generation model resolved from `models`: the full endpoint URL and the key to send. */
+export interface GeneratorSettings {
+  provider: 'openai' | 'ollama' | 'strata';
   model: string;
-  query: string;
-  hits: { title: string; evidence: Evidence }[];
+  url: string;
+  apiKey?: string;
+  maxInputBytes?: number;
 }
 
 export interface ProjectSearchHost extends TransformStageHost {
   /** The path of the installed hannoy tool, after its integrity check. */
   indexTool?(name: string): string | Promise<string>;
-  /** Orders the hits with the reranking model and returns their 1-based IDs in the new order. */
-  rerank?(request: ProjectRerankRequest): number[] | Promise<number[]>;
 }
+
+/** An answer from a search result (spec 28.10 step 3b): the ask plan, the search output and the model. */
+export interface AnswerRequest {
+  /** `moduleSettings(plan)` of the ask stage. */
+  plan: unknown[];
+  /** The search result in the format of spec 27.1. */
+  search: Record<string, unknown>;
+  query: string;
+  model: GeneratorSettings;
+}
+
+export type AnswerOutcome =
+  | { status: 'done'; output: Record<string, unknown> }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; module?: string } };
 
 export type ProjectSearchOutcome =
   | { status: 'done'; output: Record<string, unknown>; context: Evidence[]; contextStop: string }

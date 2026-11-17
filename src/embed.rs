@@ -114,18 +114,77 @@ pub struct Embedder {
     agent: ureq::Agent,
 }
 
+/// The HTTP client of model calls: fetch's defaults in the JavaScript implementation.
+pub(crate) fn model_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(120)))
+        // fetch(..., { redirect: 'error' })
+        .max_redirects(0)
+        // Node.js fetch ignores HTTP_PROXY, so a local Ollama stays direct.
+        .proxy(None)
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
+/// A model endpoint: its URL, key, request size limit and the name its errors use.
+#[derive(Clone)]
+pub(crate) struct Endpoint {
+    pub url: String,
+    pub api_key: Option<String>,
+    pub max_input_bytes: Option<f64>,
+    /// `Ollama embeddings`, `openai` and so on, as the JavaScript messages named it.
+    pub label: String,
+}
+
+/// `post`: checks the size limit, counts the request against the trial limits, sends the JSON and
+/// reads the JSON response. Cancellation stops waiting at once.
+pub(crate) fn post_json(
+    agent: &ureq::Agent,
+    endpoint: &Endpoint,
+    payload: &str,
+    charge: &dyn Charge,
+    cancel: &Cancellation,
+) -> Result<Value, EmbedError> {
+    if endpoint
+        .max_input_bytes
+        .is_some_and(|limit| payload.len() as f64 > limit)
+    {
+        return Err(EmbedError::coded(
+            "MODEL_INPUT_LIMIT",
+            "The model request exceeds max_input_bytes.",
+            2,
+        ));
+    }
+    charge.charge(payload.len()).map_err(EmbedError::plain)?;
+    // The request runs on its own thread so that cancellation stops waiting at once, as an
+    // aborted fetch did. An abandoned request ends by itself within the timeout.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let agent = agent.clone();
+    let endpoint = endpoint.clone();
+    let payload = payload.to_owned();
+    std::thread::spawn(move || {
+        let _ = sender.send(send(&agent, &endpoint, &payload));
+    });
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(50)) {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                cancel.check().map_err(|_| EmbedError::aborted())?
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(EmbedError::plain("The model request stopped"));
+            }
+        }
+    }
+}
+
 impl Embedder {
     pub fn new(settings: EmbedderSettings) -> Self {
-        let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(120)))
-            // fetch(..., { redirect: 'error' })
-            .max_redirects(0)
-            // Node.js fetch ignores HTTP_PROXY, so a local Ollama stays direct.
-            .proxy(None)
-            .http_status_as_error(false)
-            .build()
-            .into();
-        Self { settings, agent }
+        Self {
+            settings,
+            agent: model_agent(),
+        }
     }
 
     /// Embeds `input` and returns one unit-length vector per text, in order.
@@ -176,60 +235,32 @@ impl Embedder {
         cancel: &Cancellation,
     ) -> Result<Value, EmbedError> {
         let settings = &self.settings;
-        if settings
-            .max_input_bytes
-            .is_some_and(|limit| payload.len() as f64 > limit)
-        {
-            return Err(EmbedError::coded(
-                "MODEL_INPUT_LIMIT",
-                "The model request exceeds max_input_bytes.",
-                2,
-            ));
-        }
-        charge.charge(payload.len()).map_err(EmbedError::plain)?;
-        // The request runs on its own thread so that cancellation stops waiting at once, as an
-        // aborted fetch did. An abandoned request ends by itself within the timeout.
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let agent = self.agent.clone();
-        let settings = settings.clone();
-        let payload = payload.to_owned();
-        std::thread::spawn(move || {
-            let _ = sender.send(send(&agent, &settings, &payload));
-        });
-        loop {
-            match receiver.recv_timeout(Duration::from_millis(50)) {
-                Ok(result) => return result,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    cancel.check().map_err(|_| EmbedError::aborted())?
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(EmbedError::plain("The embedding request stopped"));
-                }
-            }
-        }
+        let endpoint = Endpoint {
+            url: settings.url.clone(),
+            api_key: settings.api_key.clone(),
+            max_input_bytes: settings.max_input_bytes,
+            label: settings.label().into(),
+        };
+        post_json(&self.agent, &endpoint, payload, charge, cancel)
     }
 }
 
-fn send(
-    agent: &ureq::Agent,
-    settings: &EmbedderSettings,
-    payload: &str,
-) -> Result<Value, EmbedError> {
+fn send(agent: &ureq::Agent, endpoint: &Endpoint, payload: &str) -> Result<Value, EmbedError> {
     let mut request = agent
-        .post(&settings.url)
+        .post(&endpoint.url)
         .header("content-type", "application/json");
-    if let Some(key) = settings.api_key.as_deref().filter(|key| !key.is_empty()) {
+    if let Some(key) = endpoint.api_key.as_deref().filter(|key| !key.is_empty()) {
         request = request.header("authorization", format!("Bearer {key}"));
     }
     let failed = |error: ureq::Error| {
-        EmbedError::plain(format!("{} request failed: {error}", settings.label()))
+        EmbedError::plain(format!("{} request failed: {error}", endpoint.label))
     };
     let mut response = request.send(payload).map_err(failed)?;
     let status = response.status().as_u16();
     if !(200..300).contains(&status) {
         return Err(EmbedError::plain(format!(
             "{} generation failed (HTTP {status})",
-            settings.label()
+            endpoint.label
         )));
     }
     let text = response
@@ -239,7 +270,7 @@ fn send(
         .read_to_string()
         .map_err(failed)?;
     serde_json::from_str(&text)
-        .map_err(|_| EmbedError::plain(format!("{} returned invalid JSON", settings.label())))
+        .map_err(|_| EmbedError::plain(format!("{} returned invalid JSON", endpoint.label)))
 }
 
 /// OpenAI returns `data: [{ index, embedding }]`, placed by index.

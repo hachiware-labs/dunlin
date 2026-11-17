@@ -972,6 +972,7 @@ dependencies = [
  "unicode-segmentation",
  "ureq",
  "url",
+ "uuid",
  "walkdir",
  "yaml-rust2",
 ]

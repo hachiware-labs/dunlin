@@ -677,14 +677,6 @@ impl crate::search_stage::SearchHost for JsHost {
     fn index_tool(&self) -> std::result::Result<String, String> {
         crate::index_stage::IndexHost::index_tool(self)
     }
-
-    fn rerank(
-        &self,
-        request: &crate::config_value::ConfigValue,
-    ) -> std::result::Result<Vec<usize>, String> {
-        let answer = self.call("rerank", request.to_js_json())?;
-        serde_json::from_str(&answer).map_err(|_| "JavaScript returned an invalid order".into())
-    }
 }
 
 impl crate::build_stage::TagHost for JsHost {
@@ -754,6 +746,52 @@ pub fn run_build<'env>(
         deferred.resolve(move |_| Ok(text));
     });
     Ok(promise)
+}
+
+/// Answers a question from a search result (see `generate::answer`). `host` answers `charge`.
+/// Resolves to `{ status: "done", output }` or `{ status: "failed", error: { ..., module? } }`.
+#[napi]
+pub fn answer_question<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = JsHost { function };
+        let outcome = serde_json::from_str::<crate::generate::AnswerRequest>(&request)
+            .map_err(|error| crate::generate::AnswerFailure {
+                error: crate::embed::EmbedError::plain(format!("Invalid answer request: {error}")),
+                module: None,
+            })
+            .and_then(|request| crate::generate::answer(&request, &host, &cancel));
+        let text = match outcome {
+            Ok(output) => format!("{{\"status\":\"done\",\"output\":{}}}", output.to_js_json()),
+            Err(failure) if failure.error.aborted => {
+                deferred.reject(native_error(crate::Error::Aborted));
+                return;
+            }
+            Err(failure) => with_module(failed_stage(failure.error), failure.module),
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
+}
+
+/// Adds `module` inside the error of a failed status.
+fn with_module(mut text: String, module: Option<String>) -> String {
+    if let Some(module) = module {
+        // `{"status":"failed","error":{...}}`
+        text.truncate(text.len() - 2);
+        text.push_str(&format!(
+            ",\"module\":{}}}}}",
+            crate::config_value::ConfigValue::String(module).to_js_json()
+        ));
+    }
+    text
 }
 
 /// Names a build with a tag (see `build_stage::tag`). `host` answers `search_config` with the
@@ -1383,7 +1421,7 @@ impl NativeDatabase {
     }
 
     /// Runs a project search plan (see `search_stage`). `host(id, kind, args, bytes)` answers
-    /// `charge`, `tool` and `rerank`. Resolves to `{ status: "done", output, context, contextStop }`
+    /// `charge` and `tool`. Resolves to `{ status: "done", output, context, contextStop }`
     /// or `{ status: "failed", error: { code?, message, exitCode?, module? } }`.
     #[napi]
     pub fn search_project<'env>(
@@ -1422,18 +1460,7 @@ impl NativeDatabase {
                     deferred.reject(native_error(crate::Error::Aborted));
                     return;
                 }
-                Err(failure) => {
-                    let mut text = failed_stage(failure.error);
-                    if let Some(module) = failure.module {
-                        // `{"status":"failed","error":{...}}`: add the module inside the error.
-                        text.truncate(text.len() - 2);
-                        text.push_str(&format!(
-                            ",\"module\":{}}}}}",
-                            ConfigValue::String(module).to_js_json()
-                        ));
-                    }
-                    text
-                }
+                Err(failure) => with_module(failed_stage(failure.error), failure.module),
             };
             deferred.resolve(move |_| Ok(text));
         });

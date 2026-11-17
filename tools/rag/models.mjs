@@ -4,6 +4,21 @@ const openaiBase = 'https://api.openai.com/v1';
 const ollamaBase = 'http://127.0.0.1:11434';
 const strataBase = 'http://127.0.0.1:8080/v1';
 
+/**
+ * Resolves a generation model to `{ provider, model, url, apiKey, maxInputBytes }`: the full endpoint
+ * URL and the key to send. Rust makes the requests for rerank.model and answer.generate (spec 28.10 step 3b).
+ */
+export function generatorSettings(provider, model, baseUrl, apiKey, { maxInputBytes } = {}) {
+  const resolved = (url, key) => ({ provider, model, url: url.href, ...(key && { apiKey: key }),
+    ...(maxInputBytes !== undefined && { maxInputBytes }) });
+  switch (provider) {
+    case 'openai': return resolved(endpoint(baseUrl ?? process.env.OPENAI_BASE_URL ?? openaiBase, 'responses'), apiKey ?? openaiKey());
+    case 'ollama': return resolved(endpoint(baseUrl ?? process.env.OLLAMA_BASE_URL ?? ollamaBase, 'api/chat'), apiKey);
+    case 'strata': return resolved(endpoint(baseUrl ?? process.env.STRATA_BASE_URL ?? strataBase, 'chat/completions'), apiKey ?? process.env.STRATA_API_KEY);
+    default: throw new Error('Expected --provider openai, ollama, or strata');
+  }
+}
+
 export function createGenerator(provider, model, baseUrl, apiKey, { maxInputBytes, includeUsage = false } = {}) {
   switch (provider) {
     case 'openai': {

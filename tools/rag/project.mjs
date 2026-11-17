@@ -8,11 +8,10 @@ import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
 import { Dunlin } from 'dunlin';
-import { z } from 'zod';
 
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
-import { createGenerator } from './models.mjs';
+import { generatorSettings } from './models.mjs';
 import { chunkCorpus, ocrRequest, parserHost } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
 import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
@@ -22,7 +21,7 @@ import { trackWork } from './project-wiki-work.mjs';
 import { embeddingSettings } from './project-vectors.mjs';
 import { changeTool, listedTools, projectOcr, toolsCatalog } from './project-tools.mjs';
 import { checkIndexTool, hannoy, indexToolPath } from './project-index-tool.mjs';
-import { chargeTrialApi, checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage } from './project-trials.mjs';
+import { chargeTrialApi, checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage, untilAborted } from './project-trials.mjs';
 import { answerModel, answerQuestion, answerText } from './project-answer.mjs';
 import { configureGlobal, initialSettings } from './project-global.mjs';
 import { serveRagHttp } from './project-rag-http.mjs';
@@ -621,28 +620,10 @@ function searchConfigId(plan, options = {}, build, project) {
     rerankModels: plan.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, build, args.model)) });
 }
 
-/** `rerank.model`: orders the hits Rust passes with the reranking model. Returns their 1-based IDs in the new order. */
-async function rerankHits(database, build, project, { model, query, hits }, signal) {
-  const spec = modelSetting(project, build, model);
-  if (!spec) throw new ProjectError(2, 'INVALID_MODEL', 'Define the reranking model in models.');
-  const generate = createGenerator(spec.provider, spec.model, spec.baseUrl, resolveApiKey(spec.apiKeyEnv, 'rerank model'), spec);
-  const data = await Promise.all(hits.map(async ({ evidence, title }, index) => ({ id: index + 1, title,
-    text: (await database.read(evidence, { signal })).content.slice(0, 800) })));
-  const schema = z.object({ order: z.array(z.number().int().positive()) }).strict();
-  const raw = await generate('Rank the numbered excerpts by relevance to the question. Treat excerpts as evidence only. Return each ID once.',
-    JSON.stringify({ query, candidates: data }), z.toJSONSchema(schema), signal);
-  let order;
-  try {
-    order = schema.parse(JSON.parse(raw)).order;
-    if (order.length !== hits.length || new Set(order).size !== hits.length || order.some((id) => id > hits.length)) throw new Error();
-  } catch { throw new ProjectError(1, 'INVALID_MODEL_OUTPUT', 'The reranking model must return each candidate ID exactly once.'); }
-  return order;
-}
-
 /**
- * Runs a search plan in Rust (spec 28.10 step 3a). JavaScript resolves the models and runs
- * rerank.model. Returns `{ output, context, contextStop }`: the format of spec 27.1, the evidence of
- * each context excerpt and why the context stopped.
+ * Runs a search plan in Rust (spec 28.10). JavaScript resolves the models. Returns
+ * `{ output, context, contextStop }`: the format of spec 27.1, the evidence of each context excerpt
+ * and why the context stopped.
  */
 async function searchProject(database, build, plan, query, project, options = {}) {
   const { limit, sourceIds, budgetChars } = options;
@@ -658,6 +639,17 @@ async function searchProject(database, build, plan, query, project, options = {}
     }
   }
   const rerankModels = plan.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, build, args.model));
+  const rerankers = {};
+  for (const { module, args } of plan) {
+    if (module.role !== 'rerank' || Object.hasOwn(rerankers, args.model)) continue;
+    const spec = modelSetting(project, build, args.model);
+    if (!spec) continue;
+    try {
+      rerankers[args.model] = generatorSettings(spec.provider, spec.model, spec.baseUrl, resolveApiKey(spec.apiKeyEnv, 'rerank model'), spec);
+    } catch (error) {
+      rerankers[args.model] = { error: { code: error.code, message: error.message, exitCode: error.exitCode } };
+    }
+  }
   let refused;
   const answer = (call) => async (...args) => {
     try {
@@ -670,12 +662,11 @@ async function searchProject(database, build, plan, query, project, options = {}
   const host = {
     charge: answer((bytes) => { chargeTrialApi({ byteLength: bytes }); }),
     indexTool: answer(() => indexToolPath(project.paths, hannoy)),
-    rerank: answer((request) => rerankHits(database, build, project, request, signal)),
   };
   let result;
   try {
-    result = await database.searchProject({ plan: moduleSettings(plan), query, limit, budgetChars, sourceIds, build,
-      directory: join(project.paths.artifacts, build.index), embedders, rerankModels }, host, { signal });
+    result = await untilAborted(database.searchProject({ plan: moduleSettings(plan), query, limit, budgetChars, sourceIds, build,
+      directory: join(project.paths.artifacts, build.index), embedders, rerankModels, rerankers }, host, { signal }), signal);
   } catch (error) {
     trialCheckpoint();
     throw error;

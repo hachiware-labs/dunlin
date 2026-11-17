@@ -49,14 +49,15 @@ pub struct SearchRequest {
     /// Embedding models by name: resolved settings, or `{ error: { code, message, exitCode } }`.
     #[serde(default)]
     pub embedders: ConfigValue,
+    /// The chat models of `rerank.model` by name, in the same form.
+    #[serde(default)]
+    pub rerankers: ConfigValue,
 }
 
-/// What search asks of JavaScript: trial charges, the index tool and reranking.
+/// What search asks of JavaScript: trial charges and the index tool.
 pub trait SearchHost: Charge {
     /// The verified path of the hannoy index tool.
     fn index_tool(&self) -> Result<String, String>;
-    /// Reranks `{ model, query, hits: [{ title, evidence }] }` and returns the 1-based order.
-    fn rerank(&self, request: &ConfigValue) -> Result<Vec<usize>, String>;
 }
 
 /// A failure, with the module it happened in.
@@ -381,7 +382,7 @@ pub fn run(
                     let found = current.as_mut().ok_or_else(|| {
                         StageError::plain("rerank.model needs candidates from a retrieval module.")
                     })?;
-                    rerank(found, &query, &args, host, cancel)?;
+                    rerank(database, found, &query, &args, request, host, cancel)?;
                 }
                 "context.assemble" => {
                     let found = current.as_ref().ok_or_else(|| {
@@ -497,13 +498,26 @@ struct VectorSearch<'a> {
 
 /// The embedding model of a vector module, as JavaScript resolved it.
 fn embedder(request: &SearchRequest, name: &str) -> Result<EmbedderSettings, StageError> {
-    let entry = field(&request.embedders, name).ok_or_else(|| {
+    resolved(
+        &request.embedders,
+        name,
         StageError::coded(
             "VECTOR_MODEL_REQUIRED",
             "Define an embedding model under models.",
             2,
-        )
-    })?;
+        ),
+    )
+}
+
+/// A model JavaScript resolved by name, or the error it reported.
+fn resolved<T: serde::de::DeserializeOwned>(
+    models: &ConfigValue,
+    name: &str,
+    missing: StageError,
+) -> Result<T, StageError> {
+    let Some(entry) = field(models, name) else {
+        return Err(missing);
+    };
     if let Some(error) = field(entry, "error") {
         let message = string_field(error, "message")
             .unwrap_or_default()
@@ -518,7 +532,7 @@ fn embedder(request: &SearchRequest, name: &str) -> Result<EmbedderSettings, Sta
         });
     }
     serde_json::from_str(&entry.to_js_json())
-        .map_err(|_| StageError::plain("Invalid embedding model settings."))
+        .map_err(|_| StageError::plain("Invalid model settings."))
 }
 
 fn vector(search: &VectorSearch<'_>, cancel: &Cancellation) -> Result<Found, StageError> {
@@ -798,11 +812,14 @@ fn fuse(results: &[Found], k: f64, max: f64) -> Found {
     Found { hits: fused, total }
 }
 
-/// `rerank.model`: JavaScript orders the first `candidates` hits with the model.
+/// `rerank.model`: the chat model orders the first `candidates` hits by their first 800 UTF-16
+/// code units.
 fn rerank(
+    database: &KnowledgeBase,
     found: &mut Found,
     query: &str,
     args: &ConfigValue,
+    request: &SearchRequest,
     host: &dyn SearchHost,
     cancel: &Cancellation,
 ) -> Result<(), StageError> {
@@ -811,39 +828,45 @@ fn rerank(
     if count < 2 {
         return Ok(());
     }
-    let request = object(vec![
-        (
-            "model",
-            field(args, "model").cloned().unwrap_or(ConfigValue::Null),
-        ),
-        ("query", text(query)),
-        (
-            "hits",
-            ConfigValue::Array(
-                found.hits[..count]
-                    .iter()
-                    .map(|hit| {
-                        object(vec![
-                            ("title", text(&hit.title)),
-                            ("evidence", hit.evidence.clone()),
-                        ])
-                    })
-                    .collect(),
-            ),
-        ),
-    ]);
-    let order = host.rerank(&request).map_err(StageError::plain)?;
-    cancel.check().map_err(|_| StageError::aborted())?;
-    if order.len() != count
-        || order.iter().any(|&id| id == 0 || id > count)
-        || order.iter().collect::<HashSet<_>>().len() != count
-    {
-        return Err(StageError::coded(
-            "INVALID_MODEL_OUTPUT",
-            "The reranking model must return each candidate ID exactly once.",
-            1,
+    let settings: crate::generate::GeneratorSettings = resolved(
+        &request.rerankers,
+        string_field(args, "model").unwrap_or_default(),
+        StageError::coded("INVALID_MODEL", "Define the reranking model in models.", 2),
+    )?;
+    let mut data = Vec::with_capacity(count);
+    for (i, hit) in found.hits[..count].iter().enumerate() {
+        let content = database
+            .read(&evidence_of(&hit.evidence)?, cancel)
+            .map_err(StageError::native)?
+            .content;
+        data.push(format!(
+            "{{\"id\":{},\"title\":{},\"text\":{}}}",
+            i + 1,
+            text(&hit.title).to_js_json(),
+            crate::generate::js_prefix_json(&content, 800)
         ));
     }
+    let input = format!(
+        "{{\"query\":{},\"candidates\":[{}]}}",
+        text(query).to_js_json(),
+        data.join(",")
+    );
+    let generated = crate::generate::generate(
+        &settings,
+        crate::generate::RERANK_INSTRUCTIONS,
+        &input,
+        crate::generate::RERANK_SCHEMA,
+        host,
+        cancel,
+    )?;
+    let order =
+        crate::generate::rerank_order(generated.text.as_deref(), count).ok_or_else(|| {
+            StageError::coded(
+                "INVALID_MODEL_OUTPUT",
+                "The reranking model must return each candidate ID exactly once.",
+                1,
+            )
+        })?;
     let mut hits: Vec<Hit> = order.iter().map(|&id| found.hits[id - 1].clone()).collect();
     hits.extend(found.hits[count..].iter().cloned());
     found.hits = hits;
@@ -1295,11 +1318,6 @@ mod tests {
         fn index_tool(&self) -> Result<String, String> {
             Err("No index tool in tests".into())
         }
-
-        fn rerank(&self, request: &ConfigValue) -> Result<Vec<usize>, String> {
-            // Reverse the candidates.
-            Ok((1..=items(field(request, "hits")).len()).rev().collect())
-        }
     }
 
     fn json(text: &str) -> ConfigValue {
@@ -1403,13 +1421,28 @@ mod tests {
         assert_eq!(failure.error.code, Some("INDEX_REQUIRED"));
         assert_eq!(failure.module, None);
 
-        // rerank.model reorders the first candidates.
+        // rerank.model asks the chat model to reorder the first candidates.
+        let (base, bodies) = crate::embed::tests::serve(|_| {
+            (
+                200,
+                serde_json::json!({ "done": true, "message": { "content": r#"{"order":[2,1]}"# } })
+                    .to_string(),
+            )
+        });
+        let plan = PLAN.replace(
+            r#"{"use":"context.assemble""#,
+            r#"{"use":"rerank.model","with":{"model":"m","candidates":2}},{"use":"context.assemble""#,
+        );
+        let missing = run(&database, &vectors, &request(&plan, ""), &Host, &cancel)
+            .err()
+            .unwrap();
+        assert_eq!(missing.error.code, Some("INVALID_MODEL"));
+        assert_eq!(missing.module.as_deref(), Some("rerank.model"));
         let reranked = request(
-            &PLAN.replace(
-                r#"{"use":"context.assemble""#,
-                r#"{"use":"rerank.model","with":{"model":"m","candidates":2}},{"use":"context.assemble""#,
+            &plan,
+            &format!(
+                r#","rerankModels":[null],"rerankers":{{"m":{{"provider":"ollama","model":"r","url":"{base}/api/chat"}}}}"#
             ),
-            r#","rerankModels":[null]"#,
         );
         let output = run(&database, &vectors, &reranked, &Host, &cancel)
             .unwrap()
@@ -1417,6 +1450,11 @@ mod tests {
         let first =
             |output: &ConfigValue| field(&items(output.get("results"))[0], "document_id").cloned();
         assert_ne!(first(&output), first(&outcome.output));
+        let sent: serde_json::Value = serde_json::from_str(&bodies.lock().unwrap()[0]).unwrap();
+        let input: serde_json::Value =
+            serde_json::from_str(sent["messages"][1]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(input["query"], "pump");
+        assert_eq!(input["candidates"][1]["id"], 2);
     }
 
     #[test]

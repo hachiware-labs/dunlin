@@ -28,6 +28,8 @@ mod command_parser;
 #[cfg(any(feature = "node", test))]
 mod embed;
 #[cfg(any(feature = "node", test))]
+mod generate;
+#[cfg(any(feature = "node", test))]
 mod index_stage;
 #[cfg(any(feature = "node", test))]
 mod lighton;

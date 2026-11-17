@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectRerankRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle, McpHttpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -74,6 +74,7 @@ interface NativeBinding {
   tagBuild(request: string, host: (...args: unknown[]) => void): Promise<string>;
   routeFiles(request: string): string;
   searchConfigId(request: string): string;
+  answerQuestion(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   matchesGlob(path: string, pattern: string): boolean;
   readModuleArgs(name: string, args: string): string;
   readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
@@ -111,7 +112,6 @@ function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<T
         : kind === 'config' ? host.configChanged?.() ?? false
         : kind === 'tool' ? host.indexTool!(args)
         : kind === 'search_config' ? host.searchConfigId!(JSON.parse(args) as Record<string, unknown>)
-        : kind === 'rerank' ? host.rerank!(JSON.parse(args) as ProjectRerankRequest)
         : host.parse!(JSON.parse(args) as LoadCorpusFile, bytes))
       .then((result) => native().completeHostCall(id, configJson(result), null),
         (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
@@ -463,6 +463,15 @@ export class Dunlin {
   }
 
   /**
+   * Answer a question from a search result (spec 28.10 step 3b): the answer model writes grounded
+   * statements with citations, returned as a Responses API object (spec 27.2).
+   */
+  static async answerQuestion(request: AnswerRequest, host: TransformStageHost = {}, { signal }: OperationOptions = {}): Promise<AnswerOutcome> {
+    const text = await cancellable(signal, (cancel) => native().answerQuestion(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as AnswerOutcome;
+  }
+
+  /**
    * The search configuration ID (spec 28.10): a digest of the search plan, the request overrides,
    * the keyword dictionary, the vector model and the reranking models. Evaluation reports compare it.
    */
@@ -698,8 +707,8 @@ export class Dunlin {
   }
 
   /**
-   * Run a project search plan (spec 28.10 step 3a): retrieval, fusion, reranking through `host`,
-   * context assembly and the returned format of spec 27.1.
+   * Run a project search plan (spec 28.10): retrieval, fusion, reranking, context assembly and the
+   * returned format of spec 27.1.
    */
   async searchProject(request: ProjectSearchRequest, host: ProjectSearchHost = {}, { signal }: OperationOptions = {}): Promise<ProjectSearchOutcome> {
     const text = await this.#run(signal, (database, cancel) => database.searchProject(configJson(request), hostCallback(host), cancel));

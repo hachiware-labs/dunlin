@@ -114,6 +114,21 @@ export function trialSignal(signal) {
   return current && signal && current !== signal ? AbortSignal.any([current, signal]) : current ?? signal;
 }
 
+/**
+ * Settles with `promise`, or rejects with the signal's reason as soon as it aborts, as an aborted
+ * fetch did. A native call that is still running stops by itself shortly after.
+ */
+export function untilAborted(promise, signal) {
+  if (!signal) return promise;
+  promise.catch(() => {});
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) return abort();
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+
 export function chargeTrialApi(body, signal) {
   const current = usage.getStore();
   current?.charge(typeof body === 'string' ? Buffer.byteLength(body) : body?.byteLength ?? 0);

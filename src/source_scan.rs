@@ -1,7 +1,8 @@
 //! Scanning source folders and routing files to parsers (spec 6.7).
 //!
 //! The rules follow the JavaScript `scanFolder` and `resolveParser` this replaces. Files come back
-//! unsorted; the caller orders them.
+//! ordered by object ID in code point order, which the `source` stage ID depends on (spec 28.9
+//! step 2e).
 
 use std::path::Path;
 
@@ -75,6 +76,7 @@ pub fn scan(request: &ScanRequest, cancel: &Cancellation) -> Result<Scanned, Str
             files.push(ScannedFile { file, object_id });
         }
     }
+    files.sort_by(|a, b| a.object_id.cmp(&b.object_id));
     Ok(Scanned { id, files })
 }
 
@@ -263,8 +265,7 @@ mod tests {
             name: "source.filesystem".into(),
             project_root: None,
         };
-        let mut scanned = scan(&request, &Cancellation::default()).unwrap();
-        scanned.files.sort_by(|a, b| a.object_id.cmp(&b.object_id));
+        let scanned = scan(&request, &Cancellation::default()).unwrap();
         let ids: Vec<_> = scanned
             .files
             .iter()

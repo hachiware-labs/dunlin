@@ -278,6 +278,21 @@ impl Corpus {
     }
 }
 
+/// Opens `corpus.sqlite` in a corpus directory, creating or migrating it as `Corpus::open` does.
+#[cfg(any(feature = "node", test))]
+pub(crate) fn open_connection(path: &Path, cancel: &Cancellation) -> Result<Connection> {
+    std::fs::create_dir_all(path)
+        .map_err(|_| Error::Io("Could not create the corpus directory"))?;
+    open_sqlite(&path.join(SQLITE_FILE), path, cancel)
+}
+
+/// The record indexing saves for a revision.
+#[cfg(any(feature = "node", test))]
+pub(crate) fn record_bytes(object: &SourceObject, end_line: usize) -> Result<Vec<u8>> {
+    serde_json::to_vec(&record(object, end_line))
+        .map_err(|_| Error::Io("Could not encode the corpus revision"))
+}
+
 fn open_sqlite(path: &Path, legacy: &Path, cancel: &Cancellation) -> Result<Connection> {
     let mut connection = Connection::open(path)
         .map_err(|error| sqlite_error(error, "Could not open the corpus database"))?;

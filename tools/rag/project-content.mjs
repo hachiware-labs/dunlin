@@ -1,7 +1,5 @@
 
 import { join } from 'node:path';
-import { open } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 
 import { Dunlin } from 'dunlin';
 
@@ -10,35 +8,7 @@ import { lightonModel } from './parsers/catalog.mjs';
 import { lightonServer, managedOcr, managedOcrVersion } from './parsers/lighton-setup.mjs';
 import { oarOcrHome } from './parsers/oar-setup.mjs';
 import { defaultRoutes, routeFiles } from './project-parsers.mjs';
-import { chargeTrialApi, trialCheckpoint, trialSignal } from './project-trials.mjs';
-
-const fileConcurrency = 4;
-
-async function processFiles(files, prepare, record, limit = fileConcurrency) {
-  const results = new Array(files.length);
-  let next = 0;
-  let failure;
-  await Promise.all(Array.from({ length: Math.min(files.length, limit) }, async () => {
-    while (!failure && next < files.length) {
-      const index = next++;
-      try {
-        results[index] = await prepare(files[index]);
-      } catch (error) {
-        if (!failure || index < failure.index) failure = { index, error };
-      }
-    }
-  }));
-  // Drain in-flight work before the caller can close the database. Record results in input order.
-  for (let index = 0; index < (failure?.index ?? files.length); index++) record(files[index], results[index]);
-  if (failure) throw failure.error;
-}
-
-/** Scans a folder in Rust. Files are ordered here, by locale, until identifiers change (spec 28.9). */
-export async function scanFolder(sources, { path, exclude }, { name, projectRoot }) {
-  const { id, files } = await Dunlin.scanSource({ path, exclude, name, ...(projectRoot && { projectRoot }) }, { signal: trialSignal() });
-  files.sort((a, b) => a.objectId.localeCompare(b.objectId));
-  return [...sources, { id, files }];
-}
+import { trialCheckpoint, trialSignal } from './project-trials.mjs';
 
 /** Routes every scanned file once: `{ route, kind }` or null, keyed by source and object ID. */
 function routeSources(sources, routes) {
@@ -52,36 +22,6 @@ export function unsupportedFiles(sources, routes = defaultRoutes()) {
   const routed = routeSources(sources, routes);
   return sources.flatMap(({ id, files }) => files.filter(({ objectId }) => !routed.get(JSON.stringify([id, objectId])))
     .map(({ objectId }) => ({ source_id: id, path: objectId, reason: 'No configured loader for this file format' })));
-}
-
-/** Names the parser module for each scanned file, or null when none claims it. */
-export function parserAssignments(sources, routes) {
-  return new Map([...routeSources(sources, routes)].map(([key, routed]) => [key, routed?.route.name ?? null]));
-}
-
-export async function inventory(sources, previous) {
-  const old = new Map((previous?.groups ?? []).flatMap(([id, docs]) => docs.map(({ objectId, corpus }) =>
-    [JSON.stringify([id, objectId]), corpus?.originalSha256])));
-  const files = [];
-  const pending = sources.flatMap(({ id, files }) => files.map((entry) => ({ ...entry, id })));
-  await processFiles(pending, async ({ file }) => {
-    const handle = await open(file, 'r');
-    try {
-      const hash = createHash('sha256');
-      for await (const chunk of handle.createReadStream({ autoClose: false })) hash.update(chunk);
-      return hash.digest('hex');
-    } finally { await handle.close(); }
-  }, ({ id, objectId }, actual) => {
-    const key = JSON.stringify([id, objectId]);
-    const change = !old.has(key) ? 'added' : old.get(key) === actual ? 'unchanged' : 'updated';
-    old.delete(key);
-    files.push({ source_id: id, path: objectId, change });
-  });
-  for (const key of old.keys()) {
-    const [source_id, path] = JSON.parse(key);
-    files.push({ source_id, path, change: 'deleted' });
-  }
-  return files;
 }
 
 /**
@@ -113,7 +53,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   }
   const host = parserHost(progress);
   const request = {
-    state: paths.state, originals: join(paths.artifacts, 'originals', 'shared'), force: Boolean(force), ...await ocrRequest(ocr),
+    state: paths.state, corpus: paths.corpus, originals: join(paths.artifacts, 'originals', 'shared'), force: Boolean(force), ...await ocrRequest(ocr),
     root: root ?? process.cwd(),
     files: pending.map(({ id, file, objectId, kind, route }) => ({ id, file, objectId, kind, route: route.name,
       ...(kind === 'command' && { command: { module: route.name, args: route.args } }) })),
@@ -130,62 +70,6 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   loaded.documents.forEach((document, index) => pending[index].documents.push(document));
   warnings.push(...loaded.warnings);
   return groups;
-}
-
-/**
- * Runs the `source` stage in Rust: routing, loading, the stage ID and its record in state.sqlite.
- * Returns `{ output, reused, warnings }`, or `{ unsupported: { files, skipped } }`.
- */
-export async function runSourceStage({ sources, routes, reject, skipUnsupported, force, modules, ocr = null }, paths, root) {
-  const request = {
-    state: paths.state, originals: join(paths.artifacts, 'originals', 'shared'), root, force: Boolean(force),
-    skipUnsupported: Boolean(skipUnsupported), reject: Boolean(reject), ...await ocrRequest(ocr), sources,
-    routes: routes.map(({ name, category, match, ocr }) => ({ name, category, ...(match && { match }), ocr })),
-    commands: routes.filter(({ category }) => category === 'command').map(({ name, args }) => ({ module: name, args })),
-    modules,
-  };
-  let result;
-  try {
-    result = await Dunlin.runSource(request, parserHost(), { signal: trialSignal() });
-  } catch (error) {
-    trialCheckpoint();
-    if (error.code === 'LOAD_FAILED') throw new Error(error.message, { cause: error });
-    throw error;
-  }
-  return result.status === 'unsupported' ? { unsupported: result.stats }
-    : { output: result.output, reused: result.reused, warnings: result.warnings };
-}
-
-/**
- * Runs the transform stage in Rust (spec 28.9 step 2b): chunking, the chunk cache, embedding calls for
- * chunk.semantic and the stage record. Model requests count against trial limits here.
- * Returns `{ output, reused }`.
- */
-export async function runTransformStage({ sourceId, modules, force, embedder = null }, paths) {
-  let refused;
-  const host = {
-    charge(bytes) {
-      try {
-        chargeTrialApi({ byteLength: bytes });
-      } catch (error) {
-        refused = error;
-        throw error;
-      }
-    },
-  };
-  let result;
-  try {
-    result = await Dunlin.runTransform({ state: paths.state, sourceId, force: Boolean(force), modules, embedder }, host, { signal: trialSignal() });
-  } catch (error) {
-    trialCheckpoint();
-    throw error;
-  }
-  if (result.status === 'failed') {
-    if (refused) throw refused;
-    const { code, message, exitCode } = result.error;
-    throw Object.assign(new Error(message), code && { code, exitCode });
-  }
-  return { output: result.output, reused: result.reused };
 }
 
 /** Rust reads, hashes, caches, runs loader.command and stores. It calls back here for the parsers that are still in JavaScript. */

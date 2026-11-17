@@ -17,7 +17,6 @@ async function fixture(t, files) {
   // The loader opens state.sqlite itself, so the test uses a file.
   const state = join(root, 'state.sqlite');
   const db = new DatabaseSync(state);
-  db.exec('CREATE TABLE loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL)');
   // Close the database before removing its directory.
   t.after(() => {
     db.close();
@@ -25,7 +24,7 @@ async function fixture(t, files) {
   });
   const sources = [{ id: 'docs', files: files.map(([name]) => ({ file: join(docs, name), objectId: name })) }];
   const artifacts = join(root, 'artifacts');
-  const load = () => loadCorpus(sources, { artifacts, state }, [], [], db, false, defaultRoutes(), undefined, root);
+  const load = () => loadCorpus(sources, { artifacts, state, corpus: join(root, 'corpus') }, [], [], db, false, defaultRoutes(), undefined, root);
   const shared = join(artifacts, 'originals', 'shared');
   return { db, load, shared };
 }
@@ -44,7 +43,7 @@ test('reads more files than one native batch and stores each original once', asy
   const stored = await readdir(shared);
   assert.equal(stored.length, 300);
   assert.equal(await readFile(join(shared, sha256('# 文書 7\n本文\n') + '.bin'), 'utf8'), '# 文書 7\n本文\n');
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM loaded_files').get().count, 600);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM extractions').get().count, 600);
   const [[, again]] = await load();
   assert.deepEqual(again, documents.map((document) => JSON.parse(JSON.stringify(document))));
 });
@@ -53,7 +52,7 @@ test('keeps the originals and cache rows of files read before a failure', async 
   const { db, load, shared } = await fixture(t, [['a.md', '# A\n'], ['b.md', '# B\n'], ['c.txt', Buffer.from([0xff])]]);
   await assert.rejects(load(), /Could not load docs:c\.txt\. The encoded data was not valid/u);
   assert.deepEqual((await readdir(shared)).sort(), [sha256('# A\n') + '.bin', sha256('# B\n') + '.bin'].sort());
-  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM loaded_files').get().count, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM extractions').get().count, 2);
 });
 
 test('reports an original that conflicts with its digest', async (t) => {

@@ -1,8 +1,8 @@
-//! The `transform` stage (spec 28.9 step 2b): `text.normalize`, `chunk.length`, `chunk.structure`
-//! and `chunk.semantic`, the chunk cache and the stage record.
+//! The `transform` stage (spec 28.9 steps 2b and 2e): `text.normalize`, `chunk.length`,
+//! `chunk.structure` and `chunk.semantic`, the chunk cache and the stage record.
 //!
-//! Identifiers, cache keys and stored JSON are the ones the JavaScript implementation wrote, so
-//! existing projects keep their stage IDs, cached chunks and build IDs.
+//! Chunks are chunk sets in `corpus.sqlite`, looked up by the document and the chunk settings; the
+//! stage record lists the chunk set of each document (spec 28.3).
 
 use std::collections::HashSet;
 
@@ -22,6 +22,8 @@ pub type StageError = EmbedError;
 #[serde(rename_all = "camelCase")]
 pub struct TransformRequest {
     pub state: String,
+    /// The shared corpus directory, which holds `corpus.sqlite`.
+    pub corpus: String,
     /// The recorded `source` stage to transform.
     pub source_id: String,
     #[serde(default)]
@@ -167,10 +169,9 @@ pub fn run(
         &ConfigValue::Array(vec![text(&request.source_id), text(&config_id)]),
     );
 
-    let mut connection = Connection::open(&request.state).map_err(sql)?;
-    connection
-        .busy_timeout(std::time::Duration::from_secs(10))
-        .map_err(sql)?;
+    let stores = crate::stage_store::open(&request.state, &request.corpus, cancel)?;
+    let mut connection = stores.state;
+    let corpus = stores.corpus;
     let latest = if semantic {
         connection
             .query_row(
@@ -184,7 +185,7 @@ pub fn run(
         None
     };
     if !request.force
-        && let Some(saved) = read_transform(&connection, latest.as_deref().unwrap_or(&id))?
+        && let Some(saved) = transform_manifest(&connection, latest.as_deref().unwrap_or(&id))?
     {
         save(&mut connection, &saved, true)?;
         return Ok(TransformOutcome {
@@ -193,10 +194,80 @@ pub fn run(
         });
     }
 
-    let groups = read_source(&connection, &request.source_id)?;
+    let entries = source_entries(&connection, &request.source_id)?;
+    // Chunk sets are found by corpus version and chunk settings first, so unchanged documents are
+    // not read. The rest are read and looked up by content in `chunkings`.
+    let settings = crate::stage_store::chunk_set_id(&match &chunker {
+        Chunker::Length {
+            size,
+            overlap,
+            structure,
+        } => vec![
+            text(if *structure {
+                "chunk.structure-v1"
+            } else {
+                "chunk.length-v1"
+            }),
+            unicode.clone(),
+            size.clone(),
+            overlap.clone(),
+        ],
+        Chunker::Semantic {
+            max_chars,
+            sentence_chars,
+            similarity,
+        } => vec![
+            text("chunk.semantic-v1"),
+            embedder.map_or(ConfigValue::Null, EmbedderSettings::identity),
+            max_chars.clone(),
+            sentence_chars.clone(),
+            similarity.clone(),
+            unicode.clone(),
+        ],
+    });
+    let mut ids: Vec<Vec<Option<String>>> = entries
+        .iter()
+        .map(|(_, documents)| vec![None; documents.len()])
+        .collect();
+    if !request.force {
+        let mut find = corpus
+            .prepare(crate::stage_store::SELECT_VERSION_CHUNKING)
+            .map_err(sql)?;
+        for ((_, documents), ids) in entries.iter().zip(ids.iter_mut()) {
+            for (document, id) in documents.iter().zip(ids.iter_mut()) {
+                let version = document
+                    .get("version")
+                    .and_then(ConfigValue::as_str)
+                    .unwrap_or_default();
+                *id = crate::stage_store::read_version_chunking(&mut find, version, &settings)?;
+            }
+        }
+    }
+    let mut reader = crate::stage_store::DocumentReader::new(&corpus)?;
+    let mut groups = Vec::with_capacity(entries.len());
+    for ((source_id, documents), ids) in entries.iter().zip(&ids) {
+        let mut group = Vec::new();
+        for (document, id) in documents.iter().zip(ids) {
+            if id.is_none() {
+                cancel.check().map_err(aborted)?;
+                let document = reader.entry(source_id, document)?;
+                group.push(Document {
+                    content: document
+                        .get("content")
+                        .and_then(ConfigValue::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    format: document.get("format").cloned().unwrap_or(ConfigValue::Null),
+                    boundaries: page_starts(&document),
+                });
+            }
+        }
+        groups.push(group);
+    }
+    drop(reader);
     let nfkc = unicode.as_str() == Some("nfkc");
     let cache = Cache {
-        connection: &connection,
+        connection: &corpus,
         force: request.force,
         replace: request.force && semantic,
     };
@@ -227,10 +298,33 @@ pub fn run(
             )?
         }
     };
+    let mut saved = Vec::new();
+    for (((_, documents), ids), chunked) in entries.iter().zip(ids.iter_mut()).zip(&chunks) {
+        let mut chunked = chunked.iter();
+        for (document, id) in documents.iter().zip(ids.iter_mut()) {
+            if id.is_some() {
+                continue;
+            }
+            let set = crate::stage_store::chunk_set_id(chunked.next().map_or(&[], Vec::as_slice));
+            let version = document
+                .get("version")
+                .and_then(ConfigValue::as_str)
+                .unwrap_or_default();
+            saved.push((version.to_owned(), set.clone()));
+            *id = Some(set);
+        }
+    }
+    crate::stage_store::write_version_chunkings(&corpus, &saved, &settings)?;
     let chunks = ConfigValue::Array(
-        chunks
-            .into_iter()
-            .map(|group| ConfigValue::Array(group.into_iter().map(ConfigValue::Array).collect()))
+        ids.into_iter()
+            .map(|group| {
+                ConfigValue::Array(
+                    group
+                        .into_iter()
+                        .map(|id| text(&id.unwrap_or_default()))
+                        .collect(),
+                )
+            })
             .collect(),
     );
     let output_id = if semantic {
@@ -254,8 +348,11 @@ pub fn run(
     })
 }
 
-/// The documents of a recorded source stage, by group.
-fn read_source(connection: &Connection, id: &str) -> Result<Vec<Vec<Document>>, StageError> {
+/// The entries of a recorded source stage, by group: the source ID and its documents' entries.
+fn source_entries(
+    connection: &Connection,
+    id: &str,
+) -> Result<Vec<(String, Vec<ConfigValue>)>, StageError> {
     let manifest: Option<String> = connection
         .query_row(
             "SELECT manifest FROM stage_outputs WHERE stage = 'source' AND id = ?",
@@ -273,58 +370,26 @@ fn read_source(connection: &Connection, id: &str) -> Result<Vec<Vec<Document>>, 
     };
     let manifest: ConfigValue = serde_json::from_str(&manifest)
         .map_err(|_| StageError::plain("A saved source stage is not valid JSON."))?;
-    let payloads = manifest.get("payloads") == Some(&ConfigValue::Number(1.0));
-    let mut find = connection
-        .prepare("SELECT data FROM stage_payloads WHERE id = ?")
-        .map_err(sql)?;
     let groups = match manifest.get("groups") {
         Some(ConfigValue::Array(groups)) => groups.as_slice(),
         _ => &[],
     };
-    groups
+    Ok(groups
         .iter()
-        .map(|group| {
-            let documents = match group {
-                ConfigValue::Array(pair) => match pair.get(1) {
-                    Some(ConfigValue::Array(documents)) => documents.as_slice(),
-                    _ => &[],
+        .map(|group| match group {
+            ConfigValue::Array(pair) => (
+                pair.first()
+                    .and_then(ConfigValue::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                match pair.get(1) {
+                    Some(ConfigValue::Array(documents)) => documents.clone(),
+                    _ => Vec::new(),
                 },
-                _ => &[],
-            };
-            documents
-                .iter()
-                .map(|document| {
-                    let content = if payloads {
-                        let key = document
-                            .get("text")
-                            .and_then(ConfigValue::as_str)
-                            .unwrap_or_default();
-                        let data: Option<String> = find
-                            .query_row([key], |row| row.get(0))
-                            .optional()
-                            .map_err(sql)?;
-                        let data = data.ok_or_else(missing_payload)?;
-                        serde_json::from_str::<String>(&data).map_err(|_| missing_payload())?
-                    } else {
-                        document
-                            .get("content")
-                            .and_then(ConfigValue::as_str)
-                            .unwrap_or_default()
-                            .to_owned()
-                    };
-                    Ok(Document {
-                        content,
-                        format: document.get("format").cloned().unwrap_or(ConfigValue::Null),
-                        boundaries: page_starts(document),
-                    })
-                })
-                .collect()
+            ),
+            _ => (String::new(), Vec::new()),
         })
-        .collect()
-}
-
-fn missing_payload() -> StageError {
-    StageError::coded("STAGE_REQUIRED", "A saved stage payload is missing.", 3)
+        .collect())
 }
 
 /// `[...new Set(locations.filter(({ page }) => page).map(({ range }) => range.startLine))]`
@@ -358,7 +423,7 @@ fn truthy(value: Option<&ConfigValue>) -> bool {
     }
 }
 
-/// The `document_chunks` table: chunks by cache key.
+/// The chunk cache in `corpus.sqlite`: chunk sets by document and chunk settings.
 struct Cache<'a> {
     connection: &'a Connection,
     /// Skip cached chunks.
@@ -372,46 +437,12 @@ impl Cache<'_> {
         if self.force {
             return Ok(None);
         }
-        let row: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT chunks FROM document_chunks WHERE id = ?",
-                [key],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sql)?;
-        Ok(match row.and_then(|row| serde_json::from_str(&row).ok()) {
-            Some(ConfigValue::Array(chunks)) => Some(chunks),
-            _ => None,
-        })
+        crate::stage_store::read_chunking(self.connection, key)
     }
 
     /// Writes entries in one transaction.
     fn write(&self, entries: &[(String, &[ConfigValue])]) -> Result<(), StageError> {
-        let statement = if self.replace {
-            "INSERT OR REPLACE INTO document_chunks VALUES (?, ?)"
-        } else {
-            "INSERT OR IGNORE INTO document_chunks VALUES (?, ?)"
-        };
-        self.connection
-            .execute_batch("BEGIN IMMEDIATE")
-            .map_err(sql)?;
-        let written = (|| {
-            let mut insert = self.connection.prepare(statement).map_err(sql)?;
-            for (key, chunks) in entries {
-                let json = ConfigValue::Array(chunks.to_vec()).to_js_json();
-                insert.execute(params![key, json]).map_err(sql)?;
-            }
-            Ok(())
-        })();
-        match written {
-            Ok(()) => self.connection.execute_batch("COMMIT").map_err(sql),
-            Err(error) => {
-                let _ = self.connection.execute_batch("ROLLBACK");
-                Err(error)
-            }
-        }
+        crate::stage_store::write_chunkings(self.connection, entries, self.replace)
     }
 }
 
@@ -695,8 +726,8 @@ fn semantic_chunks(
     Ok(output)
 }
 
-/// A recorded transform stage with its chunks, or `None`.
-pub(crate) fn read_transform(
+/// A recorded transform stage as saved: chunk set IDs in place of chunks.
+pub(crate) fn transform_manifest(
     connection: &Connection,
     id: &str,
 ) -> Result<Option<ConfigValue>, StageError> {
@@ -708,47 +739,28 @@ pub(crate) fn read_transform(
         )
         .optional()
         .map_err(sql)?;
-    let Some(manifest) = manifest else {
-        return Ok(None);
-    };
-    let manifest: ConfigValue = serde_json::from_str(&manifest)
-        .map_err(|_| StageError::plain("A saved transform stage is not valid JSON."))?;
-    if manifest.get("payloads") != Some(&ConfigValue::Number(1.0)) {
-        return Ok(Some(manifest));
-    }
-    let mut find = connection
-        .prepare("SELECT data FROM stage_payloads WHERE id = ?")
-        .map_err(sql)?;
-    let ConfigValue::Object(mut entries) = manifest else {
-        return Ok(None);
-    };
-    for (name, value) in entries.iter_mut() {
-        if name != "chunks" {
-            continue;
-        }
-        let ConfigValue::Array(groups) = value else {
-            continue;
-        };
-        for group in groups.iter_mut() {
-            let ConfigValue::Array(documents) = group else {
-                continue;
-            };
-            for document in documents.iter_mut() {
-                let key = document.as_str().unwrap_or_default().to_owned();
-                let data: Option<String> = find
-                    .query_row([&key], |row| row.get(0))
-                    .optional()
-                    .map_err(sql)?;
-                let data = data.ok_or_else(missing_payload)?;
-                *document = serde_json::from_str(&data).map_err(|_| missing_payload())?;
-            }
-        }
-    }
-    Ok(Some(ConfigValue::Object(entries)))
+    manifest
+        .map(|manifest| {
+            serde_json::from_str(&manifest)
+                .map_err(|_| StageError::plain("A saved transform stage is not valid JSON."))
+        })
+        .transpose()
 }
 
-/// Records the stage: chunk payloads by content, the manifest, the latest stage and, when the output
-/// ID differs from its key, the key's latest output.
+/// A recorded transform stage with its chunks, or `None`.
+#[cfg(test)]
+fn read_transform(
+    connection: &Connection,
+    corpus: &Connection,
+    id: &str,
+) -> Result<Option<ConfigValue>, StageError> {
+    transform_manifest(connection, id)?
+        .map(|manifest| crate::stage_store::expand_transform(corpus, manifest))
+        .transpose()
+}
+
+/// Records the stage: the manifest, the latest stage and, when the output ID differs from its key,
+/// the key's latest output.
 fn save(connection: &mut Connection, output: &ConfigValue, reused: bool) -> Result<(), StageError> {
     let field = |name: &str| {
         output
@@ -761,43 +773,10 @@ fn save(connection: &mut Connection, output: &ConfigValue, reused: bool) -> Resu
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(sql)?;
     if !reused {
-        let ConfigValue::Object(entries) = output else {
-            return Err(StageError::plain("Invalid transform output."));
-        };
-        let mut insert = transaction
-            .prepare("INSERT OR IGNORE INTO stage_payloads VALUES (?, ?)")
-            .map_err(sql)?;
-        let mut manifest = Vec::with_capacity(entries.len() + 1);
-        for (name, value) in entries {
-            let value = match (name.as_str(), value) {
-                ("chunks", ConfigValue::Array(groups)) => {
-                    let mut stored = Vec::with_capacity(groups.len());
-                    for group in groups {
-                        let ConfigValue::Array(documents) = group else {
-                            stored.push(group.clone());
-                            continue;
-                        };
-                        let mut keys = Vec::with_capacity(documents.len());
-                        for chunks in documents {
-                            let json = chunks.to_js_json();
-                            let key = sha256_hex(json.as_bytes());
-                            insert.execute(params![key, json]).map_err(sql)?;
-                            keys.push(text(&key));
-                        }
-                        stored.push(ConfigValue::Array(keys));
-                    }
-                    ConfigValue::Array(stored)
-                }
-                _ => value.clone(),
-            };
-            manifest.push((name.clone(), value));
-        }
-        manifest.push(("payloads".into(), number(1)));
-        drop(insert);
         transaction
             .execute(
                 "INSERT OR IGNORE INTO stage_outputs VALUES (?, ?, ?)",
-                params!["transform", id, ConfigValue::Object(manifest).to_js_json()],
+                params!["transform", id, output.to_js_json()],
             )
             .map_err(sql)?;
     }
@@ -820,38 +799,83 @@ fn save(connection: &mut Connection, output: &ConfigValue, reused: bool) -> Resu
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use crate::embed::tests::{Free, serve};
 
     const SCHEMA: &str = "CREATE TABLE stage_outputs (stage TEXT NOT NULL, id TEXT NOT NULL, manifest TEXT NOT NULL, PRIMARY KEY (stage, id));
         CREATE TABLE latest_stage (stage TEXT PRIMARY KEY, id TEXT NOT NULL);
-        CREATE TABLE stage_payloads (id TEXT PRIMARY KEY, data TEXT NOT NULL);
-        CREATE TABLE document_chunks (id TEXT PRIMARY KEY, chunks TEXT NOT NULL);
         CREATE TABLE transform_outputs (key TEXT PRIMARY KEY, output_id TEXT NOT NULL);";
 
-    fn state(content: &str) -> (tempfile::TempDir, String) {
+    struct Project {
+        _root: tempfile::TempDir,
+        state: String,
+        corpus: String,
+    }
+
+    /// A project with a recorded source stage of one Markdown document.
+    fn state(content: &str) -> Project {
         let root = tempfile::tempdir().unwrap();
         let state = root.path().join("state.sqlite");
-        let connection = Connection::open(&state).unwrap();
-        connection.execute_batch(SCHEMA).unwrap();
-        let payload = serde_json::to_string(content).unwrap();
-        let key = sha256_hex(payload.as_bytes());
-        connection
+        let corpus = root.path().join("corpus");
+        Connection::open(&state)
+            .unwrap()
+            .execute_batch(SCHEMA)
+            .unwrap();
+        let (state, corpus) = (
+            state.to_string_lossy().into_owned(),
+            corpus.to_string_lossy().into_owned(),
+        );
+        let stores = crate::stage_store::open(&state, &corpus, &Cancellation::default()).unwrap();
+        let document = ConfigValue::Object(vec![
+            ("objectId".into(), text("a.md")),
+            ("url".into(), text("file:///a.md")),
+            ("content".into(), text(content)),
+            ("format".into(), text("markdown")),
+            ("corpus".into(), ConfigValue::Object(Vec::new())),
+        ]);
+        let (version, record) = crate::stage_store::revision("docs", &document).unwrap();
+        stores
+            .corpus
             .execute(
-                "INSERT INTO stage_payloads VALUES (?, ?)",
-                params![key, payload],
+                crate::stage_store::INSERT_REVISION,
+                params!["docs", "a.md", version, record],
             )
             .unwrap();
         let manifest = format!(
-            "{{\"id\":\"src-1\",\"groups\":[[\"docs\",[{{\"objectId\":\"a.md\",\"format\":\"markdown\",\"text\":\"{key}\"}}]]],\"payloads\":1}}"
+            "{{\"id\":\"src-1\",\"groups\":[[\"docs\",[{{\"objectId\":\"a.md\",\"version\":\"{version}\"}}]]]}}"
         );
-        connection
+        stores
+            .state
             .execute(
                 "INSERT INTO stage_outputs VALUES ('source', 'src-1', ?)",
                 [manifest],
             )
             .unwrap();
-        (root, state.to_string_lossy().into_owned())
+        Project {
+            _root: root,
+            state,
+            corpus,
+        }
+    }
+
+    /// The chunks of the first document of a transform output.
+    fn first_chunks(project: &Project, output: &ConfigValue) -> Vec<ConfigValue> {
+        let state = Connection::open(&project.state).unwrap();
+        let corpus = Connection::open(Path::new(&project.corpus).join("corpus.sqlite")).unwrap();
+        let id = output.get("id").and_then(ConfigValue::as_str).unwrap();
+        let expanded = read_transform(&state, &corpus, id).unwrap().unwrap();
+        let ConfigValue::Array(groups) = expanded.get("chunks").unwrap() else {
+            panic!("expected chunks")
+        };
+        let ConfigValue::Array(documents) = &groups[0] else {
+            panic!("expected documents")
+        };
+        let ConfigValue::Array(chunks) = &documents[0] else {
+            panic!("expected chunks")
+        };
+        chunks.clone()
     }
 
     fn modules(json: &str) -> ConfigValue {
@@ -860,9 +884,10 @@ mod tests {
 
     #[test]
     fn chunks_records_and_reuses_the_stage() {
-        let (_root, state) = state("# A\nOne. Two. Three.\n");
+        let project = state("# A\nOne. Two. Three.\n");
         let request = TransformRequest {
-            state: state.clone(),
+            state: project.state.clone(),
+            corpus: project.corpus.clone(),
             source_id: "src-1".into(),
             force: false,
             modules: modules(
@@ -882,33 +907,34 @@ mod tests {
             .to_owned();
         assert!(id.starts_with("trn-"));
         assert_eq!(first.output.get("key"), Some(&text(&id)));
-        let ConfigValue::Array(groups) = first.output.get("chunks").unwrap() else {
-            panic!("expected chunks")
-        };
-        let ConfigValue::Array(documents) = &groups[0] else {
-            panic!("expected documents")
-        };
-        let ConfigValue::Array(chunks) = &documents[0] else {
-            panic!("expected chunks")
-        };
+        let chunks = first_chunks(&project, &first.output);
         assert!(chunks.len() > 1);
         assert!(chunks[0].get("searchText").is_some());
 
         let again = run(&request, &Free, &cancel).unwrap();
         assert!(again.reused);
         assert_eq!(again.output.get("chunks"), first.output.get("chunks"));
-        let connection = Connection::open(&state).unwrap();
-        let cached: i64 = connection
-            .query_row("SELECT count(*) FROM document_chunks", [], |row| row.get(0))
+        let corpus = Connection::open(Path::new(&project.corpus).join("corpus.sqlite")).unwrap();
+        let cached: i64 = corpus
+            .query_row("SELECT count(*) FROM chunkings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(cached, 1);
-        let key: String = connection
-            .query_row("SELECT id FROM document_chunks", [], |row| row.get(0))
-            .unwrap();
-        assert!(
-            key.starts_with("[\"chunk.length-v1\",\"nfkc\",8,0,\"markdown\",\""),
-            "{key}"
+        let key = ConfigValue::Array(vec![
+            text("chunk.length-v1"),
+            text("nfkc"),
+            number(8),
+            number(0),
+            text("markdown"),
+            text(&sha256_hex("# A\nOne. Two. Three.\n".as_bytes())),
+        ])
+        .to_js_json();
+        assert_eq!(
+            crate::stage_store::read_chunking(&corpus, &key)
+                .unwrap()
+                .map(ConfigValue::Array),
+            Some(ConfigValue::Array(chunks))
         );
+        let connection = Connection::open(&project.state).unwrap();
         let latest: String = connection
             .query_row(
                 "SELECT id FROM latest_stage WHERE stage = 'transform'",
@@ -922,7 +948,7 @@ mod tests {
     #[test]
     fn joins_similar_passages_with_the_embedding_model() {
         let content = "Alpha one.\nAlpha two.\nBeta three.\n";
-        let (_root, state) = state(content);
+        let project = state(content);
         // Passages about the same word get the same direction.
         let (base, bodies) = serve(|body| {
             let vectors: Vec<[f64; 2]> = body["input"]
@@ -943,7 +969,8 @@ mod tests {
             )
         });
         let request = TransformRequest {
-            state,
+            state: project.state.clone(),
+            corpus: project.corpus.clone(),
             source_id: "src-1".into(),
             force: false,
             modules: modules(
@@ -959,15 +986,7 @@ mod tests {
         };
         let cancel = Cancellation::default();
         let first = run(&request, &Free, &cancel).unwrap();
-        let ConfigValue::Array(groups) = first.output.get("chunks").unwrap() else {
-            panic!()
-        };
-        let ConfigValue::Array(documents) = &groups[0] else {
-            panic!()
-        };
-        let ConfigValue::Array(chunks) = &documents[0] else {
-            panic!()
-        };
+        let chunks = first_chunks(&project, &first.output);
         let texts: Vec<&str> = chunks
             .iter()
             .map(|chunk| {

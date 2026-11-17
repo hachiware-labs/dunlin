@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { createGenerator } from './models.mjs';
-import { chunkCorpus, ocrRequest, parserHost, scanFolder } from './project-content.mjs';
+import { chunkCorpus, ocrRequest, parserHost } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
 import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
@@ -141,9 +141,6 @@ function ensureStages(db) {
     CREATE TABLE IF NOT EXISTS index_outputs (key TEXT PRIMARY KEY, build_id TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS source_checks (id INTEGER PRIMARY KEY, source_id TEXT NOT NULL, checked_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS transform_outputs (key TEXT PRIMARY KEY, output_id TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS document_chunks (id TEXT PRIMARY KEY, chunks TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS stage_payloads (id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS embeddings (id TEXT PRIMARY KEY, data BLOB NOT NULL);`);
 }
 
@@ -339,12 +336,11 @@ function latestStageId(db, stage) {
   return db.prepare('SELECT id FROM latest_stage WHERE stage = ?').get(stage)?.id;
 }
 
-/** The settings of the source stage. Scans and orders the source folders when `scan` is set. */
-async function sourceSettings(project, plan, { scan, ocr }) {
-  const parsed = await runModules(plan, { sources: [], parsers: [], reject: false }, {
-    scan(input, args, ctx) {
-      if (!scan) return input;
-      return scanFolder(input.sources, args, { ...ctx, projectRoot: project.root }).then((sources) => ({ ...input, sources }));
+/** The settings of the source stage. Rust scans the folders of `scans` when the stage runs. */
+async function sourceSettings(project, plan, { ocr }) {
+  const parsed = await runModules(plan, { scans: [], parsers: [], reject: false }, {
+    scan(input, { path, exclude }, { name }) {
+      return { ...input, scans: [...input.scans, { path, exclude: exclude ?? [], name }] };
     },
     load(input, { category, ...args }, { name }) {
       return { ...input, parsers: [...input.parsers, { name, category, args }], reject: input.reject || args.unsupported === 'error' };
@@ -352,7 +348,7 @@ async function sourceSettings(project, plan, { scan, ocr }) {
   });
   const routes = parserRoutes(parsed.parsers);
   return {
-    ...(scan && { sources: parsed.sources }), reject: parsed.reject, modules: moduleSettings(plan),
+    scans: parsed.scans, reject: parsed.reject, modules: moduleSettings(plan),
     routes: routes.map(({ name, category, match, ocr: reads }) => ({ name, category, ...(match && { match }), ocr: reads })),
     commands: routes.filter(({ category }) => category === 'command').map(({ name, args }) => ({ module: name, args })),
     ...(ocr && await ocrRequest(projectOcr(project.config.tools))),
@@ -482,13 +478,22 @@ async function directoryBytes(root) {
   return bytes;
 }
 
-async function statusDetails(state, project, build, evaluation) {
+/** A source stage made before the data layout change of step 2e (spec 28.7): moved, or not moved yet. */
+function earlierLayout(source) {
+  return Boolean(source && (source.migrated || source.groups?.some(([, docs]) => docs.some((document) => !('version' in document)))));
+}
+
+async function statusDetails(state, project, build, evaluation, warnings) {
   const { paths } = project;
   const snapshot = readStage(state, 'source', build.source_id);
   const previous = evaluation.report && state.prepare('SELECT manifest FROM builds WHERE id = ?').get(evaluation.report.build_id);
   const assessed = previous && readStage(state, 'source', JSON.parse(previous.manifest).source_id);
+  if (assessed && earlierLayout(assessed) && !earlierLayout(snapshot)) {
+    warnings.push({ code: 'REPORT_BEFORE_LAYOUT_CHANGE',
+      message: 'The latest evaluation report measured a build made before the data layout change. Run eval again to compare new builds.' });
+  }
   const versions = (source) => new Map((source?.groups ?? []).flatMap(([sourceId, docs]) => docs.map((document) =>
-    [sourceId + ':' + document.objectId, document.corpus?.originalSha256 ?? revision(document.content)])));
+    [sourceId + ':' + document.objectId, document.sha256 ?? document.corpus?.originalSha256 ?? document.version ?? revision(document.content ?? '')])));
   const activeDocs = versions(snapshot);
   const oldDocs = versions(assessed);
   const updated = assessed ? [...activeDocs].filter(([name, hash]) => oldDocs.get(name) !== hash).length
@@ -506,7 +511,7 @@ async function statusDetails(state, project, build, evaluation) {
       shared_corpus_logical_bytes: corpus, shared_state_logical_bytes: metadata.size } };
 }
 
-/** Runs a build command in Rust (spec 28.9 step 2d). JavaScript scans and orders the sources until step 2e. */
+/** Runs a build command in Rust (spec 28.9 steps 2d and 2e). Rust also scans and orders the sources. */
 async function buildProject(project, command, runId, values, warnings) {
   const selected = command === 'build'
     ? stages.slice(values.from === undefined ? 0 : stages.indexOf(values.from), values.until === undefined ? stages.length : stages.indexOf(values.until) + 1)
@@ -520,7 +525,7 @@ async function buildProject(project, command, runId, values, warnings) {
       command, runId: runId ?? undefined, from: values.from, until: values.until, input: values.input, tag: values.tag,
       candidate: Boolean(values.config), force: Boolean(values.force), skipUnsupported: Boolean(values['skip-unsupported']), dryRun,
       state: paths.state, artifacts: paths.artifacts, corpus: paths.corpus, root: project.root,
-      source: await sourceSettings(project, plan.source, { scan: selected[0] === 'source', ocr: !dryRun && selected[0] === 'source' }),
+      source: await sourceSettings(project, plan.source, { ocr: !dryRun && selected[0] === 'source' }),
       transform: { modules: moduleSettings(plan.transform),
         embedder: semantic && !dryRun && selected.includes('transform') ? embeddingSettings(project.config, semantic.args.model) : null },
       index: await indexSettings(project, { resolve: !dryRun && selected.includes('index') }),
@@ -1220,7 +1225,7 @@ export async function runProjectCommand(command, args, explicitProject) {
           const trials = { limits: project.trialLimits, usage: trialUsage(state) };
           data = build ? { build_id: build.build_id, search_config_id: searchId,
             evaluation_status: evaluation.state, evaluation_report: evaluation.report, documents: build.documents, skipped: build.skipped,
-            trials, ...await statusDetails(state, project, build, evaluation) } : { build_id: null, trials };
+            trials, ...await statusDetails(state, project, build, evaluation, warnings) } : { build_id: null, trials };
         } finally {
           state.close();
         }

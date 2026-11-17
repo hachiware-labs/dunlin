@@ -1,9 +1,9 @@
 //! The build commands (spec 28.9 step 2d): `build`, `source`, `transform` and `index` with
 //! `--from`, `--until`, `--input`, `--tag`, `--config` and `--dry-run`, and the `tag` command.
 //!
-//! JavaScript scans and orders the source folders (the order is part of the stage IDs until step
-//! 2e), resolves settings from the configuration, holds the execution lock and counts trial runs.
-//! Everything else runs here, with the results and errors of the JavaScript implementation.
+//! JavaScript resolves settings from the configuration, holds the execution lock and counts trial
+//! runs. Everything else runs here, including scanning the source folders (step 2e), with the
+//! results and errors of the JavaScript implementation.
 
 use std::io::Read;
 use std::time::Instant;
@@ -18,7 +18,7 @@ use crate::index_stage::{
     IndexHost, IndexRequest, assign, digest, field, items, js_json, object, sql, string_field, text,
 };
 use crate::source_load::{Host, sha256_hex};
-use crate::source_scan::{Route, RouteFile, RouteRequest, route};
+use crate::source_scan::{Route, RouteFile, RouteRequest, ScanRequest, route, scan};
 use crate::source_stage::{SourceOutcome, SourceRequest, StageSource};
 use crate::transform_stage::{StageError, TransformRequest};
 
@@ -73,9 +73,10 @@ pub struct BuildRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceSettings {
-    /// Scanned and ordered sources, when the source stage runs or a dry run starts there.
+    /// The folders of the `source.filesystem` instances, in order. They are scanned when the source
+    /// stage runs or a dry run starts there.
     #[serde(default)]
-    pub sources: Option<Vec<StageSource>>,
+    pub scans: Vec<ScanRequest>,
     #[serde(default)]
     pub routes: Vec<Route>,
     #[serde(default)]
@@ -315,6 +316,50 @@ fn stage_modules<'a>(request: &'a BuildRequest, stage: &str) -> &'a ConfigValue 
     }
 }
 
+/// Scans the source folders in order. Files come back ordered by object ID.
+fn scan_sources(
+    request: &BuildRequest,
+    cancel: &Cancellation,
+) -> Result<Vec<StageSource>, StageError> {
+    request
+        .source
+        .scans
+        .iter()
+        .map(|folder| {
+            let scanned = scan(
+                &ScanRequest {
+                    path: folder.path.clone(),
+                    exclude: folder.exclude.clone(),
+                    name: folder.name.clone(),
+                    project_root: folder
+                        .project_root
+                        .clone()
+                        .or_else(|| Some(request.root.clone())),
+                },
+                cancel,
+            )
+            .map_err(|message| {
+                if cancel.check().is_err() {
+                    StageError::aborted()
+                } else {
+                    StageError::plain(message)
+                }
+            })?;
+            Ok(StageSource {
+                id: scanned.id,
+                files: scanned
+                    .files
+                    .into_iter()
+                    .map(|file| RouteFile {
+                        file: file.file,
+                        object_id: file.object_id,
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
 pub fn run(
     request: BuildRequest,
     host: &dyn BuildHost,
@@ -328,6 +373,8 @@ pub fn run(
         });
     }
     let start = Instant::now();
+    // A project built before step 2e moves its stage data to the corpus once (spec 28.7).
+    let migrated = crate::stage_store::open(&request.state, &request.corpus, cancel)?.migrated;
     let connection = open(&request.state, false)?;
     let generation: Option<i64> = connection
         .query_row("SELECT max(id) FROM adoption_history", [], |row| row.get(0))
@@ -338,6 +385,15 @@ pub fn run(
         .clone()
         .ok_or_else(|| StageError::plain("A build needs a run ID."))?;
     let mut warnings = Vec::new();
+    if migrated {
+        warnings.push(object(vec![
+            ("code", text("DATA_LAYOUT_MIGRATED")),
+            (
+                "message",
+                text("Moved extraction results and chunks into the corpus. Build IDs change once, so earlier evaluation reports cannot be compared with new builds."),
+            ),
+        ]));
+    }
     let mut results = Vec::new();
     let mut source: Option<ConfigValue> = None;
     let mut request = request;
@@ -433,10 +489,12 @@ pub fn run(
                 });
             }
             "source" => {
+                let sources = scan_sources(&request, cancel)?;
                 let settings = &mut request.source;
                 let outcome = crate::source_stage::run(
                     &SourceRequest {
                         state: request.state.clone(),
+                        corpus: request.corpus.clone(),
                         originals: std::path::Path::new(&request.artifacts)
                             .join("originals")
                             .join("shared")
@@ -453,7 +511,7 @@ pub fn run(
                             .unwrap_or_else(|| "lightonocr".into()),
                         ocr_home: settings.ocr_home.clone(),
                         lighton: settings.lighton.take(),
-                        sources: settings.sources.take().unwrap_or_default(),
+                        sources,
                         routes: settings.routes.clone(),
                         commands: settings.commands.clone(),
                         modules: settings.modules.clone(),
@@ -500,6 +558,7 @@ pub fn run(
                 let outcome = crate::transform_stage::run(
                     &TransformRequest {
                         state: request.state.clone(),
+                        corpus: request.corpus.clone(),
                         source_id,
                         force: request.force,
                         modules: request.transform.modules.clone(),
@@ -597,7 +656,7 @@ fn dry_run(
         assign(&mut data, "input_id", Some(text(&id)));
         return Ok(ConfigValue::Object(data));
     }
-    let sources = request.source.sources.as_deref().unwrap_or_default();
+    let sources = scan_sources(request, cancel)?;
     let files: Vec<(&str, &RouteFile)> = sources
         .iter()
         .flat_map(|source| {
@@ -789,8 +848,12 @@ fn inventory(
                     .unwrap_or_default()
                     .to_owned(),
             );
-            let hash = field(document, "corpus")
-                .and_then(|corpus| string_field(corpus, "originalSha256"))
+            // Before step 2e moved a project, its entries were whole documents.
+            let hash = string_field(document, "sha256")
+                .or_else(|| {
+                    field(document, "corpus")
+                        .and_then(|corpus| string_field(corpus, "originalSha256"))
+                })
                 .map(str::to_owned);
             match old.iter_mut().find(|(existing, _)| *existing == key) {
                 Some(entry) => entry.1 = hash,
@@ -1038,14 +1101,10 @@ mod tests {
     use super::*;
     use crate::embed::Charge;
     use crate::source_load::LoadFile;
-    use crate::source_scan::{ScanRequest, scan};
 
     const SCHEMA: &str = "CREATE TABLE stage_outputs (stage TEXT NOT NULL, id TEXT NOT NULL, manifest TEXT NOT NULL, PRIMARY KEY (stage, id));
         CREATE TABLE latest_stage (stage TEXT PRIMARY KEY, id TEXT NOT NULL);
-        CREATE TABLE stage_payloads (id TEXT PRIMARY KEY, data TEXT NOT NULL);
-        CREATE TABLE document_chunks (id TEXT PRIMARY KEY, chunks TEXT NOT NULL);
         CREATE TABLE transform_outputs (key TEXT PRIMARY KEY, output_id TEXT NOT NULL);
-        CREATE TABLE loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL);
         CREATE TABLE source_checks (id INTEGER PRIMARY KEY, source_id TEXT NOT NULL, checked_at TEXT NOT NULL);
         CREATE TABLE builds (id TEXT PRIMARY KEY, manifest TEXT NOT NULL);
         CREATE TABLE project (id INTEGER PRIMARY KEY CHECK (id = 1), build_id TEXT REFERENCES builds(id));
@@ -1100,26 +1159,9 @@ mod tests {
 
     fn request(root: &std::path::Path, values: &str) -> BuildRequest {
         let data = root.join(".dunlin");
-        let scanned = scan(
-            &ScanRequest {
-                path: root.join("docs").to_string_lossy().into_owned(),
-                exclude: Vec::new(),
-                name: "source.filesystem".into(),
-                project_root: Some(root.to_string_lossy().into_owned()),
-            },
-            &Cancellation::default(),
-        )
-        .unwrap();
-        let files: Vec<String> = scanned
-            .files
-            .iter()
-            .map(|file| {
-                serde_json::json!({ "file": file.file, "objectId": file.object_id }).to_string()
-            })
-            .collect();
         let mut text = format!(
             r#"{{{}"state":{},"artifacts":{},"corpus":{},"root":{},
-            "source":{{"sources":[{{"id":"{}","files":[{}]}}],"routes":[{{"name":"loader.auto","category":"auto","ocr":false}}],
+            "source":{{"scans":[{{"path":{},"name":"source.filesystem"}}],"routes":[{{"name":"loader.auto","category":"auto","ocr":false}}],
               "modules":[{{"use":"source.filesystem"}}],"ocrVersion":"none"}},
             "transform":{{"modules":[{{"use":"chunk.length","with":{{"size":40,"overlap":0}}}}]}},
             "index":{{"keyword":{{"tokenizer":"trigram"}},"construction":[{{"use":"index.keyword"}}],"search":[],"rerank":[],"configuration":{{"index":{{}}}}}},
@@ -1133,8 +1175,7 @@ mod tests {
             serde_json::to_string(&data.join("artifacts")).unwrap(),
             serde_json::to_string(&data.join("corpus")).unwrap(),
             serde_json::to_string(root).unwrap(),
-            scanned.id,
-            files.join(",")
+            serde_json::to_string(&root.join("docs")).unwrap(),
         );
         text.push_str(values);
         text.push('}');

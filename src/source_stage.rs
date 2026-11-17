@@ -1,7 +1,8 @@
-//! The `source` stage: routing, loading, identifiers and the stage record (spec 7, 28.9 step 2a).
+//! The `source` stage: routing, loading, identifiers and the stage record (spec 7, 28.9 steps 2a
+//! and 2e).
 //!
-//! Callers pass scanned and ordered sources. Identifiers are digests of the same JSON the
-//! JavaScript implementation hashed, so existing projects keep their stage and build IDs.
+//! Callers pass scanned and ordered sources. The stage lists each document by its corpus version
+//! (spec 28.3); the extraction results themselves are corpus revisions.
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::Deserialize;
@@ -21,6 +22,8 @@ pub struct StageSource {
 #[serde(rename_all = "camelCase")]
 pub struct SourceRequest {
     pub state: String,
+    /// The shared corpus directory, which holds `corpus.sqlite`.
+    pub corpus: String,
     pub originals: String,
     pub root: String,
     #[serde(default)]
@@ -144,6 +147,7 @@ pub fn run(
     let loaded = load(
         &LoadRequest {
             state: request.state.clone(),
+            corpus: request.corpus.clone(),
             originals: request.originals.clone(),
             force: request.force,
             ocr_version: request.ocr_version.clone(),
@@ -163,7 +167,14 @@ pub fn run(
         .collect();
     for (owner, document) in owners.into_iter().zip(loaded.documents) {
         if let Some(group) = groups.iter_mut().find(|(id, _)| id == owner) {
-            group.1.push(document);
+            let version = document
+                .get("version")
+                .and_then(ConfigValue::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            group
+                .1
+                .push(crate::stage_store::source_entry(&document, &version));
         }
     }
     let groups = ConfigValue::Array(
@@ -202,7 +213,7 @@ pub fn run(
     })
 }
 
-/// Records the stage: payloads by content, the manifest, the latest stage and the check time.
+/// Records the stage: the manifest, the latest stage and the check time.
 fn save(state: &str, output: &ConfigValue, force: bool) -> Result<bool, String> {
     let sql = |error: rusqlite::Error| error.to_string();
     let mut connection = Connection::open(state).map_err(sql)?;
@@ -228,59 +239,10 @@ fn save(state: &str, output: &ConfigValue, force: bool) -> Result<bool, String> 
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(sql)?;
     if !reused {
-        let mut manifest = match output {
-            ConfigValue::Object(entries) => entries.clone(),
-            _ => Vec::new(),
-        };
-        manifest.push(("payloads".into(), ConfigValue::Number(1.0)));
-        let mut insert = transaction
-            .prepare("INSERT OR IGNORE INTO stage_payloads VALUES (?, ?)")
-            .map_err(sql)?;
-        let mut put = |content: &ConfigValue| -> Result<String, String> {
-            let json = content.to_js_json();
-            let key = sha256_hex(json.as_bytes());
-            insert.execute(params![key, json]).map_err(sql)?;
-            Ok(key)
-        };
-        let mut stored_groups = Vec::new();
-        if let Some(ConfigValue::Array(groups)) = output.get("groups") {
-            for group in groups {
-                let ConfigValue::Array(pair) = group else {
-                    continue;
-                };
-                let documents = match pair.get(1) {
-                    Some(ConfigValue::Array(documents)) => documents,
-                    _ => continue,
-                };
-                let mut stored = Vec::new();
-                for document in documents {
-                    let ConfigValue::Object(entries) = document else {
-                        continue;
-                    };
-                    let mut entries: Vec<(String, ConfigValue)> = entries.clone();
-                    let content = entries
-                        .iter()
-                        .position(|(key, _)| key == "content")
-                        .map(|index| entries.remove(index).1)
-                        .unwrap_or(ConfigValue::Null);
-                    entries.push(("text".into(), text(&put(&content)?)));
-                    stored.push(ConfigValue::Object(entries));
-                }
-                stored_groups.push(ConfigValue::Array(vec![
-                    pair[0].clone(),
-                    ConfigValue::Array(stored),
-                ]));
-            }
-        }
-        drop(insert);
-        if let Some(entry) = manifest.iter_mut().find(|(key, _)| key == "groups") {
-            entry.1 = ConfigValue::Array(stored_groups);
-        }
-        let manifest = ConfigValue::Object(manifest).to_js_json();
         transaction
             .execute(
                 "INSERT OR IGNORE INTO stage_outputs VALUES (?, ?, ?)",
-                params!["source", id, manifest],
+                params!["source", id, output.to_js_json()],
             )
             .map_err(sql)?;
     }
@@ -348,9 +310,7 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE stage_outputs (stage TEXT NOT NULL, id TEXT NOT NULL, manifest TEXT NOT NULL, PRIMARY KEY (stage, id));
                  CREATE TABLE latest_stage (stage TEXT PRIMARY KEY, id TEXT NOT NULL);
-                 CREATE TABLE source_checks (id INTEGER PRIMARY KEY, source_id TEXT NOT NULL, checked_at TEXT NOT NULL);
-                 CREATE TABLE loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL);
-                 CREATE TABLE stage_payloads (id TEXT PRIMARY KEY, data TEXT NOT NULL);",
+                 CREATE TABLE source_checks (id INTEGER PRIMARY KEY, source_id TEXT NOT NULL, checked_at TEXT NOT NULL);",
             )
             .unwrap();
         std::fs::write(root.path().join("a.md"), "# A").unwrap();
@@ -361,6 +321,7 @@ mod tests {
         };
         let request = |reject: bool, skip_unsupported: bool| SourceRequest {
             state: state.to_string_lossy().into_owned(),
+            corpus: root.path().join("corpus").to_string_lossy().into_owned(),
             originals: root.path().join("originals").to_string_lossy().into_owned(),
             root: root.path().to_string_lossy().into_owned(),
             force: false,
@@ -423,8 +384,8 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest.ends_with(",\"payloads\":1}"), "{manifest}");
         assert!(!manifest.contains("\"content\""));
+        assert!(manifest.contains("\"version\""), "{manifest}");
         let checks: i64 = connection
             .query_row("SELECT count(*) FROM source_checks", [], |row| row.get(0))
             .unwrap();

@@ -936,7 +936,7 @@ pub fn run_source<'env>(
 }
 
 /// Scans a source folder (see `source_scan`). Resolves to `{ id, files: [{ file, objectId }] }`
-/// as JSON, unsorted, or `{ error }` with a message.
+/// as JSON, ordered by object ID, or `{ error }` with a message.
 #[napi]
 pub fn scan_source(request: String, cancel: &NativeCancellation) -> AsyncTask<Job<String>> {
     let cancel = cancel.0.clone();

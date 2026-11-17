@@ -67,6 +67,16 @@ impl SourceInput<'_> {
     }
 }
 
+/// The corpus version and record of an extraction result (spec 28.3). The record is the one indexing
+/// saves; its range covers every line of the document.
+#[cfg(any(feature = "node", test))]
+pub(crate) fn revision(id: &str, input: DocumentInput) -> Result<(String, Vec<u8>)> {
+    let object = SourceObject::new(id, input)?;
+    let end_line = object.content.split_inclusive('\n').count();
+    let record = crate::corpus::record_bytes(&object, end_line)?;
+    Ok((object.source.version, record))
+}
+
 pub(crate) struct SourceObject {
     pub source: SourceRef,
     pub acquired_at_ms: u64,

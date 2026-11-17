@@ -22,7 +22,7 @@ use crate::engine::KeywordOptions;
 use crate::source::DocumentInput;
 use crate::source_load::sha256_hex;
 use crate::source_stage::iso_now;
-use crate::transform_stage::{StageError, js_blank, read_transform};
+use crate::transform_stage::{StageError, js_blank, transform_manifest};
 use crate::{Cancellation, CorpusBackend, DocumentRef, KnowledgeBase};
 
 /// What the stage asks of JavaScript while it runs.
@@ -174,11 +174,7 @@ fn tag_exists(message: &str) -> StageError {
     StageError::coded("TAG_EXISTS", message, 2)
 }
 
-fn missing_payload() -> StageError {
-    StageError::coded("STAGE_REQUIRED", "A saved stage payload is missing.", 3)
-}
-
-/// A recorded source stage with document contents in place of payload keys, as `readStage` reads it.
+/// A recorded source stage. Its entries name corpus versions; `expand_source` reads the documents.
 fn read_source(connection: &Connection, id: &str) -> Result<Option<ConfigValue>, StageError> {
     let manifest: Option<String> = connection
         .query_row(
@@ -193,51 +189,7 @@ fn read_source(connection: &Connection, id: &str) -> Result<Option<ConfigValue>,
     };
     let manifest: ConfigValue =
         serde_json::from_str(&manifest).map_err(|_| json_error("A saved source stage"))?;
-    if manifest.get("payloads") != Some(&ConfigValue::Number(1.0)) {
-        return Ok(Some(manifest));
-    }
-    let ConfigValue::Object(mut entries) = manifest else {
-        return Ok(None);
-    };
-    let mut find = connection
-        .prepare("SELECT data FROM stage_payloads WHERE id = ?")
-        .map_err(sql)?;
-    for (name, value) in entries.iter_mut() {
-        let (true, ConfigValue::Array(groups)) = (name == "groups", value) else {
-            continue;
-        };
-        for group in groups.iter_mut() {
-            let ConfigValue::Array(pair) = group else {
-                continue;
-            };
-            let Some(ConfigValue::Array(documents)) = pair.get_mut(1) else {
-                continue;
-            };
-            for document in documents.iter_mut() {
-                let ConfigValue::Object(fields) = document else {
-                    continue;
-                };
-                // `({ text, ...doc }) => ({ ...doc, content: get(text) })`
-                let key = fields
-                    .iter()
-                    .position(|(name, _)| name == "text")
-                    .map(|index| fields.remove(index).1);
-                let key = key
-                    .as_ref()
-                    .and_then(ConfigValue::as_str)
-                    .unwrap_or_default();
-                let data: Option<String> = find
-                    .query_row([key], |row| row.get(0))
-                    .optional()
-                    .map_err(sql)?;
-                let data = data.ok_or_else(missing_payload)?;
-                let content: ConfigValue =
-                    serde_json::from_str(&data).map_err(|_| missing_payload())?;
-                assign(fields, "content", Some(content));
-            }
-        }
-    }
-    Ok(Some(ConfigValue::Object(entries)))
+    Ok(Some(manifest))
 }
 
 fn read_manifest(connection: &Connection, id: &str) -> Result<Option<ConfigValue>, StageError> {
@@ -440,11 +392,11 @@ pub fn run(
     host: &dyn IndexHost,
     cancel: &Cancellation,
 ) -> Result<IndexOutcome, StageError> {
-    let mut connection = Connection::open(&request.state).map_err(sql)?;
-    connection
-        .busy_timeout(Duration::from_secs(10))
-        .map_err(sql)?;
-    let transformed = read_transform(&connection, &request.transform_id)?.ok_or_else(|| {
+    let stores = crate::stage_store::open(&request.state, &request.corpus, cancel)?;
+    let mut connection = stores.state;
+    let corpus = stores.corpus;
+    // The documents and chunks are read from the corpus only when the build is not reused.
+    let transformed = transform_manifest(&connection, &request.transform_id)?.ok_or_else(|| {
         StageError::coded(
             "STAGE_REQUIRED",
             format!(
@@ -698,6 +650,9 @@ pub fn run(
                         }
                         _ => StageError::native(error),
                     })?;
+                    let source = crate::stage_store::expand_source(&corpus, source.clone())?;
+                    let transformed =
+                        crate::stage_store::expand_transform(&corpus, transformed.clone())?;
                     let groups = items(field(&source, "groups"));
                     let chunks = items(field(&transformed, "chunks"));
                     let mut unused: Vec<String> = baseline
@@ -1458,8 +1413,6 @@ mod tests {
 
     const SCHEMA: &str = "CREATE TABLE stage_outputs (stage TEXT NOT NULL, id TEXT NOT NULL, manifest TEXT NOT NULL, PRIMARY KEY (stage, id));
         CREATE TABLE latest_stage (stage TEXT PRIMARY KEY, id TEXT NOT NULL);
-        CREATE TABLE stage_payloads (id TEXT PRIMARY KEY, data TEXT NOT NULL);
-        CREATE TABLE document_chunks (id TEXT PRIMARY KEY, chunks TEXT NOT NULL);
         CREATE TABLE transform_outputs (key TEXT PRIMARY KEY, output_id TEXT NOT NULL);
         CREATE TABLE builds (id TEXT PRIMARY KEY, manifest TEXT NOT NULL);
         CREATE TABLE project (id INTEGER PRIMARY KEY CHECK (id = 1), build_id TEXT REFERENCES builds(id));
@@ -1501,28 +1454,44 @@ mod tests {
         let artifacts = root.path().join(".dunlin").join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
         let state = root.path().join(".dunlin").join("state.sqlite");
-        let connection = Connection::open(&state).unwrap();
-        connection.execute_batch(SCHEMA).unwrap();
+        let corpus = root.path().join(".dunlin").join("corpus");
+        Connection::open(&state)
+            .unwrap()
+            .execute_batch(SCHEMA)
+            .unwrap();
+        let stores = crate::stage_store::open(
+            &state.to_string_lossy(),
+            &corpus.to_string_lossy(),
+            &Cancellation::default(),
+        )
+        .unwrap();
         let mut documents = Vec::new();
         for (i, content) in contents.iter().enumerate() {
-            let payload = serde_json::to_string(content).unwrap();
-            let key = sha256_hex(payload.as_bytes());
-            connection
+            let document = object(vec![
+                ("objectId", text(&format!("d{i}.md"))),
+                ("url", text(&format!("file:///d{i}.md"))),
+                ("content", text(content)),
+                ("format", text("markdown")),
+            ]);
+            let (version, record) = crate::stage_store::revision("docs", &document).unwrap();
+            stores
+                .corpus
                 .execute(
-                    "INSERT OR IGNORE INTO stage_payloads VALUES (?, ?)",
-                    params![key, payload],
+                    crate::stage_store::INSERT_REVISION,
+                    params!["docs", format!("d{i}.md"), version, record],
                 )
                 .unwrap();
             documents.push(format!(
-                "{{\"objectId\":\"d{i}.md\",\"url\":\"file:///d{i}.md\",\"format\":\"markdown\",\"text\":\"{key}\"}}"
+                "{{\"objectId\":\"d{i}.md\",\"version\":\"{version}\"}}"
             ));
         }
         let manifest = format!(
-            "{{\"id\":\"src-1\",\"config_id\":\"cfg-s\",\"modules\":[],\"files\":{},\"skipped\":[],\"groups\":[[\"docs\",[{}]]],\"payloads\":1}}",
+            "{{\"id\":\"src-1\",\"config_id\":\"cfg-s\",\"modules\":[],\"files\":{},\"skipped\":[],\"groups\":[[\"docs\",[{}]]]}}",
             contents.len(),
             documents.join(",")
         );
-        connection
+        stores
+            .state
             .execute(
                 "INSERT INTO stage_outputs VALUES ('source', 'src-1', ?)",
                 [manifest],
@@ -1531,6 +1500,7 @@ mod tests {
         let transformed = transform(
             &TransformRequest {
                 state: state.to_string_lossy().into_owned(),
+                corpus: corpus.to_string_lossy().into_owned(),
                 source_id: "src-1".into(),
                 force: false,
                 modules: serde_json::from_str(

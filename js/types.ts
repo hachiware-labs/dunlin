@@ -97,8 +97,10 @@ export interface LoadCorpusFile {
 }
 
 export interface LoadCorpusRequest {
-  /** The project's state.sqlite. */
+  /** The project's state.sqlite, which maps cached files to corpus versions. */
   state: string;
+  /** The shared corpus directory, which holds the extraction results in corpus.sqlite. */
+  corpus: string;
   /** The shared originals directory. */
   originals: string;
   force?: boolean;
@@ -144,6 +146,8 @@ export interface ParserRoute {
 /** The `source` stage over scanned sources (spec 7). */
 export interface SourceStageRequest {
   state: string;
+  /** The shared corpus directory. */
+  corpus: string;
   originals: string;
   root: string;
   force?: boolean;
@@ -180,6 +184,8 @@ export interface EmbedderSettings {
 /** The `transform` stage of a recorded `source` stage (spec 28.9 step 2b). */
 export interface TransformStageRequest {
   state: string;
+  /** The shared corpus directory, which holds the chunk sets. */
+  corpus: string;
   sourceId: string;
   force?: boolean;
   /** `moduleSettings(plan)` for the transform stage. */
@@ -193,7 +199,7 @@ export interface TransformStageHost {
 }
 
 export type TransformStageOutcome =
-  | { status: 'done'; output: Record<string, unknown> & { id: string; key: string; config_id: string; source_id: string; chunks: unknown[][][] }; reused: boolean }
+  | { status: 'done'; output: Record<string, unknown> & { id: string; key: string; config_id: string; source_id: string; chunks: string[][] }; reused: boolean }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
 
 /** The `index` stage of a project build: indexes a recorded transform stage and records the build. */
@@ -263,8 +269,8 @@ export interface BuildCommandRequest {
   artifacts: string;
   corpus: string;
   root: string;
-  /** Scanned and ordered sources, routes and the other settings of the source stage. */
-  source: Record<string, unknown> & { modules: unknown };
+  /** The folders to scan (`{ path, exclude, name }`), routes and the other settings of the source stage. */
+  source: Record<string, unknown> & { modules: unknown; scans?: { path: string; exclude?: readonly string[]; name: string }[] };
   transform: { modules: unknown; embedder?: EmbedderSettings | null };
   /** The `index` stage settings of IndexStageRequest, without the run, stage and serving fields. */
   index: Record<string, unknown> & { construction: unknown };

@@ -94,16 +94,13 @@ test('runs external parsers and validates their output', async (t) => {
   // loader.command runs in Rust; load one file through Dunlin.loadCorpus and read the document back.
   const root = await mkdtemp(join(tmpdir(), 'dunlin-command-'));
   const state = join(root, 'state.sqlite');
-  const db = new DatabaseSync(state);
-  db.exec('CREATE TABLE loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL)');
-  db.close();
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const bytes = Buffer.from('ポンプの点検箇所\n');
   await writeFile(join(root, 'pump.vsdx'), bytes);
   let run = 0;
   const parse = async (args, options = {}) => {
     const route = commandRoute(args);
-    const request = { state, originals: join(root, 'originals'), force: true, ocrVersion: 'v', root,
+    const request = { state, corpus: join(root, 'corpus'), originals: join(root, 'originals'), force: true, ocrVersion: 'v', root,
       files: [{ id: 'docs', file: join(root, 'pump.vsdx'), objectId: 'pump.vsdx', kind: 'command', route: route.name + run++,
         command: { module: route.name, args: route.args } }] };
     const { documents } = await Dunlin.loadCorpus(request, { parse: () => { throw new Error('unexpected host parse'); } }, options);
@@ -177,14 +174,17 @@ test('builds with loader.command, reuses its output and reports parser assignmen
   assert.equal(result.results[0].evidence.source.objectId, 'drawings/pump.vsdx');
   assert.match(result.context.text, /シール部/u);
 
-  const { DatabaseSync } = await import('node:sqlite');
   const state = new DatabaseSync(join(project, '.dunlin', 'state.sqlite'), { readOnly: true });
-  const loaded = state.prepare("SELECT id, document FROM loaded_files WHERE id LIKE '[\"loader.command-v1\"%'").all();
+  const loaded = state.prepare("SELECT source_id, object_id, version FROM extractions WHERE key LIKE '[\"loader.command-v1\"%'").all();
   state.close();
   assert.equal(loaded.length, 1);
-  const document = JSON.parse(loaded[0].document);
-  assert.deepEqual(document.corpus.parser, { tool: 'node', module: 'loader.command', version: '1' });
-  assert.deepEqual(document.corpus.locations, [{ page: 1, range: { startLine: 1, endLine: 2 } }]);
+  const corpus = new DatabaseSync(join(project, '.dunlin', 'corpus', 'corpus.sqlite'), { readOnly: true });
+  const { source_id, object_id, version } = loaded[0];
+  const record = corpus.prepare('SELECT record FROM revisions WHERE source_id = ? AND object_id = ? AND version = ?').get(source_id, object_id, version);
+  corpus.close();
+  const document = JSON.parse(Buffer.from(record.record).toString('utf8'));
+  assert.deepEqual(document.parser, { tool: 'node', module: 'loader.command', version: '1' });
+  assert.deepEqual(document.locations, [{ range: { startLine: 1, endLine: 2 }, page: 1 }]);
 
   const repeated = (await json('build', '--skip-unsupported')).data;
   assert.equal(repeated.build_id, build.build_id);

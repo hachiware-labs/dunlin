@@ -6,7 +6,6 @@ import { test } from 'node:test';
 
 import { Dunlin } from 'dunlin';
 
-import { scanFolder } from '../project-content.mjs';
 import { parserRoutes, routeFiles } from '../project-parsers.mjs';
 import { scanFolder as referenceScan } from './fixtures/reference-load/project-content.mjs';
 import { parserKind, resolveParser } from './fixtures/reference-load/project-parsers.mjs';
@@ -32,6 +31,11 @@ test('matches globs exactly as Node.js path.matchesGlob', () => {
   assert.ok(compared > 2000);
 });
 
+// Rust orders files by object ID in code point order (spec 28.9 step 2e); the reference used localeCompare.
+const codePoints = (a, b) => Buffer.compare(Buffer.from(a.objectId), Buffer.from(b.objectId));
+const scanFolder = async (sources, { path, exclude }, { name, projectRoot }) =>
+  [...sources, await Dunlin.scanSource({ path, exclude, name, ...(projectRoot && { projectRoot }) })];
+
 test('scans and routes folders like the JavaScript implementation', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-scan-parity-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
@@ -45,7 +49,8 @@ test('scans and routes folders like the JavaScript implementation', async (t) =>
   }
   for (const [exclude, projectRoot] of [[[], undefined], [['skip/**', '**/*.bin'], docs], [['**/*.MD'], undefined]]) {
     const options = { path: docs, exclude };
-    const expected = await referenceScan([], options, { name: 'source.filesystem', projectRoot });
+    const expected = (await referenceScan([], options, { name: 'source.filesystem', projectRoot }))
+      .map(({ id, files }) => ({ id, files: [...files].sort(codePoints) }));
     const actual = await scanFolder([], options, { name: 'source.filesystem', projectRoot });
     assert.deepEqual(actual, expected, JSON.stringify(exclude));
   }

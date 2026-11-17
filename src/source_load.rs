@@ -1,8 +1,8 @@
 //! Loading source files for the `source` stage (spec 6, 28.9 step 2a).
 //!
-//! Files are read, hashed and looked up in the extraction cache in `state.sqlite`. Text files are
-//! decoded here; other kinds go to a host (the JavaScript parsers for now). Results, cache rows,
-//! stored originals and messages follow the JavaScript `loadCorpus` this replaces.
+//! Files are read, hashed and looked up in the extraction cache. Text files are decoded here; other
+//! kinds go to a host (the JavaScript parsers for now). Extraction results are corpus revisions in
+//! `corpus.sqlite`; `state.sqlite` maps each cache key to its version (spec 28.3).
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -30,6 +30,8 @@ const FILE_CONCURRENCY: usize = 4;
 #[serde(rename_all = "camelCase")]
 pub struct LoadRequest {
     pub state: String,
+    /// The shared corpus directory, which holds `corpus.sqlite`.
+    pub corpus: String,
     /// The shared originals directory.
     pub originals: String,
     #[serde(default)]
@@ -155,8 +157,14 @@ fn assign(entries: &mut Vec<(String, ConfigValue)>, key: &str, value: Option<Con
     }
 }
 
+/// A cache row: the key, source ID, object ID and corpus version.
+type Extraction = (String, String, String, String);
+/// A corpus revision: source ID, object ID, version and record.
+type Revision = (String, String, String, Vec<u8>);
+
 struct Pending {
-    rows: Vec<(String, String)>,
+    rows: Vec<Extraction>,
+    revisions: Vec<Revision>,
     originals: Vec<(String, Vec<u8>, String)>,
     bytes: usize,
     flushed: Instant,
@@ -164,6 +172,7 @@ struct Pending {
 
 struct Writer {
     connection: Mutex<Connection>,
+    corpus: Mutex<Connection>,
     originals_dir: String,
     pending: Mutex<Pending>,
 }
@@ -171,8 +180,8 @@ struct Writer {
 impl Writer {
     fn queue(
         &self,
-        key: String,
-        document: String,
+        row: Extraction,
+        revision: Option<Revision>,
         original: Option<(String, Vec<u8>, String)>,
     ) -> Result<(), String> {
         let ready = {
@@ -189,7 +198,11 @@ impl Writer {
                 pending.bytes += bytes.len();
                 pending.originals.push((sha, bytes, target));
             }
-            pending.rows.push((key, document));
+            if let Some(revision) = revision {
+                pending.bytes += revision.3.len();
+                pending.revisions.push(revision);
+            }
+            pending.rows.push(row);
             pending.rows.len() >= FLUSH_ROWS
                 || pending.bytes >= FLUSH_BYTES
                 || pending.flushed.elapsed() >= FLUSH_INTERVAL
@@ -197,9 +210,9 @@ impl Writer {
         if ready { self.flush() } else { Ok(()) }
     }
 
-    /// Stores originals, then the cache rows that refer to them, in one short transaction.
+    /// Stores originals, then corpus revisions, then the cache rows that refer to them.
     fn flush(&self) -> Result<(), String> {
-        let (rows, originals) = {
+        let (rows, revisions, originals) = {
             let mut pending = self
                 .pending
                 .lock()
@@ -208,6 +221,7 @@ impl Writer {
             pending.flushed = Instant::now();
             (
                 std::mem::take(&mut pending.rows),
+                std::mem::take(&mut pending.revisions),
                 std::mem::take(&mut pending.originals),
             )
         };
@@ -217,6 +231,24 @@ impl Writer {
                 store_original(std::path::Path::new(&self.originals_dir), sha, bytes)
                     .map_err(|message| format!("Could not load {target}. {message}"))?;
             }
+        }
+        if !revisions.is_empty() {
+            let mut corpus = self
+                .corpus
+                .lock()
+                .map_err(|_| "Could not lock the corpus database".to_owned())?;
+            let transaction = corpus.transaction().map_err(|error| error.to_string())?;
+            {
+                let mut insert = transaction
+                    .prepare(crate::stage_store::INSERT_REVISION)
+                    .map_err(|error| error.to_string())?;
+                for (source_id, object_id, version, record) in &revisions {
+                    insert
+                        .execute(params![source_id, object_id, version, record])
+                        .map_err(|error| error.to_string())?;
+                }
+            }
+            transaction.commit().map_err(|error| error.to_string())?;
         }
         if rows.is_empty() {
             return Ok(());
@@ -230,30 +262,46 @@ impl Writer {
             .map_err(|error| error.to_string())?;
         {
             let mut insert = transaction
-                .prepare("INSERT OR IGNORE INTO loaded_files VALUES (?, ?)")
+                .prepare("INSERT OR REPLACE INTO extractions VALUES (?, ?, ?, ?)")
                 .map_err(|error| error.to_string())?;
-            for (key, document) in &rows {
+            for (key, source_id, object_id, version) in &rows {
                 insert
-                    .execute(params![key, document])
+                    .execute(params![key, source_id, object_id, version])
                     .map_err(|error| error.to_string())?;
             }
         }
         transaction.commit().map_err(|error| error.to_string())
     }
 
-    fn cached(&self, key: &str) -> Result<Option<String>, String> {
-        let connection = self
-            .connection
+    /// The cached extraction result for a key, read from the corpus, or `None`.
+    fn cached(
+        &self,
+        key: &str,
+        modified_at_ms: Option<&ConfigValue>,
+    ) -> Result<Option<ConfigValue>, String> {
+        let row: Option<(String, String, String)> = {
+            let connection = self
+                .connection
+                .lock()
+                .map_err(|_| "Could not lock the extraction cache".to_owned())?;
+            connection
+                .query_row(
+                    "SELECT source_id, object_id, version FROM extractions WHERE key = ?",
+                    [key],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?
+        };
+        let Some((source_id, object_id, version)) = row else {
+            return Ok(None);
+        };
+        let corpus = self
+            .corpus
             .lock()
-            .map_err(|_| "Could not lock the extraction cache".to_owned())?;
-        connection
-            .query_row(
-                "SELECT document FROM loaded_files WHERE id = ?",
-                [key],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|error| error.to_string())
+            .map_err(|_| "Could not lock the corpus database".to_owned())?;
+        crate::stage_store::read_document(&corpus, &source_id, &object_id, &version, modified_at_ms)
+            .map_err(|error| error.message)
     }
 }
 
@@ -275,15 +323,20 @@ pub fn load(
         message,
         aborted: false,
     };
-    let connection = Connection::open(&request.state).map_err(|error| fail(error.to_string()))?;
-    connection
-        .busy_timeout(Duration::from_secs(10))
-        .map_err(|error| fail(error.to_string()))?;
+    let stores =
+        crate::stage_store::open(&request.state, &request.corpus, cancel).map_err(|error| {
+            LoadError {
+                aborted: cancel.check().is_err(),
+                message: error.message,
+            }
+        })?;
     let writer = Writer {
-        connection: Mutex::new(connection),
+        connection: Mutex::new(stores.state),
+        corpus: Mutex::new(stores.corpus),
         originals_dir: request.originals.clone(),
         pending: Mutex::new(Pending {
             rows: Vec::new(),
+            revisions: Vec::new(),
             originals: Vec::new(),
             bytes: 0,
             flushed: Instant::now(),
@@ -467,27 +520,28 @@ fn load_one(
             json(&ConfigValue::Array(parts))
         }
     };
+    let url = file_url(&file.file);
+    let modified = read
+        .modified_at_ms
+        .map(|value| ConfigValue::Number(value as f64));
     let document = [
         ("objectId", Some(string(&file.object_id))),
-        ("url", Some(string(&file_url(&file.file)))),
-        (
-            "modifiedAtMs",
-            read.modified_at_ms
-                .map(|value| ConfigValue::Number(value as f64)),
-        ),
+        ("url", Some(string(&url))),
+        ("modifiedAtMs", modified.clone()),
     ];
     if !request.force
-        && let Some(row) = writer.cached(&key)?
+        && let Some(ConfigValue::Object(mut entries)) = writer.cached(&key, modified.as_ref())?
     {
-        let ConfigValue::Object(mut entries) =
-            serde_json::from_str::<ConfigValue>(&row).map_err(|error| error.to_string())?
-        else {
-            return Err("Invalid extraction cache row".into());
-        };
-        for (name, value) in document {
-            assign(&mut entries, name, value);
+        if entries
+            .iter()
+            .any(|(name, value)| name == "url" && value.as_str() == Some(url.as_str()))
+        {
+            return Ok(ConfigValue::Object(entries));
         }
-        return Ok(ConfigValue::Object(entries));
+        // The same file at another path: the version covers the URL, so save a revision for it.
+        assign(&mut entries, "url", Some(string(&url)));
+        assign(&mut entries, "version", None);
+        return save(writer, file, key, ConfigValue::Object(entries), None);
     }
     let parsed = if file.kind == "text" {
         let content = std::str::from_utf8(&read.bytes)
@@ -558,13 +612,41 @@ fn load_one(
         parsed.get("format").cloned().unwrap_or(ConfigValue::Null),
     ));
     entries.push(("corpus".into(), ConfigValue::Object(corpus)));
-    let input = ConfigValue::Object(entries);
-    writer.queue(
+    save(
+        writer,
+        file,
         key,
-        json(&input),
+        ConfigValue::Object(entries),
         Some((hash, read.bytes, format!("{}:{}", file.id, file.object_id))),
+    )
+}
+
+/// Queues the corpus revision and cache row of an extraction result, and returns the result with
+/// its `version`.
+fn save(
+    writer: &Writer,
+    file: &LoadFile,
+    key: String,
+    document: ConfigValue,
+    original: Option<(String, Vec<u8>, String)>,
+) -> Result<ConfigValue, String> {
+    let (version, record) =
+        crate::stage_store::revision(&file.id, &document).map_err(|error| error.message)?;
+    let ConfigValue::Object(mut entries) = document else {
+        return Err("Invalid extraction result".into());
+    };
+    entries.push(("version".into(), string(&version)));
+    writer.queue(
+        (
+            key,
+            file.id.clone(),
+            file.object_id.clone(),
+            version.clone(),
+        ),
+        Some((file.id.clone(), file.object_id.clone(), version, record)),
+        original,
     )?;
-    Ok(input)
+    Ok(ConfigValue::Object(entries))
 }
 
 #[cfg(test)]
@@ -594,12 +676,6 @@ mod tests {
     fn loads_caches_and_reports_failures() {
         let root = tempfile::tempdir().unwrap();
         let state = root.path().join("state.sqlite");
-        Connection::open(&state)
-            .unwrap()
-            .execute_batch(
-                "CREATE TABLE loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL)",
-            )
-            .unwrap();
         std::fs::write(
             root.path().join("a.md"),
             "# A
@@ -618,6 +694,7 @@ mod tests {
         };
         let request = |files| LoadRequest {
             state: state.to_string_lossy().into_owned(),
+            corpus: root.path().join("corpus").to_string_lossy().into_owned(),
             originals: root.path().join("originals").to_string_lossy().into_owned(),
             force: false,
             ocr_version: "v1".into(),
@@ -645,9 +722,14 @@ mod tests {
         assert!(loaded.warnings.is_empty());
         let rows: i64 = Connection::open(&state)
             .unwrap()
-            .query_row("SELECT count(*) FROM loaded_files", [], |row| row.get(0))
+            .query_row("SELECT count(*) FROM extractions", [], |row| row.get(0))
             .unwrap();
         assert_eq!(rows, 2);
+        let revisions: i64 = Connection::open(root.path().join("corpus").join("corpus.sqlite"))
+            .unwrap()
+            .query_row("SELECT count(*) FROM revisions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(revisions, 2);
         assert_eq!(
             std::fs::read_dir(root.path().join("originals"))
                 .unwrap()
@@ -657,6 +739,30 @@ mod tests {
         let again = load(&request(vec![file("a.md", "text")]), &Html, &cancel)
             .unwrap_or_else(|error| panic!("{}", error.message));
         assert_eq!(again.documents[0], loaded.documents[0]);
+        // The same file under another folder keeps its cache entry and gets a revision for its URL.
+        std::fs::create_dir(root.path().join("moved")).unwrap();
+        std::fs::copy(
+            root.path().join("a.md"),
+            root.path().join("moved").join("a.md"),
+        )
+        .unwrap();
+        let mut moved = file("a.md", "text");
+        moved.file = root
+            .path()
+            .join("moved")
+            .join("a.md")
+            .to_string_lossy()
+            .into_owned();
+        let moved = load(&request(vec![moved]), &Html, &cancel)
+            .unwrap_or_else(|error| panic!("{}", error.message));
+        assert_ne!(
+            moved.documents[0].get("version"),
+            loaded.documents[0].get("version")
+        );
+        assert_eq!(
+            moved.documents[0].get("content"),
+            loaded.documents[0].get("content")
+        );
         let error = load(&request(vec![file("bad.txt", "text")]), &Html, &cancel)
             .err()
             .unwrap();

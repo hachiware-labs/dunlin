@@ -46,6 +46,8 @@ mod source_scan;
 #[cfg(any(feature = "node", test))]
 mod source_stage;
 #[cfg(any(feature = "node", test))]
+mod stage_store;
+#[cfg(any(feature = "node", test))]
 mod transform_stage;
 #[cfg(all(feature = "node", not(test)))]
 mod vector;

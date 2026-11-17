@@ -449,7 +449,7 @@ export class Dunlin {
 
   /**
    * Scan a source folder: its files, skipping names that start with a dot, node_modules, links and
-   * paths that match an exclude pattern. Files come back unsorted.
+   * paths that match an exclude pattern. Files come back ordered by object ID.
    */
   static async scanSource(request: { path: string; exclude?: readonly string[]; name: string; projectRoot?: string },
     { signal }: OperationOptions = {}): Promise<{ id: string; files: { file: string; objectId: string }[] }> {

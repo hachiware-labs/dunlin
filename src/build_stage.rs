@@ -1271,6 +1271,68 @@ mod tests {
     }
 
     #[test]
+    fn keeps_unchanged_documents_without_reading_them() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join(".dunlin");
+        let docs = root.path().join("docs");
+        std::fs::create_dir_all(data.join("artifacts")).unwrap();
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("a.md"), "# Alpha\nalpha one\n").unwrap();
+        std::fs::write(docs.join("b.md"), "# Beta\nbeta two\n").unwrap();
+        std::fs::write(docs.join("c.md"), "# Gone\nremoved later\n").unwrap();
+        Connection::open(data.join("state.sqlite"))
+            .unwrap()
+            .execute_batch(SCHEMA)
+            .unwrap();
+        let cancel = Cancellation::default();
+        run(
+            request(root.path(), r#","runId":"run-1""#),
+            &Answers,
+            &cancel,
+        )
+        .unwrap();
+        // b.md changes and c.md goes; a.md stays in the copied index without being read.
+        std::fs::write(docs.join("b.md"), "# Delta\ndelta four\n").unwrap();
+        std::fs::remove_file(docs.join("c.md")).unwrap();
+        let built = run(
+            request(root.path(), r#","runId":"run-2""#),
+            &Answers,
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(
+            field(&built.output, "documents"),
+            Some(&ConfigValue::Number(2.0))
+        );
+        let index = string_field(&built.output, "index")
+            .unwrap_or("run-2")
+            .to_owned();
+        let database = crate::KnowledgeBase::open_with_options(
+            &data.join("artifacts").join(index),
+            crate::CorpusBackend::Sqlite,
+            Some(&data.join("corpus")),
+            crate::index_stage::keyword_options(Some(&json(r#"{"tokenizer":"trigram"}"#)), None),
+            &cancel,
+        )
+        .unwrap();
+        let read = |object: &str| {
+            database
+                .get_document(
+                    &crate::DocumentRef {
+                        source_id: "docs".into(),
+                        object_id: object.into(),
+                    },
+                    &cancel,
+                )
+                .unwrap()
+                .map(|document| document.content)
+        };
+        assert_eq!(read("a.md").as_deref(), Some("# Alpha\nalpha one\n"));
+        assert_eq!(read("b.md").as_deref(), Some("# Delta\ndelta four\n"));
+        assert_eq!(read("c.md"), None);
+    }
+
+    #[test]
     fn selects_stages_in_order() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("docs")).unwrap();

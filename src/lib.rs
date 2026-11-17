@@ -171,7 +171,13 @@ impl KnowledgeBase {
         path: PathBuf,
         cancel: &Cancellation,
     ) -> Result<DeltaSyncOutcome> {
-        sync::sync(self, id, SourceInput::Filesystem(&path), cancel)
+        sync::sync(
+            self,
+            id,
+            SourceInput::Filesystem(&path),
+            &Default::default(),
+            cancel,
+        )
     }
 
     pub fn sync_documents(
@@ -180,16 +186,23 @@ impl KnowledgeBase {
         documents: Vec<SourceDocument>,
         cancel: &Cancellation,
     ) -> Result<DeltaSyncOutcome> {
-        self.sync_document_inputs(id, documents.into_iter().map(Into::into).collect(), cancel)
+        self.sync_document_inputs(
+            id,
+            documents.into_iter().map(Into::into).collect(),
+            &Default::default(),
+            cancel,
+        )
     }
 
+    /// Syncs a source to `documents`. Objects in `keep` are left as indexed.
     pub(crate) fn sync_document_inputs(
         &self,
         id: &str,
         documents: Vec<DocumentInput>,
+        keep: &std::collections::HashSet<String>,
         cancel: &Cancellation,
     ) -> Result<DeltaSyncOutcome> {
-        sync::sync(self, id, SourceInput::Documents(documents), cancel)
+        sync::sync(self, id, SourceInput::Documents(documents), keep, cancel)
     }
 
     pub fn search(

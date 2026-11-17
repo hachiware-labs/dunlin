@@ -192,6 +192,129 @@ fn read_source(connection: &Connection, id: &str) -> Result<Option<ConfigValue>,
     Ok(Some(manifest))
 }
 
+/// The corpus version and chunk set of each document of a source and transform stage, by source
+/// ID and object ID.
+fn document_sets(
+    source: &ConfigValue,
+    transformed: &ConfigValue,
+) -> HashMap<(String, String), (String, String)> {
+    let chunks = items(field(transformed, "chunks"));
+    let mut sets = HashMap::new();
+    for (group, pair) in items(field(source, "groups")).iter().enumerate() {
+        let pair = items(Some(pair));
+        let id = pair
+            .first()
+            .and_then(ConfigValue::as_str)
+            .unwrap_or_default();
+        let ids = items(chunks.get(group));
+        for (document, set) in items(pair.get(1)).iter().zip(ids) {
+            if let (Some(object_id), Some(version), Some(set)) = (
+                string_field(document, "objectId"),
+                string_field(document, "version"),
+                set.as_str(),
+            ) {
+                sets.insert(
+                    (id.to_owned(), object_id.to_owned()),
+                    (version.to_owned(), set.to_owned()),
+                );
+            }
+        }
+    }
+    sets
+}
+
+/// For each source group, the object IDs whose corpus version and chunk set are the same as in
+/// `prior`, the build whose keyword index was copied.
+fn unchanged_documents(
+    connection: &Connection,
+    prior: Option<&ConfigValue>,
+    source: &ConfigValue,
+    transformed: &ConfigValue,
+) -> Result<Vec<HashSet<String>>, StageError> {
+    let Some((Some(source_id), Some(transform_id))) = prior.map(|prior| {
+        (
+            string_field(prior, "source_id"),
+            string_field(prior, "transform_id"),
+        )
+    }) else {
+        return Ok(Vec::new());
+    };
+    let (Some(before_source), Some(before_transform)) = (
+        read_source(connection, source_id)?,
+        transform_manifest(connection, transform_id)?,
+    ) else {
+        return Ok(Vec::new());
+    };
+    let before = document_sets(&before_source, &before_transform);
+    let now = document_sets(source, transformed);
+    Ok(items(field(source, "groups"))
+        .iter()
+        .map(|pair| {
+            let pair = items(Some(pair));
+            let id = pair
+                .first()
+                .and_then(ConfigValue::as_str)
+                .unwrap_or_default();
+            items(pair.get(1))
+                .iter()
+                .filter_map(|document| string_field(document, "objectId"))
+                .filter(|object_id| {
+                    let key = (id.to_owned(), (*object_id).to_owned());
+                    now.get(&key)
+                        .is_some_and(|set| before.get(&key) == Some(set))
+                })
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect())
+}
+
+/// The source and transform stages without the kept documents.
+fn without_kept(
+    source: &ConfigValue,
+    transformed: &ConfigValue,
+    kept: &[HashSet<String>],
+) -> (ConfigValue, ConfigValue) {
+    if kept.iter().all(HashSet::is_empty) {
+        return (source.clone(), transformed.clone());
+    }
+    let chunks = items(field(transformed, "chunks"));
+    let mut groups = Vec::new();
+    let mut sets = Vec::new();
+    for (group, pair) in items(field(source, "groups")).iter().enumerate() {
+        let pair = items(Some(pair));
+        let keep = kept.get(group);
+        let ids = items(chunks.get(group));
+        let mut documents = Vec::new();
+        let mut chosen = Vec::new();
+        for (i, document) in items(pair.get(1)).iter().enumerate() {
+            let object_id = string_field(document, "objectId").unwrap_or_default();
+            if keep.is_some_and(|keep| keep.contains(object_id)) {
+                continue;
+            }
+            documents.push(document.clone());
+            chosen.push(ids.get(i).cloned().unwrap_or(ConfigValue::Null));
+        }
+        groups.push(ConfigValue::Array(vec![
+            pair.first().cloned().unwrap_or(ConfigValue::Null),
+            ConfigValue::Array(documents),
+        ]));
+        sets.push(ConfigValue::Array(chosen));
+    }
+    let replace = |value: &ConfigValue, name: &str, items: Vec<ConfigValue>| {
+        let mut entries = match value {
+            ConfigValue::Object(entries) => entries.clone(),
+            _ => Vec::new(),
+        };
+        assign(&mut entries, name, Some(ConfigValue::Array(items)));
+        ConfigValue::Object(entries)
+    };
+    (
+        replace(source, "groups", groups),
+        replace(transformed, "chunks", sets),
+    )
+}
+
 fn read_manifest(connection: &Connection, id: &str) -> Result<Option<ConfigValue>, StageError> {
     let manifest: Option<String> = connection
         .query_row("SELECT manifest FROM builds WHERE id = ?", [id], |row| {
@@ -240,7 +363,7 @@ fn document_inputs(
 }
 
 /// `options.keyword` for `Dunlin.open`, from the recorded keyword settings (`keywordOptions`).
-fn keyword_options<'a>(
+pub(crate) fn keyword_options<'a>(
     keyword: Option<&ConfigValue>,
     snapshot: Option<&'a Path>,
 ) -> KeywordOptions<'a> {
@@ -650,9 +773,16 @@ pub fn run(
                         }
                         _ => StageError::native(error),
                     })?;
-                    let source = crate::stage_store::expand_source(&corpus, source.clone())?;
-                    let transformed =
-                        crate::stage_store::expand_transform(&corpus, transformed.clone())?;
+                    // Documents whose version and chunk set match the build the index was copied
+                    // from stay in it unread. Vectors are written for every chunk, so they read all.
+                    let kept = if baseline.is_some() && embedder.is_none() {
+                        unchanged_documents(&connection, prior.as_ref(), &source, &transformed)?
+                    } else {
+                        Vec::new()
+                    };
+                    let (source, transformed) = without_kept(&source, &transformed, &kept);
+                    let source = crate::stage_store::expand_source(&corpus, source)?;
+                    let transformed = crate::stage_store::expand_transform(&corpus, transformed)?;
                     let groups = items(field(&source, "groups"));
                     let chunks = items(field(&transformed, "chunks"));
                     let mut unused: Vec<String> = baseline
@@ -669,7 +799,12 @@ pub fn run(
                         let input = document_inputs(items(pair.get(1)), chunks.get(group))?;
                         if baseline.is_some() {
                             database
-                                .sync_document_inputs(id, input, cancel)
+                                .sync_document_inputs(
+                                    id,
+                                    input,
+                                    kept.get(group).unwrap_or(&HashSet::new()),
+                                    cancel,
+                                )
                                 .map_err(StageError::native)?;
                         } else {
                             database

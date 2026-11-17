@@ -1106,7 +1106,7 @@ impl NativeDatabase {
         let cancel = cancel.0.clone();
         Ok(task(move || {
             let documents = parse_documents(request, &cancel)?;
-            json(database.sync_document_inputs(&id, documents, &cancel)?)
+            json(database.sync_document_inputs(&id, documents, &Default::default(), &cancel)?)
         }))
     }
 

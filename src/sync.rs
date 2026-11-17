@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::Serialize;
 
 use crate::{
@@ -49,10 +51,11 @@ pub(crate) fn sync(
     database: &KnowledgeBase,
     source_id: &str,
     input: SourceInput<'_>,
+    keep: &HashSet<String>,
     cancel: &Cancellation,
 ) -> Result<DeltaSyncOutcome> {
     source::validate_id(source_id)?;
-    let changes = database.index.sync_source(source_id, input, cancel)?;
+    let changes = database.index.sync_source(source_id, input, keep, cancel)?;
     let mut wiki = WikiSyncOutcome {
         status: "complete",
         regenerated: Vec::new(),

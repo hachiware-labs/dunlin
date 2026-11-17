@@ -214,10 +214,13 @@ impl KeywordIndex {
         Ok(report)
     }
 
+    /// Indexes the objects of `input` that changed and deletes the ones that are gone. Objects in
+    /// `keep` stay as indexed without being read again.
     pub fn sync_source(
         &self,
         id: &str,
         input: SourceInput<'_>,
+        keep: &HashSet<String>,
         cancel: &Cancellation,
     ) -> Result<IndexChanges> {
         cancel.check()?;
@@ -260,6 +263,10 @@ impl KeywordIndex {
             .and_then(|_| {
                 for (object_id, old) in previous {
                     cancel.check()?;
+                    if keep.contains(&object_id) {
+                        changes.unchanged += 1;
+                        continue;
+                    }
                     self.delete_object(&writer, id, &old, &mut legacy);
                     changes.deleted.push(object_id);
                 }

@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -76,6 +76,8 @@ interface NativeBinding {
   runIndex(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   runBuild(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   tagBuild(request: string, host: (...args: unknown[]) => void): Promise<string>;
+  adoptBuild(request: string, host: (...args: unknown[]) => void): Promise<string>;
+  trialUsage(state: string): string;
   evidenceMaps(request: string): Promise<string>;
   evaluationReports(request: string): string;
   evaluationStatus(request: string): string;
@@ -107,10 +109,11 @@ function native(): NativeBinding {
 
 /**
  * The native side calls `(id, kind, args, bytes)`, passing its arguments as one array. Kinds:
- * `parse` and `progress` for loading, `charge` for counting model requests in the transform stage.
+ * `parse` and `progress` for loading, `config` and `tool` for the index stage, and the project
+ * search and serving questions. Trials count model requests in Rust.
  */
 function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<TagBuildHost> & Partial<ProjectSearchHost> & Partial<McpHost>
-  & Partial<ServeProjectHost>): (...raw: unknown[]) => void {
+  & Partial<ServeProjectHost> & Partial<AdoptBuildHost>): (...raw: unknown[]) => void {
   return (...raw) => {
     const [id, kind, args, bytes] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string, Buffer];
     if (kind === 'progress') {
@@ -126,8 +129,9 @@ function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<T
       return;
     }
     Promise.resolve()
-      .then(() => kind === 'charge' ? Promise.resolve(host.charge?.(Number(args))).then(() => null)
-        : kind === 'config' ? host.configChanged?.() ?? false
+      .then(() => kind === 'config' ? host.configChanged?.() ?? false
+        : kind === 'write_config' ? Promise.resolve(host.writeConfig!()).then(() => null)
+        : kind === 'restore_config' ? Promise.resolve(host.restoreConfig!()).then(() => null)
         : kind === 'tool' ? host.indexTool!(args)
         : kind === 'search_config' ? host.searchConfigId!(JSON.parse(args) as Record<string, unknown>)
         : kind === 'search_models' ? host.searchModels!(JSON.parse(args) as Record<string, unknown>)
@@ -441,8 +445,8 @@ export class Dunlin {
    * embedding model for `chunk.semantic`, and record the stage in `state.sqlite`. Failures of the
    * stage resolve to `{ status: "failed", error }`.
    */
-  static async runTransform(request: TransformStageRequest, host: TransformStageHost = {}, { signal }: OperationOptions = {}): Promise<TransformStageOutcome> {
-    const text = await cancellable(signal, (cancel) => native().runTransform(configJson(request), hostCallback(host), cancel));
+  static async runTransform(request: TransformStageRequest, { signal }: OperationOptions = {}): Promise<TransformStageOutcome> {
+    const text = await cancellable(signal, (cancel) => native().runTransform(configJson(request), hostCallback({}), cancel));
     return JSON.parse(text) as TransformStageOutcome;
   }
 
@@ -469,6 +473,20 @@ export class Dunlin {
   static async tagBuild(request: TagBuildRequest, host: TagBuildHost): Promise<TagBuildOutcome> {
     const text = await native().tagBuild(configJson(request), hostCallback(host));
     return JSON.parse(text) as TagBuildOutcome;
+  }
+
+  /**
+   * Adopt a build with `use` (spec 28.11 step 4c): record the adoption, the serving build and its
+   * generation in one transaction, during which `host.writeConfig` writes the configuration file.
+   * After a failure, `host.restoreConfig` puts the previous file back.
+   */
+  static async adoptBuild(request: AdoptBuildRequest, host: AdoptBuildHost): Promise<ReportOutcome<Record<string, unknown>>> {
+    return JSON.parse(await native().adoptBuild(configJson(request), hostCallback(host))) as ReportOutcome<Record<string, unknown>>;
+  }
+
+  /** The usage of all trial runs of a project (spec 28.11 step 4c). */
+  static trialUsage(state: string): { runs: number; elapsed_ms: number; api_requests: number; api_input_bytes: number } {
+    return JSON.parse(native().trialUsage(state)) as { runs: number; elapsed_ms: number; api_requests: number; api_input_bytes: number };
   }
 
   /** `report show`, `list` and `compare` on a project's `state.sqlite` (spec 28.11 step 4b). */
@@ -510,8 +528,8 @@ export class Dunlin {
    * Answer a question from a search result (spec 28.10 step 3b): the answer model writes grounded
    * statements with citations, returned as a Responses API object (spec 27.2).
    */
-  static async answerQuestion(request: AnswerRequest, host: TransformStageHost = {}, { signal }: OperationOptions = {}): Promise<AnswerOutcome> {
-    const text = await cancellable(signal, (cancel) => native().answerQuestion(configJson(request), hostCallback(host), cancel));
+  static async answerQuestion(request: AnswerRequest, { signal }: OperationOptions = {}): Promise<AnswerOutcome> {
+    const text = await cancellable(signal, (cancel) => native().answerQuestion(configJson(request), hostCallback({}), cancel));
     return JSON.parse(text) as AnswerOutcome;
   }
 

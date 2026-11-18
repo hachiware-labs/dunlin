@@ -1,4 +1,3 @@
-import { chargeTrialApi } from './project-trials.mjs';
 
 const openaiBase = 'https://api.openai.com/v1';
 const ollamaBase = 'http://127.0.0.1:11434';
@@ -134,7 +133,6 @@ async function post(provider, url, key, body, signal, maxInputBytes) {
   if (maxInputBytes !== undefined && Buffer.byteLength(payload) > maxInputBytes) {
     throw Object.assign(new Error('The model request exceeds max_input_bytes.'), { code: 'MODEL_INPUT_LIMIT', exitCode: 2 });
   }
-  signal = chargeTrialApi(payload, signal);
   const timeout = AbortSignal.timeout(120_000);
   const response = await fetch(url, {
     method: 'POST',

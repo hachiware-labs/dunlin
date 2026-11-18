@@ -193,11 +193,6 @@ export interface TransformStageRequest {
   embedder?: EmbedderSettings | null;
 }
 
-/** Counts each model request (its JSON body size in bytes) against trial limits. Throw to stop the stage. */
-export interface TransformStageHost {
-  charge?(bytes: number): void | Promise<void>;
-}
-
 export type TransformStageOutcome =
   | { status: 'done'; output: Record<string, unknown> & { id: string; key: string; config_id: string; source_id: string; chunks: string[][] }; reused: boolean }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
@@ -236,7 +231,7 @@ export interface IndexStageRequest {
 }
 
 /** Answers the `index` stage's questions. Throw to stop the stage. */
-export interface IndexStageHost extends TransformStageHost {
+export interface IndexStageHost {
   /** Whether the configuration file changed since the build started. */
   configChanged?(): boolean | Promise<boolean>;
   /** The path of the installed hannoy tool, after its integrity check. */
@@ -253,6 +248,8 @@ export interface BuildCommandRequest {
   command: 'build' | 'source' | 'transform' | 'index';
   /** Absent for dry runs. */
   runId?: string;
+  /** Records the run as a trial within its limits (`build --tag` and `--config`). */
+  trial?: TrialRequest;
   from?: string;
   until?: string;
   /** A build ID or tag whose saved stages feed `from`. */
@@ -331,7 +328,7 @@ export interface GeneratorSettings {
   maxInputBytes?: number;
 }
 
-export interface ProjectSearchHost extends TransformStageHost {
+export interface ProjectSearchHost {
   /** The path of the installed hannoy tool, after its integrity check. */
   indexTool?(name: string): string | Promise<string>;
 }
@@ -369,6 +366,8 @@ export interface EvaluateProjectRequest {
   split?: string;
   tag?: string;
   runId: string;
+  /** Records the run as a trial within its limits (`eval --build` and `--config`). */
+  trial?: TrialRequest;
 }
 
 export type EvaluateProjectOutcome =
@@ -394,6 +393,34 @@ export interface EvidenceMapRequest {
 export type EvidenceMapOutcome =
   | { status: 'done'; output: unknown }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+
+/** A build to adopt with `use` (spec 28.11 step 4c). */
+export interface AdoptBuildRequest {
+  state: string;
+  buildId: string;
+  /** The search configuration ID of the adopted configuration. */
+  searchId: string;
+  /** The configuration before and after, without secrets, as JSON text. */
+  previous: string;
+  adopted: string;
+  /** `eval-data.use` and the `eval` settings of the adopted configuration. */
+  dataset?: string;
+  settings?: Record<string, unknown> | null;
+}
+
+/** Writes the configuration file during adoption, and restores it after a failure. Throw to stop. */
+export interface AdoptBuildHost {
+  writeConfig(): void | Promise<void>;
+  restoreConfig(): void | Promise<void>;
+}
+
+/** The trials a run belongs to, which Rust records and limits (spec 28.11 step 4c). */
+export interface TrialRequest {
+  state: string;
+  id: string;
+  operation: string;
+  limits?: Record<string, number>;
+}
 
 /** `report show`, `list` or `compare` (spec 28.11 step 4b). */
 export interface EvaluationReportsRequest {
@@ -801,7 +828,7 @@ export interface ServeProjectRequest {
 }
 
 /** What serving asks of a project's JavaScript. */
-export interface ServeProjectHost extends TransformStageHost {
+export interface ServeProjectHost {
   indexTool?(name: string): string | Promise<string>;
   /** `{ embedders, rerankers, rerankModels }` for a build, or `{ error }`. */
   searchModels(build: Record<string, unknown>): Record<string, unknown>;

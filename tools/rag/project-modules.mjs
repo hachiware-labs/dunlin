@@ -3,7 +3,6 @@ import { stringify } from 'yaml';
 import { Dunlin } from 'dunlin';
 
 import { toolsCatalog } from './project-tools.mjs';
-import { trialCheckpoint } from './project-trials.mjs';
 import { isSearchProject, serveTemplate } from './project-serving.mjs';
 import { projectModel } from './project-global.mjs';
 
@@ -175,9 +174,7 @@ export async function runModules(plan, initial, context) {
   let output = initial;
   for (const { module, args, name } of plan) {
     try {
-      trialCheckpoint();
       output = await module.run(output, args, { ...context, name });
-      trialCheckpoint();
     } catch (error) {
       error.module ??= module.name;
       error.section ??= module.stage;

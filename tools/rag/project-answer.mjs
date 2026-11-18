@@ -3,7 +3,7 @@ import { Dunlin } from 'dunlin';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { generatorSettings } from './models.mjs';
 import { moduleSettings } from './project-modules.mjs';
-import { chargeTrialApi, trialCheckpoint, trialSignal, untilAborted } from './project-trials.mjs';
+import { untilAborted } from './project-trials.mjs';
 
 function fail(exitCode, code, message) {
   return Object.assign(new Error(message), { exitCode, code });
@@ -29,29 +29,11 @@ export function answerModel(project, { optional = false } = {}) {
 
 /** Answers a question from a search result in Rust (spec 28.10 step 3b). Returns a Responses API object (spec 27.2). */
 export async function answerQuestion(project, search, query, model, signal) {
-  let refused;
-  const host = {
-    charge(bytes) {
-      try {
-        chargeTrialApi({ byteLength: bytes });
-      } catch (error) {
-        refused = error;
-        throw error;
-      }
-    },
-  };
-  const combined = trialSignal(signal);
-  let result;
-  try {
-    result = await untilAborted(Dunlin.answerQuestion({ plan: moduleSettings(project.plan.ask), search, query, model: model.settings }, host,
-      { signal: combined }), combined);
-  } catch (error) {
-    trialCheckpoint();
-    throw error;
-  }
+  const result = await untilAborted(Dunlin.answerQuestion({ plan: moduleSettings(project.plan.ask), search, query, model: model.settings },
+    { signal }), signal);
   if (result.status === 'done') return result.output;
   const { code, message, exitCode, module } = result.error;
-  const error = refused ?? Object.assign(new Error(message), code && { code }, exitCode && { exitCode });
+  const error = Object.assign(new Error(message), code && { code }, exitCode && { exitCode });
   if (module) {
     error.module ??= module;
     error.section ??= 'ask';

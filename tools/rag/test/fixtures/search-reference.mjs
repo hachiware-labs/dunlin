@@ -13,7 +13,8 @@ import { resolveApiKey, resolveConfigValue } from '../../config.mjs';
 import { createGenerator, embedderFor, embeddingEndpoint } from '../../models.mjs';
 import { hannoy, openIndexTool } from '../../project-index-tool.mjs';
 import { moduleSettings, runModules } from '../../project-modules.mjs';
-import { trialSignal } from '../../project-trials.mjs';
+// Trials moved to Rust (spec 28.11 step 4c). Outside a trial this passed the signal through.
+const trialSignal = (signal) => signal;
 
 class ProjectError extends Error {
   constructor(exitCode, code, message, data = null) {

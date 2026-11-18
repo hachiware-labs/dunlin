@@ -22,7 +22,7 @@ import { trackWork } from './project-wiki-work.mjs';
 import { embeddingSettings } from './project-vectors.mjs';
 import { changeTool, listedTools, projectOcr, toolsCatalog } from './project-tools.mjs';
 import { checkIndexTool, hannoy, indexToolPath } from './project-index-tool.mjs';
-import { chargeTrialApi, checkTrialLimits, runTrial, trialCheckpoint, trialLimits, trialSignal, trialUsage, untilAborted } from './project-trials.mjs';
+import { checkTrialLimits, trialLimits, untilAborted } from './project-trials.mjs';
 import { answerModel, answerQuestion, answerText } from './project-answer.mjs';
 import { configureGlobal, initialSettings } from './project-global.mjs';
 import { isSearchProject, serveAddress, serveCredential, withServeOverrides } from './project-serving.mjs';
@@ -414,26 +414,30 @@ async function adoptBuild(project, reference) {
     if (adopted.errors.length) throw new ProjectError(2, 'INVALID_CONFIG', 'The adopted settings cannot be resolved. Run validate for the candidate.');
     const before = await readFile(project.configPath, 'utf8');
     if (revision(before) !== project.configDigest) throw new ProjectError(4, 'CONFIG_CHANGED', 'The configuration changed. Retry use.');
+    const searchId = searchConfigId(adopted.plan.search, {}, build, { config });
     return await withWriteLock(project.paths.data, async () => {
-      db.exec('BEGIN IMMEDIATE');
+      // Rust records the adoption in one transaction and asks for the file in the middle of it.
+      let refused;
       let replaced = false;
-      try {
-        if (await readFile(project.configPath, 'utf8') !== before) throw new ProjectError(4, 'CONFIG_CHANGED', 'The configuration changed. Retry use.');
-        await atomicWrite(project.configPath, writeTemplate(config));
-        replaced = true;
-        const adoption = db.prepare('INSERT INTO adoption_history (previous, adopted) VALUES (?, ?)')
-          .run(JSON.stringify(safeConfig(project.config)), JSON.stringify(safeConfig(config)));
-        db.prepare('UPDATE project SET build_id = ? WHERE id = 1').run(build.build_id);
-        db.prepare('INSERT INTO serving_generations VALUES (?, ?)').run(adoption.lastInsertRowid, build.build_id);
-        const searchId = searchConfigId(adopted.plan.search, {}, build, { config });
-        const evaluation = evaluationState(project.paths, config, adopted.evalSettings, build.build_id, searchId);
-        db.exec('COMMIT');
-        return { build_id: build.build_id, search_config_id: searchId, evaluation_status: evaluation.state, restart_mcp: true };
-      } catch (error) {
-        db.exec('ROLLBACK');
-        if (replaced) await atomicWrite(project.configPath, before);
-        throw error;
-      }
+      const result = await Dunlin.adoptBuild({ state: project.paths.state, buildId: build.build_id, searchId,
+        previous: JSON.stringify(safeConfig(project.config)), adopted: JSON.stringify(safeConfig(config)),
+        dataset: config['eval-data']?.use, settings: adopted.evalSettings ?? null }, {
+        async writeConfig() {
+          try {
+            if (await readFile(project.configPath, 'utf8') !== before) throw new ProjectError(4, 'CONFIG_CHANGED', 'The configuration changed. Retry use.');
+            await atomicWrite(project.configPath, writeTemplate(config));
+            replaced = true;
+          } catch (error) {
+            refused = error;
+            throw error;
+          }
+        },
+        async restoreConfig() {
+          if (replaced) await atomicWrite(project.configPath, before);
+        },
+      });
+      if (result.status === 'failed') throw stageFailure(result.error, refused);
+      return result.output;
     });
   } finally {
     db.close();
@@ -517,7 +521,8 @@ async function buildProject(project, command, runId, values, warnings) {
   const dryRun = Boolean(values['dry-run']);
   const { paths, plan } = project;
   const start = performance.now();
-  const run = async (signal) => {
+  /** `trial` records the run as a trial with the project's limits (spec 28.11 step 4c). */
+  const run = async (trial) => {
     const semantic = plan.transform.find(({ module }) => module.name === 'chunk.semantic');
     const request = {
       command, runId: runId ?? undefined, from: values.from, until: values.until, input: values.input, tag: values.tag,
@@ -527,7 +532,7 @@ async function buildProject(project, command, runId, values, warnings) {
       transform: { modules: moduleSettings(plan.transform),
         embedder: semantic && !dryRun && selected.includes('transform') ? embeddingSettings(project.config, semantic.args.model) : null },
       index: await indexSettings(project, { resolve: !dryRun && selected.includes('index') }),
-      configIndex: project.config.index,
+      configIndex: project.config.index, trial,
     };
     request.elapsedMs = performance.now() - start;
     let refused;
@@ -541,17 +546,10 @@ async function buildProject(project, command, runId, values, warnings) {
     };
     const host = {
       ...parserHost(),
-      charge: answer((bytes) => { chargeTrialApi({ byteLength: bytes }); }),
       configChanged: answer(async () => buildConfigChanged(project, await readFile(project.configPath, 'utf8'))),
       indexTool: answer(() => indexToolPath(paths, hannoy)),
     };
-    let result;
-    try {
-      result = await Dunlin.runBuild(request, host, { signal: trialSignal(signal) });
-    } catch (error) {
-      trialCheckpoint();
-      throw error;
-    }
+    const result = await Dunlin.runBuild(request, host);
     if (result.status === 'failed') throw stageFailure(result.error, refused);
     warnings.push(...result.warnings);
     return result.output;
@@ -561,7 +559,7 @@ async function buildProject(project, command, runId, values, warnings) {
     const db = openState(paths);
     try {
       ensureStages(db);
-      return values.tag || values.config ? await runTrial(db, runId, command, project.trialLimits, run) : await run();
+      return await run(values.tag || values.config ? { state: paths.state, id: runId, operation: command, limits: project.trialLimits } : undefined);
     } finally {
       db.close();
     }
@@ -646,8 +644,7 @@ function searchModels(plan, build, project) {
  * and why the context stopped.
  */
 async function searchProject(database, build, plan, query, project, options = {}) {
-  const { limit, sourceIds, budgetChars } = options;
-  const signal = trialSignal(options.signal);
+  const { limit, sourceIds, budgetChars, signal } = options;
   const { embedders, rerankers, rerankModels } = searchModels(plan, build, project);
   let refused;
   const answer = (call) => async (...args) => {
@@ -658,18 +655,9 @@ async function searchProject(database, build, plan, query, project, options = {}
       throw error;
     }
   };
-  const host = {
-    charge: answer((bytes) => { chargeTrialApi({ byteLength: bytes }); }),
-    indexTool: answer(() => indexToolPath(project.paths, hannoy)),
-  };
-  let result;
-  try {
-    result = await untilAborted(database.searchProject({ plan: moduleSettings(plan), query, limit, budgetChars, sourceIds, build,
-      directory: join(project.paths.artifacts, build.index), embedders, rerankModels, rerankers }, host, { signal }), signal);
-  } catch (error) {
-    trialCheckpoint();
-    throw error;
-  }
+  const host = { indexTool: answer(() => indexToolPath(project.paths, hannoy)) };
+  const result = await untilAborted(database.searchProject({ plan: moduleSettings(plan), query, limit, budgetChars, sourceIds, build,
+    directory: join(project.paths.artifacts, build.index), embedders, rerankModels, rerankers }, host, { signal }), signal);
   if (result.status === 'failed') {
     const error = stageFailure(result.error, refused);
     if (result.error.module) {
@@ -678,16 +666,14 @@ async function searchProject(database, build, plan, query, project, options = {}
     }
     throw error;
   }
-  trialCheckpoint();
   return result;
 }
 
 /**
  * Scores a build with the selected evaluation data in Rust and saves the report (spec 28.11 step
- * 4a). `searchBuild` resolves the search models.
+ * 4a). `searchBuild` resolves the search models. `trial` records the run as a trial (step 4c).
  */
-async function evaluateProject(database, build, searchBuild, plan, project, settings, values, runId) {
-  const signal = trialSignal();
+async function evaluateProject(database, build, searchBuild, plan, project, settings, values, runId, trial) {
   const { embedders, rerankers, rerankModels } = searchModels(plan, searchBuild, project);
   let refused;
   const answer = (call) => async (...args) => {
@@ -698,21 +684,12 @@ async function evaluateProject(database, build, searchBuild, plan, project, sett
       throw error;
     }
   };
-  const host = {
-    charge: answer((bytes) => { chargeTrialApi({ byteLength: bytes }); }),
-    indexTool: answer(() => indexToolPath(project.paths, hannoy)),
-  };
-  let result;
-  try {
-    result = await untilAborted(database.evaluateProject({
-      search: { plan: moduleSettings(plan), query: '', build: searchBuild, directory: join(project.paths.artifacts, build.index),
-        embedders, rerankModels, rerankers },
-      state: project.paths.state, build, dataset: project.config['eval-data']?.use, settings, split: values.split, tag: values.tag, runId,
-    }, host, { signal }), signal);
-  } catch (error) {
-    trialCheckpoint();
-    throw error;
-  }
+  const host = { indexTool: answer(() => indexToolPath(project.paths, hannoy)) };
+  const result = await database.evaluateProject({
+    search: { plan: moduleSettings(plan), query: '', build: searchBuild, directory: join(project.paths.artifacts, build.index),
+      embedders, rerankModels, rerankers },
+    state: project.paths.state, build, dataset: project.config['eval-data']?.use, settings, split: values.split, tag: values.tag, runId, trial,
+  }, host);
   if (result.status === 'failed') {
     const error = stageFailure(result.error, refused);
     if (result.error.module) {
@@ -834,7 +811,6 @@ async function serveProject(project, settings) {
       projectType: type, settings, token, paths: project.paths, search: moduleSettings(project.plan.search),
       ask: project.plan.ask ? moduleSettings(project.plan.ask) : [], model: model?.settings ?? null,
     }, {
-      charge() {},
       indexTool: () => indexToolPath(project.paths, hannoy),
       searchModels(build) {
         try {
@@ -1133,14 +1109,12 @@ export async function runProjectCommand(command, args, explicitProject) {
             const settings = { ...project.evalSettings, contextBudget: plan.find(({ module }) => module.role === 'context').args.budget_chars,
               construction: Object.fromEntries(stages.map((stage) => [stage, build.construction?.[stage] ?? config[stage]])), searchModules: moduleSettings(plan) };
             runId = `run-${randomUUID()}`;
-            const score = async () => {
-              const database = await openBuild(project.paths, build);
-              try {
-                return await evaluateProject(database, build, values.config ? { ...build, search_models: undefined } : build,
-                  plan, project, settings, values, runId);
-              } finally { await database.close(); }
-            };
-            return values.build || values.config ? await runTrial(db, runId, command, project.trialLimits, score) : await score();
+            const database = await openBuild(project.paths, build);
+            try {
+              return await evaluateProject(database, build, values.config ? { ...build, search_models: undefined } : build, plan, project,
+                settings, values, runId, values.build || values.config ? { state: project.paths.state, id: runId, operation: command,
+                  limits: project.trialLimits } : undefined);
+            } finally { await database.close(); }
           } finally {
             db.close();
           }
@@ -1152,7 +1126,7 @@ export async function runProjectCommand(command, args, explicitProject) {
         try {
           const searchId = searchConfigId(project.plan.search, {}, build, project);
           const evaluation = build && evaluationState(project.paths, project.config, project.evalSettings, build.build_id, searchId);
-          const trials = { limits: project.trialLimits, usage: trialUsage(state) };
+          const trials = { limits: project.trialLimits, usage: Dunlin.trialUsage(project.paths.state) };
           data = build ? { build_id: build.build_id, search_config_id: searchId,
             evaluation_status: evaluation.state, evaluation_report: evaluation.report, documents: build.documents, skipped: build.skipped,
             trials, ...await statusDetails(state, project, build, evaluation, warnings) } : { build_id: null, trials };

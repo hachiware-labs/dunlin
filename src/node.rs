@@ -569,6 +569,8 @@ pub fn complete_host_call(id: u32, result: Option<String>, error: Option<String>
 
 struct JsHost {
     function: HostFunction,
+    /// The trial the call runs in, which counts model requests.
+    trial: Option<Arc<crate::trial::Trial>>,
 }
 
 impl crate::source_load::Host for JsHost {
@@ -629,6 +631,13 @@ impl crate::source_load::Host for JsHost {
 }
 
 impl JsHost {
+    fn new(function: HostFunction) -> Self {
+        Self {
+            function,
+            trial: None,
+        }
+    }
+
     /// Tells the JavaScript host something without waiting for it.
     fn notify(&self, kind: &str, args: String) {
         use napi::threadsafe_function::ThreadsafeFunctionCallMode;
@@ -664,9 +673,12 @@ impl JsHost {
 }
 
 impl crate::embed::Charge for JsHost {
-    /// Asks JavaScript to count a model request against the trial limits, and waits for it.
+    /// Counts a model request against the limits of the trial, if the call runs in one.
     fn charge(&self, bytes: usize) -> std::result::Result<(), String> {
-        self.call("charge", bytes.to_string()).map(|_| ())
+        match &self.trial {
+            Some(trial) => trial.charge(bytes).map_err(|error| error.message),
+            None => Ok(()),
+        }
     }
 }
 
@@ -679,6 +691,16 @@ impl crate::index_stage::IndexHost for JsHost {
     fn index_tool(&self) -> std::result::Result<String, String> {
         let answer = self.call("tool", "hannoy".into())?;
         serde_json::from_str(&answer).map_err(|_| "JavaScript returned an invalid tool path".into())
+    }
+}
+
+impl crate::adoption::AdoptHost for JsHost {
+    fn write_config(&self) -> std::result::Result<(), String> {
+        self.call("write_config", String::new()).map(|_| ())
+    }
+
+    fn restore_config(&self) -> std::result::Result<(), String> {
+        self.call("restore_config", String::new()).map(|_| ())
     }
 }
 
@@ -760,6 +782,48 @@ fn failed_stage(error: crate::embed::EmbedError) -> String {
     )
 }
 
+/// The `trial` of a request: `{ state, id, operation, limits }`, started before the run.
+fn start_trial(
+    request: &str,
+    cancel: &crate::Cancellation,
+) -> std::result::Result<Option<Arc<crate::trial::Trial>>, crate::embed::EmbedError> {
+    #[derive(serde::Deserialize)]
+    struct Field {
+        #[serde(default)]
+        trial: Option<crate::trial::TrialRequest>,
+    }
+    let field: Field = serde_json::from_str(request).map_err(|error| {
+        crate::embed::EmbedError::plain(format!("Invalid trial request: {error}"))
+    })?;
+    field
+        .trial
+        .map(|trial| crate::trial::Trial::start(&trial, cancel))
+        .transpose()
+}
+
+/// Ends a trial with the outcome of its run. A run stopped at a limit reports the limit.
+fn finish_trial<T, E>(
+    trial: Option<&crate::trial::Trial>,
+    outcome: std::result::Result<T, E>,
+    error: impl Fn(&E) -> &crate::embed::EmbedError,
+    replace: impl FnOnce(E, crate::embed::EmbedError) -> E,
+) -> std::result::Result<T, E> {
+    let Some(trial) = trial else {
+        return outcome;
+    };
+    match outcome {
+        Ok(value) => match trial.finish(Ok(())) {
+            None => Ok(value),
+            // Recording the end failed after the run succeeded, as the JavaScript run did not.
+            Some(_) => Ok(value),
+        },
+        Err(failure) => match trial.finish(Err(error(&failure))) {
+            Some(limit) => Err(replace(failure, limit)),
+            None => Err(failure),
+        },
+    }
+}
+
 /// Runs a build command (see `build_stage`): the selected stages with their inputs, or a dry run.
 /// `host(id, kind, args, bytes)` answers `parse`, `progress`, `charge`, `config` and `tool`.
 /// Resolves to `{ status: "done", output, warnings }` or a failed status as `runTransform` does.
@@ -775,12 +839,22 @@ pub fn run_build<'env>(
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
     std::thread::spawn(move || {
-        let host = JsHost { function };
-        let outcome = serde_json::from_str::<crate::build_stage::BuildRequest>(&request)
-            .map_err(|error| {
-                crate::embed::EmbedError::plain(format!("Invalid build request: {error}"))
+        let mut host = JsHost::new(function);
+        let (trial, started) = match start_trial(&request, &cancel) {
+            Ok(trial) => (trial, Ok(())),
+            Err(error) => (None, Err(error)),
+        };
+        host.trial = trial.clone();
+        let outcome = started
+            .and_then(|()| {
+                serde_json::from_str::<crate::build_stage::BuildRequest>(&request).map_err(
+                    |error| {
+                        crate::embed::EmbedError::plain(format!("Invalid build request: {error}"))
+                    },
+                )
             })
             .and_then(|request| crate::build_stage::run(request, &host, &cancel));
+        let outcome = finish_trial(trial.as_deref(), outcome, |error| error, |_, limit| limit);
         let text = match outcome {
             Ok(outcome) => format!(
                 "{{\"status\":\"done\",\"output\":{},\"warnings\":{}}}",
@@ -791,6 +865,32 @@ pub fn run_build<'env>(
                 deferred.reject(native_error(crate::Error::Aborted));
                 return;
             }
+            Err(error) => failed_stage(error),
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
+}
+
+/// Adopts a build with `use` (see `adoption`). `host` answers `write_config` and
+/// `restore_config`. Resolves to `{ status: "done", output }` or a failed status.
+#[napi]
+pub fn adopt_build<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+) -> Result<Object<'env>> {
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    std::thread::spawn(move || {
+        let host = JsHost::new(function);
+        let outcome = serde_json::from_str::<crate::adoption::AdoptRequest>(&request)
+            .map_err(|error| {
+                crate::embed::EmbedError::plain(format!("Invalid adoption request: {error}"))
+            })
+            .and_then(|request| crate::adoption::adopt(&request, &host));
+        let text = match outcome {
+            Ok(output) => format!("{{\"status\":\"done\",\"output\":{}}}", output.to_js_json()),
             Err(error) => failed_stage(error),
         };
         deferred.resolve(move |_| Ok(text));
@@ -811,7 +911,7 @@ pub fn answer_question<'env>(
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
     std::thread::spawn(move || {
-        let host = JsHost { function };
+        let host = JsHost::new(function);
         let outcome = serde_json::from_str::<crate::generate::AnswerRequest>(&request)
             .map_err(|error| crate::generate::AnswerFailure {
                 error: crate::embed::EmbedError::plain(format!("Invalid answer request: {error}")),
@@ -858,7 +958,7 @@ pub fn serve_project<'env>(
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
     std::thread::spawn(move || {
-        let host = Arc::new(JsHost { function });
+        let host = Arc::new(JsHost::new(function));
         let outcome = serde_json::from_str::<crate::serve::ServeRequest>(&request)
             .map_err(|error| {
                 crate::embed::EmbedError::plain(format!("Invalid serve request: {error}"))
@@ -894,7 +994,7 @@ pub fn tag_build<'env>(
     let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     std::thread::spawn(move || {
-        let host = JsHost { function };
+        let host = JsHost::new(function);
         let outcome = serde_json::from_str::<crate::build_stage::TagRequest>(&request)
             .map_err(|error| {
                 crate::embed::EmbedError::plain(format!("Invalid tag request: {error}"))
@@ -961,7 +1061,7 @@ pub fn run_index<'env>(
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
     std::thread::spawn(move || {
-        let host = JsHost { function };
+        let host = JsHost::new(function);
         let outcome = serde_json::from_str::<crate::index_stage::IndexRequest>(&request)
             .map_err(|error| {
                 crate::embed::EmbedError::plain(format!("Invalid index request: {error}"))
@@ -1000,7 +1100,7 @@ pub fn run_transform<'env>(
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
     std::thread::spawn(move || {
-        let host = JsHost { function };
+        let host = JsHost::new(function);
         let outcome = serde_json::from_str::<crate::transform_stage::TransformRequest>(&request)
             .map_err(|error| {
                 crate::embed::EmbedError::plain(format!("Invalid transform request: {error}"))
@@ -1037,7 +1137,7 @@ pub fn load_corpus<'env>(
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
     std::thread::spawn(move || {
-        let host = JsHost { function };
+        let host = JsHost::new(function);
         let outcome = serde_json::from_str::<crate::source_load::LoadRequest>(&request)
             .map_err(|_| crate::source_load::LoadError {
                 message: "Invalid load request".into(),
@@ -1079,7 +1179,7 @@ pub fn run_source<'env>(
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
     std::thread::spawn(move || {
-        let host = JsHost { function };
+        let host = JsHost::new(function);
         let outcome = serde_json::from_str::<crate::source_stage::SourceRequest>(&request)
             .map_err(|error| crate::source_load::LoadError {
                 message: format!("Invalid source request: {error}"),
@@ -1156,6 +1256,14 @@ fn report_outcome<T: serde::de::DeserializeOwned>(
         Ok(output) => format!("{{\"status\":\"done\",\"output\":{}}}", output.to_js_json()),
         Err(error) => failed_stage(error),
     }
+}
+
+/// The usage of all trial runs of a project: `{ runs, elapsed_ms, api_requests, api_input_bytes }`.
+#[napi]
+pub fn trial_usage(state: String) -> Result<String> {
+    crate::trial::usage(&state)
+        .map(|usage| usage.to_js_json())
+        .map_err(|error| Error::new(Status::GenericFailure, error.message))
 }
 
 /// `report show`, `list` and `compare` on `state.sqlite` (see `eval_report`).
@@ -1599,7 +1707,7 @@ impl NativeDatabase {
         let (deferred, promise) = env.create_deferred::<String, _>()?;
         let cancel = cancel.0.clone();
         std::thread::spawn(move || {
-            let host = JsHost { function };
+            let host = JsHost::new(function);
             let outcome = serde_json::from_str::<crate::search_stage::SearchRequest>(&request)
                 .map_err(|error| crate::search_stage::SearchFailure {
                     error: crate::embed::EmbedError::plain(format!(
@@ -1646,17 +1754,41 @@ impl NativeDatabase {
         let (deferred, promise) = env.create_deferred::<String, _>()?;
         let cancel = cancel.0.clone();
         std::thread::spawn(move || {
-            let host = JsHost { function };
-            let outcome = serde_json::from_str::<crate::eval_stage::EvaluateRequest>(&request)
-                .map_err(|error| crate::search_stage::SearchFailure {
-                    error: crate::embed::EmbedError::plain(format!(
-                        "Invalid evaluation request: {error}"
-                    )),
-                    module: None,
+            let mut host = JsHost::new(function);
+            let (trial, started) = match start_trial(&request, &cancel) {
+                Ok(trial) => (trial, Ok(())),
+                Err(error) => (
+                    None,
+                    Err(crate::search_stage::SearchFailure {
+                        error,
+                        module: None,
+                    }),
+                ),
+            };
+            host.trial = trial.clone();
+            let outcome = started
+                .and_then(|()| {
+                    serde_json::from_str::<crate::eval_stage::EvaluateRequest>(&request).map_err(
+                        |error| crate::search_stage::SearchFailure {
+                            error: crate::embed::EmbedError::plain(format!(
+                                "Invalid evaluation request: {error}"
+                            )),
+                            module: None,
+                        },
+                    )
                 })
                 .and_then(|request| {
                     crate::eval_stage::evaluate(&database, &vectors, request, &host, &cancel)
                 });
+            let outcome = finish_trial(
+                trial.as_deref(),
+                outcome,
+                |failure| &failure.error,
+                |_, limit| crate::search_stage::SearchFailure {
+                    error: limit,
+                    module: None,
+                },
+            );
             let text = match outcome {
                 Ok(report) => format!("{{\"status\":\"done\",\"report\":{}}}", report.to_js_json()),
                 Err(failure) if failure.error.aborted => {
@@ -1746,7 +1878,7 @@ impl NativeDatabase {
             let host: Option<Arc<dyn crate::mcp::McpHost>> = options["project"]
                 .as_bool()
                 .unwrap_or(false)
-                .then(|| Arc::new(JsHost { function }) as Arc<dyn crate::mcp::McpHost>);
+                .then(|| Arc::new(JsHost::new(function)) as Arc<dyn crate::mcp::McpHost>);
             let server = crate::mcp::McpServer::new(
                 database,
                 host,

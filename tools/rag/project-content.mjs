@@ -8,7 +8,6 @@ import { lightonModel } from './parsers/catalog.mjs';
 import { lightonServer, managedOcr, managedOcrVersion } from './parsers/lighton-setup.mjs';
 import { oarOcrHome } from './parsers/oar-setup.mjs';
 import { defaultRoutes, routeFiles } from './project-parsers.mjs';
-import { trialCheckpoint, trialSignal } from './project-trials.mjs';
 
 /** Routes every scanned file once: `{ route, kind }` or null, keyed by source and object ID. */
 function routeSources(sources, routes) {
@@ -61,9 +60,8 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   progress(0);
   let loaded;
   try {
-    loaded = await Dunlin.loadCorpus(request, host, { signal: trialSignal() });
+    loaded = await Dunlin.loadCorpus(request, host);
   } catch (error) {
-    trialCheckpoint();
     if (error.code === 'LOAD_FAILED') throw new Error(error.message, { cause: error });
     throw error;
   }
@@ -77,9 +75,7 @@ export function parserHost(progress = () => {}) {
   return {
     progress,
     async parse({ kind, name }, bytes) {
-      const signal = trialSignal();
-      const parsed = kind === 'html' ? await loadHtml(bytes)
-        : await convertOffice(bytes, name, signal);
+      const parsed = kind === 'html' ? await loadHtml(bytes) : await convertOffice(bytes, name);
       return { content: parsed.content, format: parsed.format, locations: parsed.locations, parser: parsed.parser };
     },
   };
@@ -100,14 +96,13 @@ async function loadHtml(bytes) {
   return { content, format: 'markdown', bytes, parser: { tool: 'cheerio' } };
 }
 
-// Chunk documents in native batches of about this many characters, checking trial limits between them.
+// Chunk documents in native batches of about this many characters.
 const chunkBatchChars = 4 * 1024 * 1024;
 
 export function chunkCorpus({ groups, unicode }, { size, overlap, structure = false }, cache) {
   const output = groups.map(([, documents]) => new Array(documents.length));
   const pending = [];
   groups.forEach(([, documents], group) => documents.forEach(({ content, format, corpus }, index) => {
-    trialCheckpoint();
     const boundaries = structure ? [...new Set((corpus?.locations ?? []).filter(({ page }) => page).map(({ range }) => range.startLine))] : [];
     const key = cache && JSON.stringify([structure ? 'chunk.structure-v1' : 'chunk.length-v1', unicode, size, overlap, format,
       cache.hash(content), ...(structure ? [boundaries] : [])]);
@@ -117,7 +112,6 @@ export function chunkCorpus({ groups, unicode }, { size, overlap, structure = fa
   }));
   const options = { size, overlap, structure, nfkc: unicode === 'nfkc' };
   for (let start = 0; start < pending.length;) {
-    trialCheckpoint();
     let end = start;
     for (let chars = 0; end < pending.length && (end === start || chars < chunkBatchChars); end++) chars += pending[end].document.content.length;
     const batch = pending.slice(start, end);

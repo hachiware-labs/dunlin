@@ -22,6 +22,8 @@ mod wiki;
 pub mod yaml_config;
 
 #[cfg(any(feature = "node", test))]
+mod adoption;
+#[cfg(any(feature = "node", test))]
 mod build_stage;
 #[cfg(any(feature = "node", test))]
 mod command_parser;
@@ -61,6 +63,8 @@ mod source_stage;
 mod stage_store;
 #[cfg(any(feature = "node", test))]
 mod transform_stage;
+#[cfg(any(feature = "node", test))]
+mod trial;
 #[cfg(any(feature = "node", test))]
 mod vector;
 

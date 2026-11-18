@@ -12,7 +12,9 @@ import { listFiles } from '../../../ingest-files.mjs';
 import { convertOffice } from '../../../parsers/documents.mjs';
 import { managedOcrVersion } from '../../../parsers/lighton-setup.mjs';
 import { commandIdentity, commandVersion, defaultRoutes, parserKind, parseWithCommand, resolveParser } from './project-parsers.mjs';
-import { trialCheckpoint, trialSignal } from '../../../project-trials.mjs';
+// Trials moved to Rust (spec 28.11 step 4c). Outside a trial these passed the signal through and checked nothing.
+const trialCheckpoint = () => {};
+const trialSignal = (signal) => signal;
 
 const fileConcurrency = 4;
 // Each commit costs a disk sync, about 1 ms on Windows. Group cache rows into short transactions.

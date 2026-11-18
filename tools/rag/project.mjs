@@ -15,7 +15,7 @@ import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { generatorSettings } from './models.mjs';
 import { chunkCorpus, ocrRequest, parserHost } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
-import { ensureEvaluation, manageEvaluationData } from './project-eval.mjs';
+import { ensureEvaluation, generateEvaluationData, selectDataset } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
@@ -701,6 +701,32 @@ async function evaluateProject(database, build, searchBuild, plan, project, sett
   return result.report;
 }
 
+/**
+ * An `eval-data` command in Rust (spec 28.11 step 4e). Commands that read documents run on the
+ * active build. JavaScript reads import files, writes exports and selects the resulting dataset.
+ */
+async function evalDataCommand(project, action, [positional, other], values) {
+  const request = { state: project.paths.state, action, positional, other, selected: project.config['eval-data']?.use, values };
+  const withBuild = async () => {
+    const database = await openBuild(project.paths, currentBuild(project.paths));
+    try {
+      if (action === 'import') request.input = await readFile(positional, 'utf8');
+      return await database.evalData(request);
+    } finally {
+      await database.close();
+    }
+  };
+  let result = ['add', 'import', 'sync'].includes(action) ? await withBuild() : await Dunlin.evalData(request);
+  if (result.status === 'failed' && result.error.code === 'BUILD_NEEDED') result = await withBuild();
+  if (result.status === 'failed') throw stageFailure(result.error);
+  if (result.select) await selectDataset(project, result.select);
+  if (action !== 'export') return result.output;
+  const { id, cases } = result.output;
+  if (!values.output) throw new ProjectError(2, 'INVALID_EVAL_DATA', 'Use --output <file>.');
+  await writeFile(values.output, cases.map((item) => JSON.stringify(item)).join('\n') + '\n', { flag: 'wx' });
+  return { id, cases: cases.length };
+}
+
 /** An `evidence-map` command in Rust (spec 28.11 step 4a). `export` writes the map it shows. */
 async function evidenceMapCommand(project, action, reference, values) {
   if (action === 'export' && !values.output) throw new ProjectError(2, 'INVALID_EVAL_DATA', 'Use --output <file>.');
@@ -1092,8 +1118,9 @@ export async function runProjectCommand(command, args, explicitProject) {
                 ensureEvaluation(db);
                 runId = `run-${randomUUID()}`;
               }
-              return await manageEvaluationData(db, project, type, positionals.slice(1), values,
-                () => openBuild(project.paths, currentBuild(project.paths)));
+              return type === 'generate'
+                ? await generateEvaluationData(db, project, values, () => openBuild(project.paths, currentBuild(project.paths)))
+                : await evalDataCommand(project, type, positionals.slice(1), values);
             }
             if (!project.evalSettings) throw new ProjectError(3, 'EVAL_DATA_REQUIRED', 'Add evaluation data before running eval.');
             const build = currentBuild(project.paths, true, values.build);

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 
 import { atomicWrite, revision, withWriteLock } from './authoring/files.mjs';
 import { stringify } from 'yaml';
@@ -193,7 +193,7 @@ function makeCase(input, documents, prior) {
     ...(input.reason && { reason: input.reason }) };
 }
 
-async function selectDataset(project, id) {
+export async function selectDataset(project, id) {
   return withWriteLock(project.paths.data, async () => {
     const current = await readFile(project.configPath, 'utf8');
     if (revision(current) !== project.configDigest) throw new EvaluationError(4, 'CONFIG_CHANGED', 'The settings changed; retry the selection.');
@@ -214,90 +214,12 @@ function saveDataset(db, cases) {
   return output;
 }
 
-export async function manageEvaluationData(db, project, action, [positional, other], values, open) {
+/**
+ * `eval-data generate`: candidates from the documents of the active build, added to the selected
+ * data. The other eval-data commands run in Rust (spec 28.11 step 4e); generation moves next.
+ */
+export async function generateEvaluationData(db, project, values, open) {
   const selected = project.config['eval-data']?.use;
-  if (action === 'list') {
-    const row = db.prepare('SELECT data FROM evaluation_datasets ORDER BY rowid DESC LIMIT 1').get();
-    const tagged = db.prepare("SELECT name FROM sqlite_master WHERE name = 'evaluation_dataset_tags'").get()
-      ? db.prepare('SELECT name, dataset_id FROM evaluation_dataset_tags ORDER BY name').all() : [];
-    const refs = new Set(tagged.map(({ dataset_id }) => dataset_id));
-    if (row) refs.add(JSON.parse(row.data).id);
-    return { selected: selected ?? null, datasets: [...refs].map((id) => ({ id, cases: dataset(db, id).cases.length,
-      tags: tagged.filter(({ dataset_id }) => dataset_id === id).map(({ name }) => name) })) };
-  }
-  if (action === 'tag') {
-    if (!/^[\p{L}\p{N}_.-]{1,100}$/u.test(positional)) throw invalid('Invalid evaluation dataset tag.');
-    const { id } = dataset(db, other);
-    const prior = db.prepare('SELECT dataset_id FROM evaluation_dataset_tags WHERE name = ?').get(positional);
-    if (prior && prior.dataset_id !== id) throw invalid('The dataset tag is already assigned.');
-    db.prepare('INSERT OR IGNORE INTO evaluation_dataset_tags VALUES (?, ?)').run(positional, id);
-    return { tag: positional, id };
-  }
-  if (action === 'show') return dataset(db, positional);
-  if (action === 'diff') {
-    const [left, right] = [dataset(db, positional), dataset(db, other)];
-    const before = new Map(left.cases.map((item) => [item.id, item]));
-    const after = new Map(right.cases.map((item) => [item.id, item]));
-    return { from: left.id, to: right.id,
-      added: right.cases.filter(({ id }) => !before.has(id)),
-      removed: left.cases.filter(({ id }) => !after.has(id)),
-      changed: right.cases.filter(({ id }) => before.has(id) && JSON.stringify(before.get(id)) !== JSON.stringify(after.get(id)))
-        .map((item) => ({ before: before.get(item.id), after: item })),
-    };
-  }
-  if (action === 'use') {
-    const { id } = dataset(db, positional);
-    await selectDataset(project, id);
-    return { id };
-  }
-  if (action === 'export') {
-    const { id, cases } = dataset(db, positional);
-    if (!values.output) throw invalid('Use --output <file>.');
-    await writeFile(values.output, cases.map((item) => JSON.stringify(item)).join('\n') + '\n', { flag: 'wx' });
-    return { id, cases: cases.length };
-  }
-  if (action === 'split') {
-    const { cases } = dataset(db, selected);
-    const ratio = Number(values['test-ratio']);
-    if (values['test-ratio'] === undefined || !Number.isFinite(ratio) || ratio < 0 || ratio > 1
-      || !/^-?\d+$/u.test(values.seed ?? '')) throw invalid('Set --test-ratio (0 to 1) and an integer --seed.');
-    const groupList = [...new Set(cases.map(({ group }) => group))].sort((a, b) =>
-      revision(values.seed + ':' + a).localeCompare(revision(values.seed + ':' + b)));
-    const test = new Set(groupList.slice(0, Math.round(groupList.length * ratio)));
-    const result = saveDataset(db, cases.map((item) => ({ ...item, split: test.has(item.group) ? 'test' : 'dev' })));
-    await selectDataset(project, result.id);
-    return { id: result.id, cases: result.cases.length };
-  }
-  if (action === 'review') {
-    const { id, cases } = dataset(db, positional);
-    if (!values.case && !values.state) return { id, cases: cases.filter(({ state }) => ['generated', 'needs_review'].includes(state)) };
-    const ids = [...new Set(values.case ?? [])];
-    if (!ids.length || !['reviewed', 'rejected'].includes(values.state) || !values.reviewer?.trim()
-      || !['human', 'agent'].includes(values['reviewer-type'])) {
-      throw invalid('Set --case <id> --state reviewed|rejected --reviewer <name> --reviewer-type human|agent. Repeat --case to review several cases.');
-    }
-    const existing = ids.map((id) => {
-      const found = cases.find((item) => item.id === id);
-      if (!found) throw missing('Unknown case: ' + id);
-      return found;
-    });
-    let documents;
-    if (values.state === 'reviewed') {
-      const database = await open();
-      try {
-        ({ documents } = await database.snapshotDocuments());
-        documents = await Promise.all(documents.map((doc) => loadEvidenceMetadata(database, doc)));
-      }
-      finally { await database.close(); }
-    }
-    const at = new Date().toISOString();
-    const reviewed = new Map(existing.map((item) => [item.id, { ...item,
-      evidence: documents ? makeCase({ ...item, state: 'reviewed' }, documents, cases).evidence : item.evidence, state: values.state, reason: undefined,
-      reviewed_by: { type: values['reviewer-type'], id: values.reviewer, at } }]));
-    const updated = saveDataset(db, cases.map((item) => reviewed.get(item.id) ?? item));
-    await selectDataset(project, updated.id);
-    return { id: updated.id, case: reviewed.get(ids[0]), cases: [...reviewed.values()] };
-  }
   const database = await open();
   let documents;
   try {
@@ -305,69 +227,8 @@ export async function manageEvaluationData(db, project, action, [positional, oth
     for (const [i, document] of documents.entries()) documents[i] = await loadEvidenceMetadata(database, document);
   }
   finally { await database.close(); }
-  const current = new Map(documents.map((document) => {
-    const { sourceId, objectId } = document.evidence.source;
-    return [sourceId + ':' + objectId, document];
-  }));
-  if (action === 'sync') {
-    const { id, cases } = dataset(db, positional);
-    const referenced = new Set(cases.flatMap(({ evidence }) => evidence.map(({ doc }) => doc)));
-    const uncovered = [...current.keys()].filter((doc) => !referenced.has(doc));
-    const updated = cases.map((item) => {
-      if (item.state === 'rejected') return item;
-      const evidence = item.evidence.map((ref) => {
-        const document = current.get(ref.doc);
-        if (document && position(document.content, ref, document.locations).range) return { ...ref, version: document.evidence.source.version, original_hash: document.originalHash };
-        return ref;
-      });
-      const allMissing = evidence.every(({ doc }) => !current.has(doc));
-      if (allMissing) return { ...item, state: 'inactive', reason: 'source_missing' };
-      const changedEvidence = item.evidence.some((ref) => {
-        const document = current.get(ref.doc);
-        return !document || (document.evidence.source.version !== ref.version
-          && (!ref.original_hash || ref.original_hash !== document.originalHash) && !position(document.content, ref, document.locations).range);
-      });
-      if (changedEvidence || item.state === 'inactive') return { ...item, evidence, state: 'needs_review', reason: 'source_changed' };
-      return { ...item, evidence };
-    });
-    const result = saveDataset(db, updated);
-    return { id: result.id, previous: id, cases: updated.length, uncovered_documents: uncovered,
-      needs_review: updated.filter(({ state }) => state === 'needs_review').length, inactive: updated.filter(({ state }) => state === 'inactive').length };
-  }
-  if (action === 'add' && values['from-search']) {
-    let record;
-    try { record = JSON.parse(await readFile(values['from-search'], 'utf8')); }
-    catch { throw invalid('Provide JSON saved from dunlin search --json.'); }
-    const index = Number(values.hit);
-    const evidence = record?.command === 'search' && (record.data?.results ?? record.data?.hits)?.[index - 1]?.evidence;
-    if (!Number.isSafeInteger(index) || index < 1 || !evidence?.byteRange || !evidence.source) throw invalid('Set --hit to the one-based search hit number.');
-    const doc = evidence.source.sourceId + ':' + evidence.source.objectId;
-    const document = current.get(doc);
-    if (!document || document.evidence.source.version !== evidence.source.version) throw invalid('The search hit no longer matches the active document version.');
-    const { start, end } = evidence.byteRange;
-    const bytes = Buffer.from(document.content);
-    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end > bytes.length
-      || (bytes[start] & 0xc0) === 0x80 || (bytes[end] & 0xc0) === 0x80) throw invalid('Invalid source byte range in the search hit.');
-    values = { ...values, doc, quote: bytes.subarray(start, end).toString().trim() };
-  }
-  const prior = ['add', 'generate'].includes(action) && selected ? dataset(db, selected).cases : [];
-  if (action === 'generate') return generateCases(db, project, documents, prior, values);
-  const input = action === 'add' ? [{ ...values, page: values.page === undefined ? undefined : Number(values.page) }]
-    : (await readFile(positional, 'utf8')).split(/\r?\n/u).flatMap((line, i) => {
-    if (!line.trim()) return [];
-    try { return [JSON.parse(line)]; }
-    catch { throw invalid('Invalid JSON at line ' + (i + 1)); }
-  });
-  const cases = [...prior];
-  for (const item of input) {
-    const entry = makeCase(item, documents, cases);
-    if (cases.some(({ id }) => id === entry.id)) throw invalid('Duplicate case: ' + entry.id);
-    cases.push(entry);
-  }
-  if (!cases.length) throw missing('The evaluation dataset is empty.');
-  const result = saveDataset(db, cases);
-  await selectDataset(project, result.id);
-  return { id: result.id, cases: result.cases.length };
+  const prior = selected ? dataset(db, selected).cases : [];
+  return generateCases(db, project, documents, prior, values);
 }
 
 const excerptChars = 4000;

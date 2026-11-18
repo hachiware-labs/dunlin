@@ -1258,6 +1258,46 @@ fn report_outcome<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// The result of an `eval-data` command: `{ status: "done", output, select? }` or a failed status,
+/// or `None` when it was aborted.
+fn eval_data_outcome(
+    database: Option<&KnowledgeBase>,
+    request: &str,
+    cancel: &crate::Cancellation,
+) -> Option<String> {
+    let outcome = serde_json::from_str::<crate::eval_data::EvalDataRequest>(request)
+        .map_err(|error| {
+            crate::embed::EmbedError::plain(format!("Invalid eval-data request: {error}"))
+        })
+        .and_then(|request| crate::eval_data::eval_data(database, &request, cancel));
+    match outcome {
+        Ok(outcome) => Some(format!(
+            "{{\"status\":\"done\",\"output\":{}{}}}",
+            outcome.output.to_js_json(),
+            outcome.select.map_or(String::new(), |id| format!(
+                ",\"select\":{}",
+                crate::config_value::ConfigValue::String(id).to_js_json()
+            ))
+        )),
+        Err(error) if error.aborted => None,
+        Err(error) => Some(failed_stage(error)),
+    }
+}
+
+/// Runs an `eval-data` command on `state.sqlite` (see `eval_data`). A command that reads the
+/// documents of the active build fails with the code `BUILD_NEEDED`; run it with
+/// `Dunlin#evalData` on the open build instead.
+#[napi]
+pub fn eval_data(env: &Env, request: String) -> Result<Object<'_>> {
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    std::thread::spawn(move || {
+        let cancel = crate::Cancellation::default();
+        let text = eval_data_outcome(None, &request, &cancel).unwrap_or_default();
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
+}
+
 /// The usage of all trial runs of a project: `{ runs, elapsed_ms, api_requests, api_input_bytes }`.
 #[napi]
 pub fn trial_usage(state: String) -> Result<String> {
@@ -1832,6 +1872,26 @@ impl NativeDatabase {
             };
             deferred.resolve(move |_| Ok(text));
         });
+        Ok(promise)
+    }
+
+    /// Runs an `eval-data` command with the documents of this index (see `eval_data`).
+    #[napi]
+    pub fn eval_data<'env>(
+        &self,
+        env: &'env Env,
+        request: String,
+        cancel: &NativeCancellation,
+    ) -> Result<Object<'env>> {
+        let database = self.database()?;
+        let (deferred, promise) = env.create_deferred::<String, _>()?;
+        let cancel = cancel.0.clone();
+        std::thread::spawn(
+            move || match eval_data_outcome(Some(&database), &request, &cancel) {
+                Some(text) => deferred.resolve(move |_| Ok(text)),
+                None => deferred.reject(native_error(crate::Error::Aborted)),
+            },
+        );
         Ok(promise)
     }
 

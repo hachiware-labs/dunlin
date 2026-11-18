@@ -394,6 +394,24 @@ export type EvidenceMapOutcome =
   | { status: 'done'; output: unknown }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
 
+/** An `eval-data` command (spec 28.11 step 4e). */
+export interface EvalDataRequest {
+  state: string;
+  action: string;
+  positional?: string;
+  other?: string;
+  /** `eval-data.use` of the configuration. */
+  selected?: string;
+  /** The text of the file `import` reads. */
+  input?: string;
+  /** The command options. */
+  values?: Record<string, unknown>;
+}
+
+export type EvalDataOutcome =
+  | { status: 'done'; output: unknown; select?: string }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+
 /** A build to adopt with `use` (spec 28.11 step 4c). */
 export interface AdoptBuildRequest {
   state: string;

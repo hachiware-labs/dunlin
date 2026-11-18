@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvalDataRequest, EvalDataOutcome, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -44,6 +44,7 @@ interface NativeDatabase {
   searchProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   evaluateProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   evidenceMap(request: string, cancel: NativeCancellation): Promise<string>;
+  evalData(request: string, cancel: NativeCancellation): Promise<string>;
   dictionaryMisses(request: string, cancel: NativeCancellation): Promise<string>;
   serveMcp(options: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<void>;
   wikiBuild(options: string, cancel: NativeCancellation): Promise<WikiPage>;
@@ -79,6 +80,7 @@ interface NativeBinding {
   adoptBuild(request: string, host: (...args: unknown[]) => void): Promise<string>;
   trialUsage(state: string): string;
   evidenceMaps(request: string): Promise<string>;
+  evalData(request: string): Promise<string>;
   evaluationReports(request: string): string;
   evaluationStatus(request: string): string;
   dictionaryEvaluation(request: string): string;
@@ -488,6 +490,15 @@ export class Dunlin {
     return JSON.parse(await native().adoptBuild(configJson(request), hostCallback(host))) as ReportOutcome<Record<string, unknown>>;
   }
 
+  /**
+   * An `eval-data` command on a project's `state.sqlite` (spec 28.11 step 4e). A command that reads
+   * the documents of the active build fails with the code `BUILD_NEEDED`; run it with the open
+   * build's `evalData` instead. `select` names the dataset to select in the configuration.
+   */
+  static async evalData(request: EvalDataRequest): Promise<EvalDataOutcome> {
+    return JSON.parse(await native().evalData(configJson(request))) as EvalDataOutcome;
+  }
+
   /** The usage of all trial runs of a project (spec 28.11 step 4c). */
   static trialUsage(state: string): { runs: number; elapsed_ms: number; api_requests: number; api_input_bytes: number } {
     return JSON.parse(native().trialUsage(state)) as { runs: number; elapsed_ms: number; api_requests: number; api_input_bytes: number };
@@ -809,6 +820,12 @@ export class Dunlin {
   async dictionaryMisses(request: DictionaryMissesRequest, { signal }: OperationOptions = {}): Promise<ReportOutcome<Record<string, unknown>[]>> {
     const text = await this.#run(signal, (database, cancel) => database.dictionaryMisses(configJson(request), cancel));
     return JSON.parse(text) as ReportOutcome<Record<string, unknown>[]>;
+  }
+
+  /** An `eval-data` command with the documents of this build (spec 28.11 step 4e). */
+  async evalData(request: EvalDataRequest, { signal }: OperationOptions = {}): Promise<EvalDataOutcome> {
+    const text = await this.#run(signal, (database, cancel) => database.evalData(configJson(request), cancel));
+    return JSON.parse(text) as EvalDataOutcome;
   }
 
   /** `evidence-map create`, `import` and `confirm` on the documents of this build (spec 28.11 step 4a). */

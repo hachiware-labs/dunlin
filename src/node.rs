@@ -1139,6 +1139,43 @@ pub fn search_config_id(request: String) -> Result<String> {
     Ok(crate::search_stage::search_config_id(&settings, true))
 }
 
+/// `{ status: "done", output }` or a failed status, for the evaluation reports.
+fn report_outcome<T: serde::de::DeserializeOwned>(
+    request: &str,
+    run: impl FnOnce(
+        &T,
+    )
+        -> std::result::Result<crate::config_value::ConfigValue, crate::embed::EmbedError>,
+) -> String {
+    let outcome = serde_json::from_str::<T>(request)
+        .map_err(|error| {
+            crate::embed::EmbedError::plain(format!("Invalid report request: {error}"))
+        })
+        .and_then(|request| run(&request));
+    match outcome {
+        Ok(output) => format!("{{\"status\":\"done\",\"output\":{}}}", output.to_js_json()),
+        Err(error) => failed_stage(error),
+    }
+}
+
+/// `report show`, `list` and `compare` on `state.sqlite` (see `eval_report`).
+#[napi]
+pub fn evaluation_reports(request: String) -> String {
+    report_outcome(&request, crate::eval_report::reports)
+}
+
+/// The evaluation status of a build: `{ state, report }` (see `eval_report`).
+#[napi]
+pub fn evaluation_status(request: String) -> String {
+    report_outcome(&request, crate::eval_report::evaluation_status)
+}
+
+/// The report and evaluation data that dictionary suggestions use: `{ report, data }`.
+#[napi]
+pub fn dictionary_evaluation(request: String) -> String {
+    report_outcome(&request, crate::eval_report::dictionary_evaluation)
+}
+
 /// Routes files to parser modules. Returns `[{ route, kind }]` as JSON, in input order.
 #[napi]
 pub fn route_files(request: String) -> Result<String> {
@@ -1627,6 +1664,39 @@ impl NativeDatabase {
                     return;
                 }
                 Err(failure) => with_module(failed_stage(failure.error), failure.module),
+            };
+            deferred.resolve(move |_| Ok(text));
+        });
+        Ok(promise)
+    }
+
+    /// The evidence a development report missed, read from the documents of this index (see
+    /// `eval_report`). Resolves to `{ status: "done", output }` or a failed status.
+    #[napi]
+    pub fn dictionary_misses<'env>(
+        &self,
+        env: &'env Env,
+        request: String,
+        cancel: &NativeCancellation,
+    ) -> Result<Object<'env>> {
+        let database = self.database()?;
+        let (deferred, promise) = env.create_deferred::<String, _>()?;
+        let cancel = cancel.0.clone();
+        std::thread::spawn(move || {
+            let outcome = serde_json::from_str::<crate::eval_report::MissesRequest>(&request)
+                .map_err(|error| {
+                    crate::embed::EmbedError::plain(format!("Invalid misses request: {error}"))
+                })
+                .and_then(|request| {
+                    crate::eval_report::dictionary_misses(&database, &request, &cancel)
+                });
+            let text = match outcome {
+                Ok(output) => format!("{{\"status\":\"done\",\"output\":{}}}", output.to_js_json()),
+                Err(error) if error.aborted => {
+                    deferred.reject(native_error(crate::Error::Aborted));
+                    return;
+                }
+                Err(error) => failed_stage(error),
             };
             deferred.resolve(move |_| Ok(text));
         });

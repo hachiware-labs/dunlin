@@ -28,6 +28,8 @@ mod command_parser;
 #[cfg(any(feature = "node", test))]
 mod embed;
 #[cfg(any(feature = "node", test))]
+mod eval_report;
+#[cfg(any(feature = "node", test))]
 mod eval_stage;
 #[cfg(any(feature = "node", test))]
 mod generate;

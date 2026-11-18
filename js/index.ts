@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -44,6 +44,7 @@ interface NativeDatabase {
   searchProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   evaluateProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   evidenceMap(request: string, cancel: NativeCancellation): Promise<string>;
+  dictionaryMisses(request: string, cancel: NativeCancellation): Promise<string>;
   serveMcp(options: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<void>;
   wikiBuild(options: string, cancel: NativeCancellation): Promise<WikiPage>;
   wikiGet(id: string, cancel: NativeCancellation): Promise<WikiPage | null>;
@@ -76,6 +77,9 @@ interface NativeBinding {
   runBuild(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   tagBuild(request: string, host: (...args: unknown[]) => void): Promise<string>;
   evidenceMaps(request: string): Promise<string>;
+  evaluationReports(request: string): string;
+  evaluationStatus(request: string): string;
+  dictionaryEvaluation(request: string): string;
   routeFiles(request: string): string;
   searchConfigId(request: string): string;
   answerQuestion(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
@@ -467,6 +471,24 @@ export class Dunlin {
     return JSON.parse(text) as TagBuildOutcome;
   }
 
+  /** `report show`, `list` and `compare` on a project's `state.sqlite` (spec 28.11 step 4b). */
+  static evaluationReports(request: EvaluationReportsRequest): ReportOutcome<unknown> {
+    return JSON.parse(native().evaluationReports(configJson(request))) as ReportOutcome<unknown>;
+  }
+
+  /**
+   * Whether the latest development report of the selected evaluation data is for this build and
+   * search configuration (spec 28.11 step 4b).
+   */
+  static evaluationStatus(request: EvaluationStatusRequest): ReportOutcome<{ state: 'evaluated' | 'stale' | 'unevaluated'; report: Record<string, unknown> | null }> {
+    return JSON.parse(native().evaluationStatus(configJson(request))) as ReportOutcome<{ state: 'evaluated' | 'stale' | 'unevaluated'; report: Record<string, unknown> | null }>;
+  }
+
+  /** The development report and evaluation data that dictionary suggestions use (spec 28.11 step 4b). */
+  static dictionaryEvaluation(request: DictionaryEvaluationRequest): ReportOutcome<{ report: Record<string, unknown>; data: Record<string, unknown> }> {
+    return JSON.parse(native().dictionaryEvaluation(configJson(request))) as ReportOutcome<{ report: Record<string, unknown>; data: Record<string, unknown> }>;
+  }
+
   /** `evidence-map list` and `show` on a project's `state.sqlite` (spec 28.11 step 4a). */
   static async evidenceMaps(request: EvidenceMapRequest): Promise<EvidenceMapOutcome> {
     return JSON.parse(await native().evidenceMaps(configJson(request))) as EvidenceMapOutcome;
@@ -755,6 +777,12 @@ export class Dunlin {
   async evaluateProject(request: EvaluateProjectRequest, host: ProjectSearchHost = {}, { signal }: OperationOptions = {}): Promise<EvaluateProjectOutcome> {
     const text = await this.#run(signal, (database, cancel) => database.evaluateProject(configJson(request), hostCallback(host), cancel));
     return JSON.parse(text) as EvaluateProjectOutcome;
+  }
+
+  /** The evidence a development report missed, with the line around each quote (spec 28.11 step 4b). */
+  async dictionaryMisses(request: DictionaryMissesRequest, { signal }: OperationOptions = {}): Promise<ReportOutcome<Record<string, unknown>[]>> {
+    const text = await this.#run(signal, (database, cancel) => database.dictionaryMisses(configJson(request), cancel));
+    return JSON.parse(text) as ReportOutcome<Record<string, unknown>[]>;
   }
 
   /** `evidence-map create`, `import` and `confirm` on the documents of this build (spec 28.11 step 4a). */

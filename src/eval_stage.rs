@@ -76,11 +76,11 @@ pub struct EvidenceMapRequest {
     pub reviewer: Option<String>,
 }
 
-fn invalid(message: impl Into<String>) -> StageError {
+pub(crate) fn invalid(message: impl Into<String>) -> StageError {
     StageError::coded("INVALID_EVAL_DATA", message, 2)
 }
 
-fn missing(message: impl Into<String>) -> StageError {
+pub(crate) fn missing(message: impl Into<String>) -> StageError {
     StageError::coded("EVAL_DATA_REQUIRED", message, 3)
 }
 
@@ -95,23 +95,23 @@ fn aborted(_: crate::Error) -> StageError {
     StageError::aborted()
 }
 
-fn parse(data: &str) -> Result<ConfigValue, StageError> {
+pub(crate) fn parse(data: &str) -> Result<ConfigValue, StageError> {
     serde_json::from_str(data)
         .map_err(|_| StageError::plain("Saved evaluation data is not valid JSON."))
 }
 
-fn num(value: f64) -> ConfigValue {
+pub(crate) fn num(value: f64) -> ConfigValue {
     ConfigValue::Number(value)
 }
 
-fn number(value: Option<&ConfigValue>) -> f64 {
+pub(crate) fn number(value: Option<&ConfigValue>) -> f64 {
     match value {
         Some(ConfigValue::Number(value)) => *value,
         _ => f64::NAN,
     }
 }
 
-fn open_state(path: &str, read_only: bool) -> Result<Connection, StageError> {
+pub(crate) fn open_state(path: &str, read_only: bool) -> Result<Connection, StageError> {
     let flags = if read_only {
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX
     } else {
@@ -137,7 +137,10 @@ fn table_exists(connection: &Connection, name: &str) -> Result<bool, StageError>
 }
 
 /// The evaluation data a reference (`eval-data:<id>`, an ID or a tag) selects.
-fn dataset(connection: &Connection, reference: Option<&str>) -> Result<ConfigValue, StageError> {
+pub(crate) fn dataset(
+    connection: &Connection,
+    reference: Option<&str>,
+) -> Result<ConfigValue, StageError> {
     let id = reference
         .map(|reference| reference.strip_prefix("eval-data:").unwrap_or(reference))
         .filter(|id| !id.is_empty());
@@ -178,7 +181,7 @@ fn utf16_len(value: &str) -> usize {
 }
 
 /// `String(value)` of JavaScript, for values that reach a message.
-fn js_string(value: Option<&ConfigValue>) -> String {
+pub(crate) fn js_string(value: Option<&ConfigValue>) -> String {
     match value {
         None => "undefined".into(),
         Some(ConfigValue::String(text)) => text.clone(),
@@ -481,7 +484,7 @@ fn nearby_quotes(document: &str, query: &str) -> ConfigValue {
 }
 
 /// The key of a saved position: the quote, its hints and the document text.
-fn position_key(evidence: &ConfigValue, document: &Document) -> String {
+pub(crate) fn position_key(evidence: &ConfigValue, document: &Document) -> String {
     let get = |name: &str| evidence.get(name).cloned().unwrap_or_default();
     let mut key = vec![
         text("nfkc-whitespace-v1"),
@@ -500,11 +503,12 @@ fn position_key(evidence: &ConfigValue, document: &Document) -> String {
 }
 
 /// A document of the build, as evaluation reads it.
-struct Document {
-    content: String,
-    source_id: String,
-    object_id: String,
-    version: String,
+pub(crate) struct Document {
+    pub(crate) content: String,
+    pub(crate) source_id: String,
+    pub(crate) object_id: String,
+    pub(crate) version: String,
+    pub(crate) url: String,
     /// The locations of its corpus revision, read for evidence with a page hint.
     locations: Vec<SourceLocation>,
     /// `locations` as JavaScript saw them in a position key: sorted keys, or `null` when not read
@@ -514,7 +518,7 @@ struct Document {
 
 /// The current document of `source-id:object-id` in the build, with its corpus locations when
 /// `metadata` is set.
-fn load_document(
+pub(crate) fn load_document(
     database: &KnowledgeBase,
     doc: &str,
     metadata: bool,
@@ -543,6 +547,7 @@ fn load_document(
         source_id: source.source_id,
         object_id: source.object_id,
         version: source.version,
+        url: source.url,
         locations: Vec::new(),
         locations_json: ConfigValue::Null,
     };
@@ -565,7 +570,7 @@ fn load_document(
 }
 
 /// Whether an evidence item has a page hint, which loads the document's locations.
-fn has_page(evidence: &ConfigValue) -> bool {
+pub(crate) fn has_page(evidence: &ConfigValue) -> bool {
     truthy(evidence.get("page"))
 }
 
@@ -651,7 +656,7 @@ fn covered(
     count as f64 >= required
 }
 
-fn mean(values: &[f64]) -> ConfigValue {
+pub(crate) fn mean(values: &[f64]) -> ConfigValue {
     if values.is_empty() {
         ConfigValue::Null
     } else {
@@ -659,7 +664,7 @@ fn mean(values: &[f64]) -> ConfigValue {
     }
 }
 
-fn evaluation_cases<'a>(
+pub(crate) fn evaluation_cases<'a>(
     data: &'a ConfigValue,
     split: &str,
     include_generated: bool,
@@ -679,7 +684,7 @@ fn evaluation_cases<'a>(
 }
 
 /// The recall that decides whether a case recovered its evidence.
-fn primary_recall(names: &[String]) -> String {
+pub(crate) fn primary_recall(names: &[String]) -> String {
     if names.iter().any(|name| name == "evidence_recall@context") {
         return "evidence_recall@context".into();
     }
@@ -730,7 +735,7 @@ fn js_property_order(entries: Vec<(String, ConfigValue)>) -> Vec<(String, Config
     indexed
 }
 
-fn method_id(settings: &ConfigValue) -> String {
+pub(crate) fn method_id(settings: &ConfigValue) -> String {
     let mut entries = Vec::new();
     assign(&mut entries, "recall", settings.get("recall").cloned());
     assign(

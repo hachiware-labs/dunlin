@@ -15,7 +15,7 @@ import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { generatorSettings } from './models.mjs';
 import { chunkCorpus, ocrRequest, parserHost } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
-import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluationStatus, manageEvaluationData, reports } from './project-eval.mjs';
+import { ensureEvaluation, manageEvaluationData } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
@@ -426,7 +426,7 @@ async function adoptBuild(project, reference) {
         db.prepare('UPDATE project SET build_id = ? WHERE id = 1').run(build.build_id);
         db.prepare('INSERT INTO serving_generations VALUES (?, ?)').run(adoption.lastInsertRowid, build.build_id);
         const searchId = searchConfigId(adopted.plan.search, {}, build, { config });
-        const evaluation = evaluationStatus(db, build.build_id, searchId, { config, evalSettings: adopted.evalSettings });
+        const evaluation = evaluationState(project.paths, config, adopted.evalSettings, build.build_id, searchId);
         db.exec('COMMIT');
         return { build_id: build.build_id, search_config_id: searchId, evaluation_status: evaluation.state, restart_mcp: true };
       } catch (error) {
@@ -747,6 +747,38 @@ async function evidenceMapCommand(project, action, reference, values) {
   return { id: result.output.id };
 }
 
+/** The output of an evaluation report call in Rust (spec 28.11 step 4b), or its error. */
+function reportOutput(result) {
+  if (result.status === 'failed') throw stageFailure(result.error);
+  return result.output;
+}
+
+/** Whether the latest development report is for this build and search configuration. */
+function evaluationState(paths, config, evalSettings, buildId, searchId) {
+  return reportOutput(Dunlin.evaluationStatus({ state: paths.state, buildId, searchId, dataset: config['eval-data']?.use,
+    settings: evalSettings ?? null }));
+}
+
+/** `dictionary suggest`: the missed evidence of a development report on a Lindera build. */
+async function suggestFromReport(project, reference) {
+  const { report, data } = reportOutput(Dunlin.dictionaryEvaluation({ state: project.paths.state, report: reference,
+    dataset: project.config['eval-data']?.use, includeGenerated: Boolean(project.evalSettings?.includeGenerated) }));
+  const build = currentBuild(project.paths, true, report.build_id);
+  if (build.keyword?.tokenizer !== 'lindera') {
+    throw new ProjectError(2, 'LINDERA_REQUIRED', 'Choose an evaluation report for a Lindera build.');
+  }
+  const database = await openBuild(project.paths, build);
+  try {
+    // Read when suggestDictionary first asks, after it checks the report.
+    async function* misses() {
+      yield* reportOutput(await database.dictionaryMisses({ state: project.paths.state, report, data }));
+    }
+    return await suggestDictionary(report, misses(), keywordOptions(build.keyword, project.paths).keywordJapanese.userDictionary);
+  } finally {
+    await database.close();
+  }
+}
+
 async function projectSearchJson(database, build, plan, query, project, options = {}) {
   return (await searchProject(database, build, plan, query, project, options)).output;
 }
@@ -1065,20 +1097,7 @@ export async function runProjectCommand(command, args, explicitProject) {
           runId = `run-${randomUUID()}`;
           data = await withExecutionLock(project.paths, () => addDictionary(project, resolve(values.config), directory));
         } else {
-          const db = openState(project.paths, true);
-          let database;
-          try {
-            const { report, data: dataset } = dictionaryEvaluation(db, project, values.report);
-            const build = currentBuild(project.paths, true, report.build_id);
-            if (build.keyword?.tokenizer !== 'lindera') {
-              throw new ProjectError(2, 'LINDERA_REQUIRED', 'Choose an evaluation report for a Lindera build.');
-            }
-            database = await openBuild(project.paths, build);
-            data = await suggestDictionary(report, dictionaryMisses(db, report, dataset, database), keywordOptions(build.keyword, project.paths).keywordJapanese.userDictionary);
-          } finally {
-            await database?.close();
-            db.close();
-          }
+          data = await suggestFromReport(project, values.report);
         }
       } else if (command === 'evidence-map') {
         if (['create', 'import', 'confirm'].includes(type)) runId = `run-${randomUUID()}`;
@@ -1088,7 +1107,9 @@ export async function runProjectCommand(command, args, explicitProject) {
         const run = async () => {
           const db = openState(project.paths, command === 'report' || (command === 'eval-data' && readOnly));
           try {
-            if (command === 'report') return reports(db, type, positionals.slice(1), values.split);
+            if (command === 'report') {
+              return reportOutput(Dunlin.evaluationReports({ state: project.paths.state, action: type, refs: positionals.slice(1), split: values.split }));
+            }
             if (command === 'eval-data') {
               if (!readOnly) {
                 ensureEvaluation(db);
@@ -1130,7 +1151,7 @@ export async function runProjectCommand(command, args, explicitProject) {
         const state = openState(project.paths, true);
         try {
           const searchId = searchConfigId(project.plan.search, {}, build, project);
-          const evaluation = build && evaluationStatus(state, build.build_id, searchId, project);
+          const evaluation = build && evaluationState(project.paths, project.config, project.evalSettings, build.build_id, searchId);
           const trials = { limits: project.trialLimits, usage: trialUsage(state) };
           data = build ? { build_id: build.build_id, search_config_id: searchId,
             evaluation_status: evaluation.state, evaluation_report: evaluation.report, documents: build.documents, skipped: build.skipped,

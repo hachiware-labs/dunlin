@@ -395,6 +395,44 @@ export type EvidenceMapOutcome =
   | { status: 'done'; output: unknown }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
 
+/** `report show`, `list` or `compare` (spec 28.11 step 4b). */
+export interface EvaluationReportsRequest {
+  state: string;
+  action: 'show' | 'list' | 'compare';
+  refs?: readonly string[];
+  split?: string;
+}
+
+/** The evaluation status of a build and search configuration (spec 28.11 step 4b). */
+export interface EvaluationStatusRequest {
+  state: string;
+  buildId: string;
+  searchId: string;
+  /** `eval-data.use` of the configuration. */
+  dataset?: string;
+  /** The validated `eval` settings, or `null` without an `eval` section. */
+  settings?: Record<string, unknown> | null;
+}
+
+/** The report that dictionary suggestions use: `report`, or the latest development report. */
+export interface DictionaryEvaluationRequest {
+  state: string;
+  report?: string;
+  dataset?: string;
+  includeGenerated?: boolean;
+}
+
+/** The evidence a development report missed (spec 28.11 step 4b). */
+export interface DictionaryMissesRequest {
+  state: string;
+  report: Record<string, unknown>;
+  data: Record<string, unknown>;
+}
+
+export type ReportOutcome<T> =
+  | { status: 'done'; output: T }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+
 export type TagBuildOutcome =
   | { status: 'done'; output: { tag: string; build_id: string; search_config_id: string } }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };

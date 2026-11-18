@@ -2777,3 +2777,11 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - 書記素のまとまりは `unicode-segmentation`、NFKC は `icu_normalizer` で求める。Node.js の `Intl.Segmenter` と `String.prototype.normalize` とは Unicode の版が違い得るので、まれな文字の並びで範囲の端が変わる可能性がある。位置のキーは文書の本文から作るので、範囲が変わっても保存済みの位置と確認済みの範囲はそのまま使われる。
 - `eval-data` の管理（4e）と辞書の提案（4b）は、同じ位置対応を JavaScript の実装のまま使う。どちらも移すときに JavaScript の実装を消す。
 - 差分テストでは、同じプロジェクトを写した2つで、CLI と基準に同じ手順（調整用と最終確認用の評価、対応表の作成、確認、取り込み、確認済みの範囲を使う再評価、誤りの入力）を行い、保存した記録と出力が一致することを確かめた。確認の時刻は比べない。
+
+#### レポートと状態（4b）
+
+- `report show`、`report list`、`report compare` は Node.js API の `Dunlin.evaluationReports` を呼ぶ。評価の状態は `Dunlin.evaluationStatus` で、`status` と `use` が使う。どちらも `state.sqlite` を読むだけなので、同期の呼び出しにした。`state.sqlite` は WAL なので、`use` の書き込みのトランザクションの中で読んでも待たない。
+- 辞書の提案は、使うレポートと評価データを `Dunlin.dictionaryEvaluation` で選び、取りこぼした根拠と前後の行を開いたビルドの `dictionaryMisses` で読む。提案の組み立て（Lindera の解析）は JavaScript に残り、レポートの検査のあとで取りこぼしを読む順も変えない。
+- `report list` の並びは、評価データと評価方法の識別子を符号位置の順で比べる。識別子は共通の接頭辞と小文字の16進数なので、`localeCompare` の順と同じである。
+- 比較の信頼区間は、JavaScript と同じ乱数の種と線形合同法で1000回引き直すので、同じ値になる。
+- 旧実装を写した基準（テストの `report-reference.mjs`）と同じプロジェクトを読み、表示、一覧（調整用と最終確認用）、比較（比べられる組、文脈の予算が違う組、分割が違う組、最終確認用どうし、根拠ごとの記録がない旧形式のレポート）、評価の状態、辞書の提案に使う取りこぼしが一致することを確かめた。

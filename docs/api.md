@@ -2,7 +2,7 @@
 
 ## Node.js ライブラリのインストール
 
-以下の API 例では、`Dunlin.open()` から索引を直接操作します。公開 API は TypeScript と JavaScript の ESM で利用できます。Rust の Tantivy が索引と検索を担い、NAPI-RS v3 で Node.js に接続します。[Tantivy](https://docs.rs/tantivy/0.27.0/tantivy/) · [NAPI-RS](https://napi.rs/docs/introduction/manual-setup)
+CLI と `Dunlinfile.yaml` を使わず、Node.js のアプリケーションから索引を直接扱う場合は、このライブラリ API を使います。以下の例では `Dunlin.open()` で索引を開きます。公開 API は TypeScript と JavaScript の ESM で利用できます。Rust の Tantivy が索引と検索を担い、NAPI-RS v3 で Node.js に接続します。[Tantivy](https://docs.rs/tantivy/0.27.0/tantivy/) · [NAPI-RS](https://napi.rs/docs/introduction/manual-setup)
 
 ビルド済みのバンドル版を、同じ OS と CPU アーキテクチャの Node.js プロジェクトへインストールします。
 
@@ -12,7 +12,7 @@ npm install /path/to/dunlin-0.5.0.tgz
 
 対象は Node.js 22.13 以降の 22 系と Node.js 24 以降です。ビルド対象は Windows x64、Linux x64 glibc、macOS arm64 と x64 です。Linux バイナリの互換性検証は Ubuntu 24.04 を基準にしています。利用側で Rust をコンパイルする必要はありません。
 
-`dunlin` は仮のパッケージ名です。npm レジストリへの公開とライセンスの決定は未実施です。GitHub Actions は、単独でインストールできる OS 別のバンドル版と、ルートパッケージの `optionalDependencies` からバイナリを解決する分割版を生成します。[NAPI-RS の配布方式](https://napi.rs/docs/deep-dive/release)
+`dunlin` は仮のパッケージ名で、npm への公開は準備中です。配布物には、OS 別に単独でインストールできるバンドル版と、ルートパッケージの `optionalDependencies` から OS 別のバイナリを取得する分割版があります。[NAPI-RS の配布方式](https://napi.rs/docs/deep-dive/release)
 
 ## 検索と根拠取得
 

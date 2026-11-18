@@ -899,7 +899,8 @@ export async function runProjectCommand(command, args, explicitProject) {
     if (command === 'eval') options.tag = { type: 'string' };
     if (command === 'eval-data') {
       for (const name of ['question', 'doc', 'quote', 'prefix', 'suffix', 'test-ratio', 'seed', 'output',
-        'model', 'case', 'state', 'reviewer', 'reviewer-type', 'from-search', 'hit', 'page', 'heading']) options[name] = { type: 'string' };
+        'model', 'count', 'state', 'reviewer', 'reviewer-type', 'from-search', 'hit', 'page', 'heading']) options[name] = { type: 'string' };
+      options.case = { type: 'string', multiple: true };
     }
     if (command === 'serve') {
       options['print-config'] = { type: 'boolean' };

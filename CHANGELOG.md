@@ -7,9 +7,10 @@
 - `config` でモデル、提供元、OCR の既定値を登録できるようにし、`init` 時の指定でも切り替えられるようにしました。
 - 稼働中の検索で更新後の索引を使い回し、差分構築で変更のない Tantivy セグメントを共有するようにしました。文書取り込みは上限付きで並行処理し、厳密ベクトル検索は `f32` で計算します。
 - `dictionary suggest` と `dictionary add` を追加しました。調整用の評価から辞書候補と確認用の質問を出し、候補設定で試せます。
-- Windows・macOS の出典パスを比較するテストと、バンドル版・分割版のオフライン配布テストを修正しました。CI は手動で実行します。
+- `eval-data generate` が評価ケースのない文書から順に読み、`--count` で指定した件数まで候補を作るようにしました。引用を検証できない候補だけを除き、理由ごとの件数を表示します。`eval-data review` は `--case` を繰り返して複数件を確認できます。
+- リリース用の npm パッケージを組み立てる `npm run release:prepare` と、手動実行のワークフロー **Release Dunlin**、MCP Registry 用の `server.json` を追加しました。
 - README を CLI 利用者向けにし、Node.js API、検索評価、Wiki・PARA、設定や運用のガイドを整備しました。
 
 ### 以前のプロジェクトから移行する
 
-旧設定の `init.type: rag` で `serve` が stdio 専用の検索プロジェクトを引き続き使う場合は、種別を `mcp` にできます。キーワード索引を `trigram` から `lindera` に切り替える場合は、設定を変更して `dunlin build --from index` で索引を作り直します。採用した検索設定を提供中のプロセスへ反映するときは `serve` を起動し直します。 [MCP の移行](docs/mcp.md#mcp-で検索を提供する) · [日本語検索と辞書](docs/mcp.md#日本語検索とユーザー辞書)
+旧設定の `init.type: rag` で `serve` が stdio 専用の検索プロジェクトを引き続き使う場合は、種別を `mcp` にできます。キーワード索引を `trigram` から `lindera` に切り替える場合は、設定を変更して `dunlin build --from index` で索引を作り直します。採用した検索設定を提供中のプロセスへ反映するときは `serve` を起動し直します。 [MCP の移行](docs/mcp.md#以前の-init-rag-プロジェクトを移行する) · [日本語検索と辞書](docs/mcp.md#日本語検索とユーザー辞書)

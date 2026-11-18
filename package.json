@@ -4,6 +4,11 @@
   "private": true,
   "description": "Local knowledge search with source evidence, powered by Rust",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hachiware-labs/dunlin.git"
+  },
+  "mcpName": "io.github.hachiware-labs/dunlin",
   "type": "module",
   "bin": {
     "dunlin": "./tools/rag/cli.mjs"
@@ -56,6 +61,7 @@
     "docs:check": "node scripts/generate-docs.mjs --check",
     "test": "tsc -p tests/tsconfig.json && node --test tests/*.test.mjs",
     "test:package": "napi create-npm-dirs && node scripts/test-package.mjs",
+    "release:prepare": "napi create-npm-dirs && node scripts/prepare-release.mjs",
     "bench": "node benches/keyword.mjs"
   },
   "dependencies": {

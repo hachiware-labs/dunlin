@@ -1,0 +1,91 @@
+name: Release Dunlin
+
+# Builds the addon and index tool on every supported platform and assembles the npm
+# tarballs. Publishing happens only when `publish` is selected and package.json is
+# no longer marked private.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the tarballs to npm (otherwise only build and upload them)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: windows-2022, target: win32-x64-msvc }
+          - { runner: ubuntu-24.04, target: linux-x64-gnu }
+          - { runner: macos-15, target: darwin-arm64 }
+          - { runner: macos-15-intel, target: darwin-x64 }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install Rust
+        run: rustup toolchain install 1.94.1 --profile minimal
+      - name: Select Rust
+        run: rustup override set 1.94.1
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm --prefix tools/rag ci
+      - run: npm --prefix tools/rag test
+      - run: npm run test:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: |
+            dist/*.node
+            dist/tools/
+          if-no-files-found: error
+
+  package:
+    name: Assemble and publish
+    needs: native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - run: npm run build:js
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: artifacts
+      - run: npm run release:prepare -- --artifacts artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dunlin-release
+          path: dist/release/**/*.tgz
+          if-no-files-found: error
+      - name: Refuse to publish a private package
+        if: inputs.publish
+        run: node -e "if (require('./package.json').private) { console.error('Remove private from package.json to publish.'); process.exit(1) }"
+      - name: Publish the platform packages, then the root package
+        if: inputs.publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for tarball in dist/release/platforms/*.tgz dist/release/root/*.tgz; do
+            npm publish "$tarball" --access public --provenance
+          done

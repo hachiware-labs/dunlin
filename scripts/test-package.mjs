@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { copyFile, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { platformPackages, stageNative, stageRoot } from './package-layout.mjs';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const output = join(project, 'dist', 'packages');
@@ -111,37 +113,16 @@ try {
   await installAndSearch('bundled-consumer', [bundled.path]);
 
   const binary = addons[0].path;
-  const configs = await Promise.all((await readdir(join(project, 'npm'), { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map(async ({ name }) => JSON.parse(await readFile(join(project, 'npm', name, 'package.json'), 'utf8'))));
+  const configs = await platformPackages(project);
   const platform = configs.find(({ main }) => main === basename(binary));
   assert.ok(platform, `No generated platform package for ${binary}`);
 
   const nativeDir = join(stage, 'native');
-  await mkdir(nativeDir);
-  await copyFile(join(project, binary), join(nativeDir, platform.main));
-  await cp(join(project, 'dist', 'tools'), join(nativeDir, 'tools'), { recursive: true });
-  await cp(join(project, 'licenses'), join(nativeDir, 'licenses'), { recursive: true });
-  await writeFile(join(nativeDir, 'package.json'), JSON.stringify({ ...platform, files: [...platform.files, 'tools/*', 'licenses/*.txt'], private: true }));
+  await stageNative({ project, directory: nativeDir, platform, binary: join(project, binary), tools: join(project, 'dist', 'tools') });
   const nativeTar = await pack(nativeDir, join(output, 'split'));
 
   const rootDir = join(stage, 'root');
-  const rootManifest = JSON.parse(await readFile(join(project, 'package.json'), 'utf8'));
-  rootManifest.files = rootManifest.files.filter((path) => !['dist/*.node', 'dist/tools/*'].includes(path));
-  rootManifest.optionalDependencies = Object.fromEntries(
-    configs.map(({ name }) => [name, rootManifest.version]),
-  );
-  await mkdir(rootDir);
-  await writeFile(join(rootDir, 'package.json'), JSON.stringify(rootManifest));
-  await cp(join(project, 'examples'), join(rootDir, 'examples'), { recursive: true });
-  for (const { path } of bundled.files) {
-    const rootDoc = path === 'LICENSE' || /^[^/]+\.md$/u.test(path);
-    if ((path.startsWith('dist/') && !path.startsWith('dist/tools/') && !path.endsWith('.node')) || /^(tools\/rag|docs|licenses)\//u.test(path) || rootDoc) {
-      const target = join(rootDir, path);
-      await mkdir(dirname(target), { recursive: true });
-      await copyFile(join(project, path), target);
-    }
-  }
+  await stageRoot({ project, directory: rootDir, files: bundled.files, platforms: configs });
   const rootTar = await pack(rootDir, join(output, 'split'));
   assert.ok(rootTar.files.every(({ path }) => !path.endsWith('.node')));
   await installAndSearch('split-consumer', [rootTar.path, nativeTar.path]);

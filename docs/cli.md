@@ -79,8 +79,8 @@ dunlin eval-data export <dataset> --output <file>
 dunlin eval-data list
 dunlin eval-data show <dataset>
 dunlin eval-data split --test-ratio <ratio> --seed <integer>
-dunlin eval-data generate --model <alias> [--doc <document>]
-dunlin eval-data review <dataset> [--case <id> --state reviewed|rejected --reviewer <name> --reviewer-type human|agent]
+dunlin eval-data generate [--model <alias>] [--doc <document>] [--count <n>]
+dunlin eval-data review <dataset> [--case <id>... --state reviewed|rejected --reviewer <name> --reviewer-type human|agent]
 dunlin eval-data sync <dataset>
 dunlin eval-data diff <dataset-a> <dataset-b>
 dunlin eval-data tag <name> <dataset>

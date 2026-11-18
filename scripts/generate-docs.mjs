@@ -49,8 +49,8 @@ function cliGuide() {
       'dunlin eval-data list',
       'dunlin eval-data show <dataset>',
       'dunlin eval-data split --test-ratio <ratio> --seed <integer>',
-      'dunlin eval-data generate --model <alias> [--doc <document>]',
-      'dunlin eval-data review <dataset> [--case <id> --state reviewed|rejected --reviewer <name> --reviewer-type human|agent]',
+      'dunlin eval-data generate [--model <alias>] [--doc <document>] [--count <n>]',
+      'dunlin eval-data review <dataset> [--case <id>... --state reviewed|rejected --reviewer <name> --reviewer-type human|agent]',
       'dunlin eval-data sync <dataset>',
       'dunlin eval-data diff <dataset-a> <dataset-b>',
       'dunlin eval-data tag <name> <dataset>',
@@ -89,6 +89,30 @@ const keywordArgs = {
   short_query: { type: '列挙', choices: ['bigram', 'none'] },
 };
 const code = (value) => '`' + value + '`';
+const descriptions = {
+  'source.filesystem': 'ローカルのフォルダを走査します。',
+  'loader.auto': 'ほかのパーサが受け持たなかったファイルを形式で判定し、本文と原文上の位置を抽出します。書いた位置によらず最後に照合します。',
+  'loader.text': 'UTF-8 テキスト、Markdown、HTML を、見出しを保って読み取ります。',
+  'loader.office': 'Word、Excel、PowerPoint の文書を構造付きのテキストとして読み取ります。',
+  'loader.pdf': 'PDF の文字層とページ位置を抽出します。',
+  'loader.ocr': '追加した OCR モデルで文字と元のページ位置を抽出します。',
+  'loader.command': '`match` に一致したファイルを外部コマンドで読み、標準出力の Markdown、テキスト、JSON を本文にします。シェルは通しません。',
+  'text.normalize': '原文上の位置を保ったまま文字を正規化します。',
+  'chunk.length': '重なりのある文字数の窓で分割します。',
+  'chunk.structure': '見出しとページの境界で分割し、長さの上限を設けます。',
+  'chunk.semantic': '隣り合う文の類似度が低い箇所で分割します。',
+  'index.keyword': 'BM25 のキーワード索引を作ります。',
+  'index.vector': '設定したチャンクから厳密なベクトル索引を作ります。',
+  'hannoy.index': '追加した hannoy で、差分更新できる HNSW 索引を作ります。',
+  'query.normalize': '問い合わせを正規化します。',
+  'retrieval.keyword': 'キーワードの一致を順位付けして取得します。',
+  'retrieval.vector': '問い合わせの埋め込みとのコサイン類似度でチャンクを順位付けします。',
+  'hannoy.search': 'hannoy の HNSW 索引から候補を取得します。',
+  'fusion.rrf': '複数の順位付き候補を Reciprocal Rank Fusion で統合します。',
+  'rerank.model': 'チャットモデルで上位候補を並べ替えます。原文上の範囲は変えません。',
+  'context.assemble': '文字数の予算内で出典の抜粋を組み立てます。',
+  'answer.generate': '渡した文脈に基づく回答を生成します。',
+};
 
 function moduleGuide() {
   const modules = describeModules();
@@ -101,13 +125,13 @@ function moduleGuide() {
         const fallback = Object.hasOwn(info, 'default') ? code(JSON.stringify(info.default)) : info.optional || (name === 'index.keyword' && keywordArgs[key]) ? '省略可' : '必須';
         return `| ${code(key)} | ${typeNames[info.type] ?? info.type ?? '—'} | ${fallback} | ${allowed} |`;
       });
-      return section('### ' + name, description + (requires.length ? '\n\n必要な構成は ' + requires.map(code).join('、') + ' です。' : ''),
+      return section('### ' + name, (descriptions[name] ?? description) + (requires.length ? '\n\n必要な構成は ' + requires.map(code).join('、') + ' です。' : ''),
         ['| 引数 | 型 | 既定値 | 範囲・候補 |', '| --- | --- | --- | --- |', ...rows].join('\n'));
     });
     chapters.push(section('## ' + stage, ...tables));
   }
   return section('# モジュールリファレンス', generated,
-    '`Dunlinfile.yaml` の各区切りに `modules` を並べ、`use` に名前、`with` に引数を書きます。以下の `source` から `ask` までは MCP・RAG のモジュール登録簿から生成しています。プロジェクト内では `dunlin modules list --json` で利用できる名前を、`dunlin modules describe <name> --json` で詳細を確認できます。',
+    '`Dunlinfile.yaml` の各区切りに `modules` を並べ、`use` に名前、`with` に引数を書きます。`source` から `ask` までは MCP・RAG で使えるモジュールです。説明の原文は英語で、プロジェクト内では `dunlin modules list --json` で利用できる名前を、`dunlin modules describe <name> --json` で詳細を確認できます。',
     '`index.keyword` の `user_dictionary` は Lindera で使います。`short_query` は `trigram` を選んだときに既定で `bigram` になります。`chunk.length` の `overlap` は `size` より小さくします。 [設定と既定値](config.md)',
     ...chapters,
     '## 評価のモジュール',
@@ -145,7 +169,7 @@ async function configGuide() {
       examples.push(section('## ' + type, block('yaml', [yaml.trimEnd()])));
     }
     return section('# Dunlinfile の設定と既定値', generated,
-      '4種別の `dunlin init <type> <type>` が書き出した YAML を掲載しています。生成時にグローバルのモデル・OCR 設定を空にしました。RAG、Wiki、PARA の初期化はグローバル設定を引き継ぎます。MCP では埋め込みと OCR を初期化時に明示指定できます。 [モデルの設定](mcp.md#初期化時にモデルを選ぶ)',
+      '`dunlin init` が4種別それぞれに書き出す `Dunlinfile.yaml` の全文です。グローバル設定にモデルと OCR を登録していない状態で生成しています。各区切りの説明は、`init` が英語のコメントとして書き出します。RAG、Wiki、PARA の初期化はグローバル設定のモデルを引き継ぎます。MCP の埋め込みと OCR は、初期化時に指定した場合だけ有効になります。 [モデルの設定](mcp.md#初期化時にモデルを選ぶ)',
       '`use` にモジュール名、`with` にその引数を書きます。ソースや辞書の相対パスは設定ファイルの場所を基準にします。モデルやパスなど、対応する項目では `${ENV_NAME}` を使えます。API キーは `api_key_env` に環境変数の名前を指定します。設定を編集したら `dunlin validate --json` で確認できます。 [モジュールと引数](modules.md)',
       ...examples);
   } finally {

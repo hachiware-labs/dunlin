@@ -39,6 +39,27 @@ dunlin report show baseline
 dunlin tag baseline-build
 ```
 
+## 質問と引用の候補をモデルに作らせる
+
+質問と引用を手で書く代わりに、設定済みの対話用モデルに候補を作らせることができます。`Dunlinfile.yaml` の `models` に `kind: chat` のモデルが1つだけあれば `--model` は省けます。
+
+```sh
+dunlin eval-data generate --count 30
+```
+
+- 評価ケースがまだない文書から先に読み、長い文書は続きの範囲も読みます。`--doc` で対象を1文書に絞れます。
+- 引用が原文にない、文書内で一意に決まらない、質問が重複している候補は採用しません。結果の `dropped` に理由ごとの件数が出ます。
+- 作られたケースの状態は `generated` で、確認するまで評価の対象になりません。モデルを使うため、読ませた範囲のテキストはそのモデルの提供元へ送られます。
+
+候補を一覧し、妥当なものを採用します。`--case` は繰り返して指定できます。
+
+```sh
+dunlin eval-data review <dataset>
+dunlin eval-data review <dataset> --case <id> --case <id> --state reviewed --reviewer <name> --reviewer-type human
+```
+
+`<dataset>` は `generate` が表示した評価データの ID です。採用しない候補は `--state rejected` にします。まとめて編集したい場合は `eval-data export` で書き出し、`eval-data import` で戻せます。
+
 ## 辞書候補を選ぶ
 
 ```sh

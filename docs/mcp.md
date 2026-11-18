@@ -18,11 +18,13 @@ dunlin serve --print-config
 
 資料を更新したら `dunlin build` を再実行します。実行中の MCP は次の要求から完成した索引を使います。未対応のファイルは `source.filesystem` の `with.exclude` に除外パターンを指定するか、`dunlin build --skip-unsupported` で飛ばせます。
 
-`build` は `source → transform → index` を実行します。各段階は同名のコマンドでも実行できます。チャンクの長さを変更するには `chunk.length` の `with.size` と `with.overlap` を編集します。`dunlin build --from transform` で保存済みの抽出結果から再開できます。[Dunlinfile の構成](dunlin-spec.md#55-設定ファイルの例)
+`build` は `source → transform → index` を実行します。各段階は同名のコマンドでも実行できます。チャンクの長さを変更するには `chunk.length` の `with.size` と `with.overlap` を編集します。`dunlin build --from transform` で保存済みの抽出結果から再開できます。 [Dunlinfile の設定と既定値](config.md)
 
 `dunlin build --dry-run` で変更された文書を確認できます。候補設定の試行は `dunlin build --from transform --config candidate.yaml --tag trial` で作り、`dunlin search "手順" --build trial` で確認できます。採用には `dunlin use trial` を実行して MCP を再起動します。入力の版を試行間でそろえる場合は `--input <build>` を指定します。[試行と採用](dunlin-spec.md#11-試行採用外部エージェントによる最適化)
 
-以前の `init rag` が生成した stdio 専用プロジェクトは、`init.type` を `mcp` に変更すると移行できます。`ask` の区切りがなく、`serve` が `transport: stdio` のみの旧設定は、移行前も MCP として動作します。
+### 以前の init rag プロジェクトを移行する
+
+以前の `init rag` が作った stdio 専用のプロジェクトを使っている場合は、`Dunlinfile.yaml` の `init.type` を `mcp` に変更します。`ask` の区切りがなく、`serve` が `transport: stdio` だけの旧設定は、変更前も MCP として動作します。
 
 ## RAG で回答と検索を提供する
 
@@ -96,7 +98,7 @@ dunlin init rag ./rag
 
 ## 初期化で生成される Dunlinfile.yaml
 
-`--source` を省くと、MCP と RAG はどちらも `./docs` を入力にします。設計仕様に、グローバル設定にモデルと OCR の登録がない状態で生成した YAML の全文を掲載しています。 [MCP の Dunlinfile.yaml](dunlin-spec.md#mcp-の-dunlinfileyaml) · [RAG の Dunlinfile.yaml](dunlin-spec.md#rag-の-dunlinfileyaml)
+`--source` を省くと、MCP と RAG はどちらも `./docs` を入力にします。グローバル設定にモデルと OCR を登録していない状態で生成される YAML の全文は、設定リファレンスにあります。 [Dunlinfile の設定と既定値](config.md)
 
 スキャン資料を取り込むプロジェクトでは、初期化時に `--ocr` を指定できます。続けて作るプロジェクトで毎回有効にするには `dunlin config set ocr` を使います。 [OCR の初期化設定](dunlin-spec.md#初期化時の-ocr-指定)
 
@@ -123,7 +125,7 @@ index:
 
 ## ベクトル索引を切り替える
 
-埋め込みモデルを `models` に設定し、`dunlin add hannoy --json` が返す設定例を使います。`index.vector` を `hannoy.index` に、`retrieval.vector` を `hannoy.search` に置き換え、両方に同じ埋め込みモデル名を指定します。キーワードとの併用では `fusion.rrf` を残します。
+資料が多く、埋め込みを使った検索に時間がかかる場合は、厳密なベクトル索引を近似索引（hannoy）に切り替えられます。埋め込みモデルを `models` に設定し、`dunlin add hannoy --json` が返す設定例を使います。`index.vector` を `hannoy.index` に、`retrieval.vector` を `hannoy.search` に置き換え、両方に同じ埋め込みモデル名を指定します。キーワードとの併用では `fusion.rrf` を残します。
 
 ```sh
 dunlin validate
@@ -136,6 +138,8 @@ dunlin use ann
 
 ## 試行に上限を設定する
 
+エージェントに検索の調整を任せるときなど、試行の回数、所要時間、モデルへのリクエスト数と送信量に上限を設けられます。`Dunlinfile.yaml` に `trial_limits` を書きます。
+
 ```yaml
 trial_limits:
   max_runs: 20
@@ -144,4 +148,4 @@ trial_limits:
   max_api_input_bytes: 5000000
 ```
 
-タグまたは候補設定を指定した構築と、ビルドまたは候補設定を指定した評価を、同じプロジェクトで累計します。失敗した試行と送信したリクエストも計上します。設定の候補で上限を引き下げられます。上限に達すると `TRIAL_LIMIT_REACHED` を返します。`dunlin status --json` の `trials` で使用量と上限を確認できます。
+上限は、タグまたは候補設定を指定した構築と、ビルドまたは候補設定を指定した評価について、同じプロジェクトで累計します。失敗した試行と送信したリクエストも数えます。候補設定では上限を引き下げられますが、引き上げることはできません。上限に達すると `TRIAL_LIMIT_REACHED` を返します。`dunlin status --json` の `trials` で使用量と上限を確認できます。

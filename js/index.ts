@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageHost, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
   WikiImpact, WikiPage,
@@ -42,6 +42,8 @@ interface NativeDatabase {
   read(evidence: string, cancel: NativeCancellation): Promise<ReadOutcome>;
   describeEvidence(evidence: string, cancel: NativeCancellation): Promise<(EvidenceExcerpt | null)[]>;
   searchProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  evaluateProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  evidenceMap(request: string, cancel: NativeCancellation): Promise<string>;
   serveMcp(options: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<void>;
   wikiBuild(options: string, cancel: NativeCancellation): Promise<WikiPage>;
   wikiGet(id: string, cancel: NativeCancellation): Promise<WikiPage | null>;
@@ -73,6 +75,7 @@ interface NativeBinding {
   runIndex(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   runBuild(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   tagBuild(request: string, host: (...args: unknown[]) => void): Promise<string>;
+  evidenceMaps(request: string): Promise<string>;
   routeFiles(request: string): string;
   searchConfigId(request: string): string;
   answerQuestion(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
@@ -464,6 +467,11 @@ export class Dunlin {
     return JSON.parse(text) as TagBuildOutcome;
   }
 
+  /** `evidence-map list` and `show` on a project's `state.sqlite` (spec 28.11 step 4a). */
+  static async evidenceMaps(request: EvidenceMapRequest): Promise<EvidenceMapOutcome> {
+    return JSON.parse(await native().evidenceMaps(configJson(request))) as EvidenceMapOutcome;
+  }
+
   /**
    * Scan a source folder: its files, skipping names that start with a dot, node_modules, links and
    * paths that match an exclude pattern. Files come back ordered by object ID.
@@ -738,6 +746,21 @@ export class Dunlin {
   async searchProject(request: ProjectSearchRequest, host: ProjectSearchHost = {}, { signal }: OperationOptions = {}): Promise<ProjectSearchOutcome> {
     const text = await this.#run(signal, (database, cancel) => database.searchProject(configJson(request), hostCallback(host), cancel));
     return JSON.parse(text) as ProjectSearchOutcome;
+  }
+
+  /**
+   * Score this build with a project's evaluation data and save the report (spec 28.11 step 4a).
+   * `host` answers as for `searchProject`.
+   */
+  async evaluateProject(request: EvaluateProjectRequest, host: ProjectSearchHost = {}, { signal }: OperationOptions = {}): Promise<EvaluateProjectOutcome> {
+    const text = await this.#run(signal, (database, cancel) => database.evaluateProject(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as EvaluateProjectOutcome;
+  }
+
+  /** `evidence-map create`, `import` and `confirm` on the documents of this build (spec 28.11 step 4a). */
+  async evidenceMap(request: EvidenceMapRequest, { signal }: OperationOptions = {}): Promise<EvidenceMapOutcome> {
+    const text = await this.#run(signal, (database, cancel) => database.evidenceMap(configJson(request), cancel));
+    return JSON.parse(text) as EvidenceMapOutcome;
   }
 
   /**

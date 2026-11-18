@@ -909,6 +909,41 @@ pub fn tag_build<'env>(
     Ok(promise)
 }
 
+/// The result of an `evidence-map` command as `{ status, output }` or a failed status, or `None`
+/// when it was aborted.
+fn evidence_map_outcome(
+    database: Option<&KnowledgeBase>,
+    request: &str,
+    cancel: &crate::Cancellation,
+) -> Option<String> {
+    let outcome = serde_json::from_str::<crate::eval_stage::EvidenceMapRequest>(request)
+        .map_err(|error| {
+            crate::embed::EmbedError::plain(format!("Invalid evidence map request: {error}"))
+        })
+        .and_then(|request| crate::eval_stage::evidence_maps(database, &request, cancel));
+    match outcome {
+        Ok(output) => Some(format!(
+            "{{\"status\":\"done\",\"output\":{}}}",
+            output.to_js_json()
+        )),
+        Err(error) if error.aborted => None,
+        Err(error) => Some(failed_stage(error)),
+    }
+}
+
+/// Runs `evidence-map list` or `show` on `state.sqlite` (see `eval_stage`). Resolves to
+/// `{ status: "done", output }` or a failed status.
+#[napi]
+pub fn evidence_maps(env: &Env, request: String) -> Result<Object<'_>> {
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    std::thread::spawn(move || {
+        let cancel = crate::Cancellation::default();
+        let text = evidence_map_outcome(None, &request, &cancel).unwrap_or_default();
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
+}
+
 /// Runs the `index` stage on a recorded transform stage (see `index_stage`): builds the keyword
 /// and vector indexes in a new build directory, or reuses a saved build, and records the build.
 /// `host(id, kind, args, bytes)` answers `charge`, `config` (whether the configuration file
@@ -1552,6 +1587,70 @@ impl NativeDatabase {
                 Err(failure) => with_module(failed_stage(failure.error), failure.module),
             };
             deferred.resolve(move |_| Ok(text));
+        });
+        Ok(promise)
+    }
+
+    /// Scores the build of this index with the selected evaluation data and saves the report (see
+    /// `eval_stage`). `host` answers `charge` and `tool` as for `searchProject`. Resolves to
+    /// `{ status: "done", report }` or `{ status: "failed", error: { code?, message, exitCode?,
+    /// module? } }`.
+    #[napi]
+    pub fn evaluate_project<'env>(
+        &self,
+        env: &'env Env,
+        request: String,
+        host: Function<'env, HostArgs, Unknown<'static>>,
+        cancel: &NativeCancellation,
+    ) -> Result<Object<'env>> {
+        let database = self.database()?;
+        let vectors = self.1.clone();
+        let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+        let (deferred, promise) = env.create_deferred::<String, _>()?;
+        let cancel = cancel.0.clone();
+        std::thread::spawn(move || {
+            let host = JsHost { function };
+            let outcome = serde_json::from_str::<crate::eval_stage::EvaluateRequest>(&request)
+                .map_err(|error| crate::search_stage::SearchFailure {
+                    error: crate::embed::EmbedError::plain(format!(
+                        "Invalid evaluation request: {error}"
+                    )),
+                    module: None,
+                })
+                .and_then(|request| {
+                    crate::eval_stage::evaluate(&database, &vectors, request, &host, &cancel)
+                });
+            let text = match outcome {
+                Ok(report) => format!("{{\"status\":\"done\",\"report\":{}}}", report.to_js_json()),
+                Err(failure) if failure.error.aborted => {
+                    deferred.reject(native_error(crate::Error::Aborted));
+                    return;
+                }
+                Err(failure) => with_module(failed_stage(failure.error), failure.module),
+            };
+            deferred.resolve(move |_| Ok(text));
+        });
+        Ok(promise)
+    }
+
+    /// Runs `evidence-map create`, `import` or `confirm` on the documents of this index (see
+    /// `eval_stage`). Resolves to `{ status: "done", output }` or a failed status.
+    #[napi]
+    pub fn evidence_map<'env>(
+        &self,
+        env: &'env Env,
+        request: String,
+        cancel: &NativeCancellation,
+    ) -> Result<Object<'env>> {
+        let database = self.database()?;
+        let (deferred, promise) = env.create_deferred::<String, _>()?;
+        let cancel = cancel.0.clone();
+        std::thread::spawn(move || {
+            let text = evidence_map_outcome(Some(&database), &request, &cancel);
+            match text {
+                Some(text) => deferred.resolve(move |_| Ok(text)),
+                None => deferred.reject(native_error(crate::Error::Aborted)),
+            }
         });
         Ok(promise)
     }

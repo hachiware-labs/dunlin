@@ -15,7 +15,7 @@ import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { generatorSettings } from './models.mjs';
 import { chunkCorpus, ocrRequest, parserHost } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
-import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluate, evaluationStatus, evidenceMaps, manageEvaluationData, reports } from './project-eval.mjs';
+import { dictionaryEvaluation, dictionaryMisses, ensureEvaluation, evaluationStatus, manageEvaluationData, reports } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
@@ -682,6 +682,71 @@ async function searchProject(database, build, plan, query, project, options = {}
   return result;
 }
 
+/**
+ * Scores a build with the selected evaluation data in Rust and saves the report (spec 28.11 step
+ * 4a). `searchBuild` resolves the search models.
+ */
+async function evaluateProject(database, build, searchBuild, plan, project, settings, values, runId) {
+  const signal = trialSignal();
+  const { embedders, rerankers, rerankModels } = searchModels(plan, searchBuild, project);
+  let refused;
+  const answer = (call) => async (...args) => {
+    try {
+      return await call(...args);
+    } catch (error) {
+      refused = error;
+      throw error;
+    }
+  };
+  const host = {
+    charge: answer((bytes) => { chargeTrialApi({ byteLength: bytes }); }),
+    indexTool: answer(() => indexToolPath(project.paths, hannoy)),
+  };
+  let result;
+  try {
+    result = await untilAborted(database.evaluateProject({
+      search: { plan: moduleSettings(plan), query: '', build: searchBuild, directory: join(project.paths.artifacts, build.index),
+        embedders, rerankModels, rerankers },
+      state: project.paths.state, build, dataset: project.config['eval-data']?.use, settings, split: values.split, tag: values.tag, runId,
+    }, host, { signal }), signal);
+  } catch (error) {
+    trialCheckpoint();
+    throw error;
+  }
+  if (result.status === 'failed') {
+    const error = stageFailure(result.error, refused);
+    if (result.error.module) {
+      error.module ??= result.error.module;
+      error.section ??= 'search';
+    }
+    throw error;
+  }
+  return result.report;
+}
+
+/** An `evidence-map` command in Rust (spec 28.11 step 4a). `export` writes the map it shows. */
+async function evidenceMapCommand(project, action, reference, values) {
+  if (action === 'export' && !values.output) throw new ProjectError(2, 'INVALID_EVAL_DATA', 'Use --output <file>.');
+  const request = { state: project.paths.state, action: action === 'export' ? 'show' : action, reference,
+    dataset: project.config['eval-data']?.use, key: values.key, start: values.start, end: values.end, reviewer: values.reviewer };
+  let result;
+  if (['create', 'import', 'confirm'].includes(action)) {
+    const build = currentBuild(project.paths, true, values.build);
+    const database = await openBuild(project.paths, build);
+    try {
+      result = await database.evidenceMap({ ...request, build });
+    } finally {
+      await database.close();
+    }
+  } else {
+    result = await Dunlin.evidenceMaps(request);
+  }
+  if (result.status === 'failed') throw stageFailure(result.error);
+  if (action !== 'export') return result.output;
+  await writeFile(values.output, JSON.stringify(result.output, null, 2) + '\n', { flag: 'wx' });
+  return { id: result.output.id };
+}
+
 async function projectSearchJson(database, build, plan, query, project, options = {}) {
   return (await searchProject(database, build, plan, query, project, options)).output;
 }
@@ -1016,20 +1081,8 @@ export async function runProjectCommand(command, args, explicitProject) {
           }
         }
       } else if (command === 'evidence-map') {
-        const mutates = ['create', 'import', 'confirm'].includes(type);
-        const db = openState(project.paths, !mutates);
-        let database;
-        try {
-          const build = mutates ? currentBuild(project.paths, true, values.build) : null;
-          if (build) {
-            runId = `run-${randomUUID()}`;
-            database = await openBuild(project.paths, build);
-          }
-          data = await evidenceMaps(db, project, type, directory, values, database, build);
-        } finally {
-          await database?.close();
-          db.close();
-        }
+        if (['create', 'import', 'confirm'].includes(type)) runId = `run-${randomUUID()}`;
+        data = await evidenceMapCommand(project, type, directory, values);
       } else if (command === 'eval-data' || command === 'eval' || command === 'report') {
         const readOnly = ['show', 'list', 'export', 'diff'].includes(type) || (type === 'review' && !values.case && !values.state);
         const run = async () => {
@@ -1062,11 +1115,8 @@ export async function runProjectCommand(command, args, explicitProject) {
             const score = async () => {
               const database = await openBuild(project.paths, build);
               try {
-                return await evaluate(db, project, build, settings, values, runId, database,
-                  (query) => searchProject(database, values.config ? { ...build, search_models: undefined } : build, plan, query, project)
-                    .then(({ output, context, contextStop }) => ({ search_config_id: output.search_config_id,
-                      hits: output.results.map(({ evidence }) => ({ evidence })), context: context.map((evidence) => ({ evidence })),
-                      context_chars: output.context.chars, context_stop: contextStop })));
+                return await evaluateProject(database, build, values.config ? { ...build, search_models: undefined } : build,
+                  plan, project, settings, values, runId);
               } finally { await database.close(); }
             };
             return values.build || values.config ? await runTrial(db, runId, command, project.trialLimits, score) : await score();

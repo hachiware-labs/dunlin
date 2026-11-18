@@ -354,6 +354,47 @@ export type ProjectSearchOutcome =
   | { status: 'done'; output: Record<string, unknown>; context: Evidence[]; contextStop: string }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; module?: string } };
 
+/** An `eval` run (spec 28.11 step 4a): the search of each question and the evaluation settings. */
+export interface EvaluateProjectRequest {
+  /** The search plan and models; `query` is replaced by each question. */
+  search: ProjectSearchRequest;
+  /** The path of `state.sqlite`. */
+  state: string;
+  /** The build manifest the report is for. */
+  build: Record<string, unknown>;
+  /** `eval-data.use` of the configuration. */
+  dataset?: string;
+  /** The validated `eval` settings with `contextBudget`, `construction` and `searchModules`. */
+  settings: Record<string, unknown>;
+  split?: string;
+  tag?: string;
+  runId: string;
+}
+
+export type EvaluateProjectOutcome =
+  | { status: 'done'; report: Record<string, unknown> }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; module?: string } };
+
+/** An `evidence-map` command (spec 28.11 step 4a). */
+export interface EvidenceMapRequest {
+  state: string;
+  action: 'list' | 'show' | 'create' | 'import' | 'confirm';
+  /** The map ID, or the file to import. */
+  reference?: string;
+  /** `eval-data.use` of the configuration, for `create`. */
+  dataset?: string;
+  /** The build manifest, for `create`, `import` and `confirm`. */
+  build?: Record<string, unknown>;
+  key?: string;
+  start?: string;
+  end?: string;
+  reviewer?: string;
+}
+
+export type EvidenceMapOutcome =
+  | { status: 'done'; output: unknown }
+  | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+
 export type TagBuildOutcome =
   | { status: 'done'; output: { tag: string; build_id: string; search_config_id: string } }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };

@@ -2746,3 +2746,34 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - `/mcp` は、TypeScript SDK の状態を持たない方式と同じに答える。要求ごとに結果を1つのイベントとする server-sent events で返し、受け付ける形式、`Content-Type`、JSON の誤り、空の一括要求、プロトコルの版の誤りには、同じ状態コードと JSON-RPC のエラーを返す。
 - 開いた索引ごとに、Node.js の `diagnostics_channel` の `dunlin:index-open` に `{ path }` を知らせる。購読者がいないときは何もしない。
 - 旧サーバーを写した基準（テストの `rag-http-reference.mjs`）を同じプロジェクトで並べて起動し、49通りの要求（検索、回答、MCP、接続先・送信元・合言葉・パス・大きさの誤り、CORS の事前確認）に、同じ状態コード、ヘッダー、本文で答えることを確かめる。
+
+### 28.11 段階4の進め方
+
+段階4では、評価（`eval`）、根拠の位置対応、レポートと比較、試行と採用、評価データの管理を Rust のエンジンに移し、Node.js API の `evaluate.rs` とまとめる。範囲が大きいので、次の小段階に分ける。各小段階の終わりで、旧実装と同じビルドと評価データに対して、根拠の位置、評価レポート、根拠の対応表、比較の結果、識別子（`evaluation_config_id`、`method_id`、`evidence_map_id`、位置のキー）が変わらないことを差分テストで確かめる。
+
+| 小段階 | 内容 |
+| --- | --- |
+| 4a | 評価の採点を Rust に移す。根拠の位置対応（NFKC と空白の正規化、前後の文字列、ページと見出しの手がかり、近い候補の提示、位置のキーと `evidence_positions`・`evidence_overrides` の表）、範囲の被覆の判定、指標と遅延の集計、レポートと根拠の対応表の保存が含まれる。検索は Rust の中で続けて行い、質問ごとに JavaScript を経由しない。`evidence-map` のコマンドも同じ位置対応を使うので、ここで移す |
+| 4b | レポートの読み出しを Rust に移す。`report show`、`report list`（設定の違いの列）、`report compare`（対の差、勝ち負け、グループ単位のブートストラップの信頼区間、ケースごとの変化）、評価の状態（`status` と `use` が使う）、辞書の提案に渡す取りこぼしの一覧が含まれる |
+| 4c | 試行と採用を Rust に移す。試行の記録（`trial_runs`）、上限の判定、経過時間の打ち切り、モデルへの要求の数と送信量の計数を Rust で行い、計数のために JavaScript へ問い合わせるのをやめる。`use` の記録（採用の履歴、提供中のビルド、世代）も Rust で行う。設定ファイルの書き出しは、YAML を移す段階6までは JavaScript に問い合わせる |
+| 4d | Node.js API の `evaluate` と `optimize` を、CLI と同じ評価のエンジンにまとめる（28.5節）。仕様（9〜11章）に合う方の動作を残す |
+| 4e | 評価データの管理（`eval-data` の `add`、`import`、`export`、`list`、`show`、`split`、`review`、`sync`、`diff`、`use`、`generate`）を Rust に移す。`generate` は 3b の生成モデルの呼び出しを使う。作業中の評価データの変更が入ってから行うため、段階4の最後に置く |
+
+#### 4a から 4e の間に変えないもの
+
+- `state.sqlite` の評価の表（`evaluation_datasets`、`evaluation_dataset_tags`、`evaluation_reports`、`evidence_positions`、`evidence_maps`、`evidence_overrides`、`trial_runs`）と、保存する JSON の形とキーの順。
+- 識別子の計算方法。`evaluation_config_id`、`method_id`、`evidence_map_id`、位置のキーは、以前のレポートと比べる条件や、保存済みの位置対応を引く鍵に入っている。
+- 根拠の位置対応の規則。範囲は原文のバイト位置で、文字の単位は書記素のまとまりとする。指標の値、エラーの番号と終了コード、`eval` と `report` の返却形式も変えない。
+
+#### 評価の採点（4a）
+
+- Rust の口は、ビルドの記録、検索のモジュールの設定、評価の設定（JavaScript が検証した `eval` の節、文脈の予算、構築の設定、検索のモジュール）、評価データの参照、`--split` と `--tag` を受け取り、レポートを保存して返す。検索は 3a の口と同じ処理で行う。
+- 評価の設定は JavaScript から受け取った順のまま `evaluation_config_id` に入れる。JSON の数値は JavaScript と同じ書き方にする。
+- 遅延は質問ごとの検索の時間で、Rust で測る。値は実行ごとに変わるので、差分テストでは比べない。
+- 試行の打ち切り（`eval --build`、`eval --config`）は、試行の中断を Rust の呼び出しの中断として渡す。打ち切られた評価はレポートを保存しない。試行の記録は 4c までは JavaScript に残る。
+- `evidence-map` の `create`、`import`、`confirm` は、確認した範囲を `evidence_overrides` に保存し、新しい対応表を作る。`list`、`show`、`export` は保存済みの対応表を読む。
+- 旧実装を写した基準（テストの `eval-reference.mjs`）と、同じプロジェクトで比べる。一意に見つかる引用、見つからない引用と近い候補、複数に一致する引用、前後の文字列、ページと見出しの手がかり、文書がない根拠、保存済みと確認済みの位置、調整用と最終確認用の分割、`--tag` の重複について、保存したレポートと対応表の JSON が遅延を除いて一致することを確かめる。
+- 評価は Node.js API の `evaluateProject`（開いたビルドの索引の口）で行い、根拠の対応表は `evidenceMap`（`create`、`import`、`confirm`）と `Dunlin.evidenceMaps`（`list`、`show`）で扱う。`export` は `show` の結果を JavaScript がファイルに書く。表示と書き出しは段階6で移す。
+- 書記素のまとまりは `unicode-segmentation`、NFKC は `icu_normalizer` で求める。Node.js の `Intl.Segmenter` と `String.prototype.normalize` とは Unicode の版が違い得るので、まれな文字の並びで範囲の端が変わる可能性がある。位置のキーは文書の本文から作るので、範囲が変わっても保存済みの位置と確認済みの範囲はそのまま使われる。
+- `eval-data` の管理（4e）と辞書の提案（4b）は、同じ位置対応を JavaScript の実装のまま使う。どちらも移すときに JavaScript の実装を消す。
+- 差分テストでは、同じプロジェクトを写した2つで、CLI と基準に同じ手順（調整用と最終確認用の評価、対応表の作成、確認、取り込み、確認済みの範囲を使う再評価、誤りの入力）を行い、保存した記録と出力が一致することを確かめた。確認の時刻は比べない。

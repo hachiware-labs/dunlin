@@ -106,11 +106,11 @@ console.log(result.wiki.regenerated, result.wiki.failures);
 
 `mode` の省略または `auto` はアクティブプランを使います。初期プランは `keyword-v1` です。明示モードはその呼び出しに限ってプランを上書きします。組み込みプランの既定件数は 10 件で、評価済みプランでは評価時の `limit` が既定値になります。呼び出しごとに `limit` を上書きできます。結果の `score` は `keyword` では BM25 スコア、`coverage` では順位の逆数です。
 
-評価セットは、検索クエリと関連資料の ID を並べた UTF-8 JSONL ファイルか、同じ形の配列です。`objectId` は検索結果に含まれる資料の相対パスです。
+評価セットは、質問とその根拠の引用を並べた UTF-8 JSONL ファイルか、同じ形の配列です。CLI の評価データ（`eval-data import`）と同じ形で、引用が1つなら `doc` と `quote` を直接書けます。`doc` は `ソースID:資料の相対パス` です。`prefix`、`suffix`、`page`、`heading` で、同じ文が複数ある場合の位置を絞れます。
 
 ```jsonl
-{"query":"認証方式 OAuth","relevant":[{"sourceId":"docs","objectId":"architecture/authentication.md"}]}
-{"query":"監査記録 保存期間","relevant":[{"sourceId":"docs","objectId":"operations/audit.md"}]}
+{"question":"認証方式は OAuth ですか","doc":"docs:architecture/authentication.md","quote":"認証には OAuth 2.0 を使う。"}
+{"question":"監査記録の保存期間","evidence":[{"doc":"docs:operations/audit.md","quote":"監査記録は5年間保存する。","heading":"保存期間"}]}
 ```
 
 ```ts
@@ -132,8 +132,8 @@ if (report.selectedPlanId) {
 ```
 
 - `evaluate` は保存せず比較結果を返します。`evaluate` と `optimize` は一つの索引スナップショットを使い、各クエリのウォームアップ後に両方式を交互に測ります。既定値は上位 10 件、各方式・クエリにつき 3 回です。
-- 精度はクエリごとの Recall@K と nDCG@K を平均します。同じ資料の複数箇所が上位 K 件に入った場合は最初の一致にだけ得点を付けます。P95 は全計測サンプルの 95 パーセンタイルを最近順位法で求めます。計測範囲は Rust の検索と根拠情報の取得で、Node.js のワーカー待ちと JS への変換は別です。
-- `optimize` は P95 が予算内の候補を、nDCG@K、Recall@K、P95 の順で比較します。選んだプランには方式の版、評価セットのハッシュ、索引リビジョン、比較結果を保存します。予算内の候補がなければ `budget_unmet` を返します。
+- 精度は CLI の `eval` と同じ根拠単位の指標です。引用を現在の資料の中で探し（NFKC と空白の正規化）、上位 K 件の結果がその範囲を覆えば回収とみなします。短い引用（既定 40 文字以下、`shortEvidenceChars`）は全体を、長い引用は文字数の 8 割（`minCoverage`）を覆う必要があります。質問ごとの回収率を平均したものが `evidenceRecallAtK` です。資料が見つからない引用や、1か所に定まらない引用は回収できなかったものとして数え、件数を `unresolvedEvidence` に返します。P95 は全計測サンプルの 95 パーセンタイルを最近順位法で求めます。計測範囲は Rust の検索と根拠情報の取得で、Node.js のワーカー待ちと JS への変換は別です。
+- `optimize` は P95 が予算内の候補を、`evidenceRecallAtK`、P95 の順で比較します。選んだプランには方式の版、評価セットのハッシュ、索引リビジョン、比較結果を保存します。予算内の候補がなければ `budget_unmet` を返します。以前の版で保存したプランも、そのまま有効にできます。
 - `activatePlan` は現在のハンドルと次回以降の `open` に適用されます。すでに開いている別ハンドルへ反映するには開き直します。保存したプランは索引更新後も使えますが、評価値は実測時の索引リビジョンに対応します。
 
 ## 複数ソースの探索

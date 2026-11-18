@@ -6,7 +6,7 @@ use tantivy::directory::error::LockError;
 use tantivy::directory::{Directory, Lock, MmapDirectory};
 
 use crate::storage::{read_json, write_json};
-use crate::{Cancellation, Error, EvaluationReport, Result};
+use crate::{Cancellation, Error, Result};
 
 const PLAN_VERSION: u32 = 1;
 const ACTIVE: &str = "active.json";
@@ -63,7 +63,15 @@ impl RetrievalPlan {
 #[serde(rename_all = "camelCase")]
 pub struct PlanEvaluation {
     pub p95_latency_budget_ms: f64,
-    pub report: EvaluationReport,
+    /// The `evaluate` report the plan was chosen with. Plans saved before evidence-level scoring
+    /// (spec 28.11 step 4d) keep their document-level report.
+    pub report: serde_json::Value,
+}
+
+impl PlanEvaluation {
+    fn limit(&self) -> Option<usize> {
+        self.report["limit"].as_u64().map(|limit| limit as usize)
+    }
 }
 
 pub(crate) struct PlanStore {
@@ -128,7 +136,7 @@ impl PlanStore {
             id: id.clone(),
             version: PLAN_VERSION,
             method,
-            default_limit: evaluation.report.limit,
+            default_limit: evaluation.limit().ok_or(Error::Plan)?,
             evaluation: Some(evaluation),
         };
         cancel.check()?;
@@ -150,7 +158,8 @@ fn load_plan(directory: &MmapDirectory, id: &str) -> Result<RetrievalPlan> {
     if plan.id != id
         || plan.version != PLAN_VERSION
         || !plan.evaluation.as_ref().is_some_and(|evaluation| {
-            evaluation.report.limit == plan.default_limit && (1..=100).contains(&plan.default_limit)
+            evaluation.limit() == Some(plan.default_limit)
+                && (1..=100).contains(&plan.default_limit)
         })
     {
         return Err(Error::Plan);

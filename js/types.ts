@@ -647,18 +647,30 @@ export interface DocumentRef {
   objectId: string;
 }
 
-export type RelevantObject = DocumentRef;
-
-export interface EvaluationCase {
-  query: string;
-  relevant: readonly RelevantObject[];
+/** A quote that answers a question, in a document `sourceId:objectId`, with the hints of `eval-data`. */
+export interface EvidenceQuote {
+  doc: string;
+  quote: string;
+  prefix?: string;
+  suffix?: string;
+  page?: number;
+  heading?: string;
 }
 
+/** A question and its evidence quotes, or one quote given directly as in `eval-data import`. */
+export type EvaluationCase =
+  | { question: string; evidence: readonly EvidenceQuote[] }
+  | ({ question: string } & EvidenceQuote);
+
 export interface EvaluationOptions extends OperationOptions {
-  /** A UTF-8 JSONL file path or an array of labeled queries. */
+  /** A UTF-8 JSONL file path or an array of questions with evidence quotes. */
   evaluationSet: string | readonly EvaluationCase[];
   limit?: number;
   repetitions?: number;
+  /** A quote of at most this many characters must be covered completely. Default 40. */
+  shortEvidenceChars?: number;
+  /** The share of a longer quote's characters the results must cover. Default 0.8. */
+  minCoverage?: number;
 }
 
 export interface OptimizeOptions extends EvaluationOptions {
@@ -669,8 +681,8 @@ export interface OptimizeOptions extends EvaluationOptions {
 export interface CandidateMetrics {
   planId: string;
   method: RetrievalMethod;
-  recallAtK: number;
-  ndcgAtK: number;
+  /** The share of evidence quotes the top `limit` results cover, averaged over questions. */
+  evidenceRecallAtK: number;
   /** Warm Rust search latency, including evidence lookup. */
   p95LatencyMs: number;
   latencySamples: number;
@@ -682,6 +694,9 @@ export interface EvaluationReport {
   queryCount: number;
   limit: number;
   repetitions: number;
+  /** Quotes found once in their documents, and the others, which count as missed. */
+  resolvedEvidence: number;
+  unresolvedEvidence: number;
   candidates: CandidateMetrics[];
 }
 
@@ -696,7 +711,8 @@ export interface RetrievalPlan {
   version: 1;
   method: RetrievalMethod;
   defaultLimit: number;
-  evaluation: { p95LatencyBudgetMs: number; report: EvaluationReport } | null;
+  /** Plans saved before evidence-level scoring keep their document-level report. */
+  evaluation: { p95LatencyBudgetMs: number; report: EvaluationReport | Record<string, unknown> } | null;
 }
 
 export interface ReadOutcome {

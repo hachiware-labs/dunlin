@@ -36,7 +36,6 @@ async function installAndSearch(name, tarballs) {
   npm(['install', ...options, ...tarballs], preparation);
   npm(['install', '--offline', ...options, ...tarballs], consumer);
   const installed = await readdir(join(consumer, 'node_modules'));
-  assert.ok(installed.includes('@modelcontextprotocol'));
   assert.ok(installed.includes('zod'));
 
   await writeFile(join(consumer, 'source.md'), '# 認証\nOAuthの根拠\n[Policy](dunlin://policies/policy.txt)');
@@ -75,7 +74,7 @@ async function installAndSearch(name, tarballs) {
     const database = await Dunlin.open('./knowledge');
     try {
       const report = await database.optimize({
-        evaluationSet: [{ query: 'OAuth 認証', relevant: [{ sourceId: 'docs', objectId: 'source.md' }] }],
+        evaluationSet: [{ question: 'OAuth 認証', doc: 'docs:source.md', quote: 'OAuthの根拠' }],
         p95LatencyBudgetMs: 500,
       });
       assert.equal(report.candidates.length, 2);

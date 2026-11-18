@@ -20,10 +20,11 @@ async function fixture(t) {
     for (let decoy = 0; decoy < 8; decoy++) {
       await writeFile(join(docs, `decoy-${index}-${decoy}.txt`), second);
     }
-    evaluationSet.push({ query: `${first} ${second}`, relevant: [{ sourceId: 'docs', objectId }] });
+    evaluationSet.push({ question: `${first} ${second}`, evidence: [{ doc: 'docs:' + objectId, quote: `${first} ${second}` }] });
   }
+  // The file gives each quote directly, as eval-data import accepts. Both forms are the same set.
   const jsonl = join(root, 'questions.jsonl');
-  await writeFile(jsonl, '\uFEFF' + evaluationSet.map((item) => JSON.stringify(item)).join('\r\n') + '\r\n');
+  await writeFile(jsonl, '\uFEFF' + evaluationSet.map(({ question, evidence: [quote] }) => JSON.stringify({ question, ...quote })).join('\r\n') + '\r\n');
   return { store: join(root, 'index'), docs, evaluationSet, jsonl };
 }
 
@@ -33,11 +34,11 @@ test('compares retrieval strategies on the same labeled cases and preserves evid
   try {
     await database.addSource({ id: 'docs', kind: 'filesystem', path: docs });
     const [example] = evaluationSet;
-    const keyword = await database.search(example.query, { mode: 'keyword' });
-    const coverage = await database.search(example.query, { mode: 'coverage' });
+    const keyword = await database.search(example.question, { mode: 'keyword' });
+    const coverage = await database.search(example.question, { mode: 'coverage' });
     assert.equal(keyword.planId, 'keyword-v1');
     assert.equal(coverage.planId, 'keyword-coverage-v1');
-    assert.equal(coverage.hits[0].evidence.source.objectId, example.relevant[0].objectId);
+    assert.equal('docs:' + coverage.hits[0].evidence.source.objectId, example.evidence[0].doc);
     assert.equal(coverage.totalHits, keyword.totalHits);
     assert.equal(coverage.hits.length, 10);
     assert.equal(new Set(coverage.hits.map(({ evidence }) => evidence.source.objectId)).size, 10);
@@ -46,10 +47,10 @@ test('compares retrieval strategies on the same labeled cases and preserves evid
     const report = await database.evaluate({ evaluationSet: jsonl, limit: 1, repetitions: 4 });
     assert.equal(report.queryCount, 3);
     const metrics = Object.fromEntries(report.candidates.map((candidate) => [candidate.method, candidate]));
-    assert.equal(metrics.keyword.recallAtK, 0);
-    assert.equal(metrics.keyword.ndcgAtK, 0);
-    assert.equal(metrics.coverage.recallAtK, 1);
-    assert.equal(metrics.coverage.ndcgAtK, 1);
+    assert.equal(metrics.keyword.evidenceRecallAtK, 0);
+    assert.equal(metrics.coverage.evidenceRecallAtK, 1);
+    assert.equal(report.resolvedEvidence, 3);
+    assert.equal(report.unresolvedEvidence, 0);
     for (const candidate of report.candidates) {
       assert.equal(candidate.latencySamples, 12);
       assert.ok(Number.isFinite(candidate.p95LatencyMs) && candidate.p95LatencyMs >= 0);
@@ -57,6 +58,15 @@ test('compares retrieval strategies on the same labeled cases and preserves evid
     const inMemory = await database.evaluate({ evaluationSet, limit: 1 });
     assert.equal(inMemory.evaluationSetHash, report.evaluationSetHash);
     assert.equal(inMemory.indexRevision, report.indexRevision);
+
+    // A quote that is not in its document, or a document that is gone, counts as missed.
+    const missing = await database.evaluate({ limit: 1, evaluationSet: [{ question: example.question, evidence: [
+      example.evidence[0], { doc: 'docs:target-0.txt', quote: 'not in the document' }, { doc: 'docs:gone.txt', quote: 'alpha' }] }] });
+    assert.equal(missing.resolvedEvidence, 1);
+    assert.equal(missing.unresolvedEvidence, 2);
+    assert.equal(missing.candidates.find(({ method }) => method === 'coverage').evidenceRecallAtK, 1 / 3);
+    await assert.rejects(database.evaluate({ evaluationSet: [{ question: 'alpha', doc: 'target-0.txt', quote: 'alpha' }] }),
+      { code: 'INVALID_ARGUMENT' });
   } finally {
     await database.close();
   }
@@ -84,7 +94,7 @@ test('saves the chosen plan, switches it after reopening, and supports rollback'
     assert.equal(plan.defaultLimit, 1);
     assert.equal(plan.evaluation.report.indexRevision, report.indexRevision);
     assert.equal(plan.evaluation.report.evaluationSetHash, report.evaluationSetHash);
-    const [{ query }] = evaluationSet;
+    const [{ question: query }] = evaluationSet;
     const defaultSearch = await database.search(query);
     assert.equal(defaultSearch.planId, plan.id);
     assert.equal(defaultSearch.hits.length, 1);

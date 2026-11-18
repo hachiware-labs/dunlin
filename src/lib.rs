@@ -6,6 +6,7 @@ pub mod config_value;
 mod corpus;
 mod engine;
 mod evaluate;
+mod evidence_match;
 mod excerpt;
 mod explore;
 pub mod glob;
@@ -75,7 +76,7 @@ pub use corpus::{CorpusBackend, CorpusDocument, CorpusMetadata, ParserInfo, Sour
 use engine::{KeywordIndex, KeywordOptions};
 pub use evaluate::{
     CandidateMetrics, EvaluationCase, EvaluationOptions, EvaluationReport, EvaluationSet,
-    OptimizationReport, OptimizeOptions, RelevantObject,
+    EvidenceQuote, OptimizationReport, OptimizeOptions,
 };
 pub use excerpt::EvidenceExcerpt;
 pub use explore::{
@@ -306,7 +307,15 @@ impl KnowledgeBase {
         cancel: &Cancellation,
     ) -> Result<EvaluationReport> {
         cancel.check()?;
-        evaluate::evaluate(&self.index.snapshot(), options, cancel)
+        let locations = |document: &DocumentRef, version: &str| -> Result<Vec<SourceLocation>> {
+            Ok(self
+                .index
+                .corpus
+                .get(document, version)?
+                .map(|document| document.metadata.locations)
+                .unwrap_or_default())
+        };
+        evaluate::evaluate(&self.index.snapshot(), &locations, options, cancel)
     }
 
     pub fn optimize(
@@ -326,9 +335,8 @@ impl KnowledgeBase {
             .iter()
             .filter(|candidate| candidate.p95_latency_ms <= budget)
             .max_by(|left, right| {
-                left.ndcg_at_k
-                    .total_cmp(&right.ndcg_at_k)
-                    .then_with(|| left.recall_at_k.total_cmp(&right.recall_at_k))
+                left.evidence_recall_at_k
+                    .total_cmp(&right.evidence_recall_at_k)
                     .then_with(|| right.p95_latency_ms.total_cmp(&left.p95_latency_ms))
                     .then_with(|| right.plan_id.cmp(&left.plan_id))
             });
@@ -338,7 +346,7 @@ impl KnowledgeBase {
                     candidate.method,
                     PlanEvaluation {
                         p95_latency_budget_ms: budget,
-                        report: report.clone(),
+                        report: serde_json::to_value(&report).map_err(|_| Error::Plan)?,
                     },
                     cancel,
                 )

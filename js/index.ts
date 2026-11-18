@@ -235,16 +235,20 @@ function validateScope(ids: readonly string[] | undefined): void {
 }
 
 function evaluationRequest(options: EvaluationOptions, p95LatencyBudgetMs?: number): string {
-  const { evaluationSet, limit = 10, repetitions = 3 } = options;
+  const { evaluationSet, limit = 10, repetitions = 3, shortEvidenceChars, minCoverage } = options;
   integer(limit, 1, 100, 'limit');
   integer(repetitions, 1, 20, 'repetitions');
+  if (shortEvidenceChars !== undefined) integer(shortEvidenceChars, 0, 10_000, 'shortEvidenceChars');
+  if (minCoverage !== undefined && !(typeof minCoverage === 'number' && minCoverage > 0 && minCoverage <= 1)) {
+    throw new DunlinError('INVALID_ARGUMENT', 'minCoverage must be above 0 and at most 1');
+  }
   const input = typeof evaluationSet === 'string' ? absolutePath(evaluationSet) : evaluationSet;
   if (typeof input !== 'string' && (!Array.isArray(input) || input.length < 1 || input.length > 1000)) {
     throw new DunlinError('INVALID_ARGUMENT', 'Expected a JSONL path or 1–1000 evaluation cases');
   }
   let serialized: string;
   try {
-    serialized = JSON.stringify({ evaluationSet: input, limit, repetitions, p95LatencyBudgetMs });
+    serialized = JSON.stringify({ evaluationSet: input, limit, repetitions, shortEvidenceChars, minCoverage, p95LatencyBudgetMs });
   } catch {
     throw new DunlinError('INVALID_ARGUMENT', 'Evaluation options must be JSON serializable');
   }
@@ -704,13 +708,17 @@ export class Dunlin {
     return this.#run(signal, (database, cancel) => database.explore(query, maxSteps, timeoutMs, seedLimit, sourceIds, cancel), true);
   }
 
-  /** Compares built-in plans against the same immutable index snapshot. */
+  /**
+   * Compares the built-in plans on questions with evidence quotes against one index snapshot. A
+   * quote is found with the rules of `eval`, and counts as recovered when the top results cover
+   * it (spec 28.11 step 4d).
+   */
   async evaluate(options: EvaluationOptions): Promise<EvaluationReport> {
     const request = evaluationRequest(options);
     return this.#run(options.signal, (database, cancel) => database.evaluate(request, cancel));
   }
 
-  /** Evaluates and saves the highest-quality plan within the budget. */
+  /** Evaluates and saves the plan that recovers the most evidence within the latency budget. */
   async optimize(options: OptimizeOptions): Promise<OptimizationReport> {
     const { objective, p95LatencyBudgetMs } = options;
     if (objective !== undefined && objective !== 'maximize-relevance') {

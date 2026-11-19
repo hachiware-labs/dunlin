@@ -66,14 +66,6 @@ export function knowledgeServer(database, search, read, searchOnly = false) {
         const result = await database.explore(query, { ...options, signal: ctx.mcpReq.signal });
         return response({ ...result });
     });
-    server.registerTool('knowledge.wiki_get', {
-        description: 'Read a derived Wiki page and its currently valid citations.',
-        inputSchema: z.object({ id: z.string().min(1).max(128) }),
-        annotations: { readOnlyHint: true },
-    }, async ({ id }, ctx) => {
-        const page = await database.wiki.get(id, { signal: ctx.mcpReq.signal });
-        return response({ page });
-    });
     return server;
 }
 function response(result) {

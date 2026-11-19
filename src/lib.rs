@@ -12,6 +12,8 @@ mod explore;
 pub mod glob;
 mod japanese;
 mod legacy_delete;
+#[cfg(any(feature = "node", test))]
+mod markdown;
 mod model;
 mod node_path;
 mod plans;
@@ -19,7 +21,6 @@ pub mod registry;
 mod source;
 mod storage;
 mod sync;
-mod wiki;
 pub mod yaml_config;
 
 #[cfg(any(feature = "node", test))]
@@ -72,6 +73,20 @@ mod transform_stage;
 mod trial;
 #[cfg(any(feature = "node", test))]
 mod vector;
+#[cfg(any(feature = "node", test))]
+mod wiki_commands;
+#[cfg(any(feature = "node", test))]
+mod wiki_html;
+#[cfg(any(feature = "node", test))]
+mod wiki_ingress;
+#[cfg(any(feature = "node", test))]
+mod wiki_inspect;
+#[cfg(any(feature = "node", test))]
+mod wiki_project;
+#[cfg(all(feature = "node", not(test)))]
+mod wiki_serve;
+#[cfg(any(feature = "node", test))]
+mod wiki_work;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -94,17 +109,11 @@ pub use model::{
 use plans::{DEFAULT_LIMIT, PlanStore};
 pub use plans::{PlanEvaluation, RetrievalMethod, RetrievalPlan};
 use source::{DocumentInput, SourceInput};
-pub use sync::{DeltaSyncOutcome, RegeneratedPage, WikiSyncFailure, WikiSyncOutcome};
-use wiki::WikiStore;
-pub use wiki::{
-    WikiBuildOptions, WikiChange, WikiChangeReason, WikiCitation, WikiImpact, WikiPage, WikiStatus,
-    WikiUnavailable,
-};
+pub use sync::DeltaSyncOutcome;
 
 pub struct KnowledgeBase {
     index: KeywordIndex,
     plans: PlanStore,
-    wiki: WikiStore,
 }
 
 impl KnowledgeBase {
@@ -144,9 +153,8 @@ impl KnowledgeBase {
             cancel,
         )?;
         let plans = PlanStore::open(&path.join(".dunlin-plans-v1"))?;
-        let wiki = WikiStore::new(path.join(".dunlin-wiki-v1"));
         cancel.check()?;
-        Ok(Self { index, plans, wiki })
+        Ok(Self { index, plans })
     }
 
     pub fn add_source(
@@ -479,26 +487,5 @@ impl KnowledgeBase {
         let result = self.index.read(evidence)?;
         cancel.check()?;
         Ok(result)
-    }
-
-    pub fn wiki_build(&self, options: WikiBuildOptions, cancel: &Cancellation) -> Result<WikiPage> {
-        self.wiki.build(&self.index, options, cancel)
-    }
-
-    pub fn wiki_get(&self, id: &str, cancel: &Cancellation) -> Result<Option<WikiPage>> {
-        self.wiki.get(&self.index.snapshot(), id, cancel)
-    }
-
-    pub fn wiki_affected(
-        &self,
-        source_id: Option<&str>,
-        cancel: &Cancellation,
-    ) -> Result<Vec<WikiImpact>> {
-        self.wiki
-            .affected(&self.index.snapshot(), source_id, cancel)
-    }
-
-    pub fn wiki_regenerate(&self, id: &str, cancel: &Cancellation) -> Result<WikiPage> {
-        self.wiki.regenerate(&self.index, id, cancel)
     }
 }

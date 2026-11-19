@@ -23,8 +23,6 @@ pub enum Error {
     Index,
     PlanNotFound,
     Plan,
-    WikiNotFound,
-    Wiki,
 }
 
 impl Error {
@@ -40,8 +38,6 @@ impl Error {
             Self::Index => "INDEX_ERROR",
             Self::PlanNotFound => "PLAN_NOT_FOUND",
             Self::Plan => "PLAN_ERROR",
-            Self::WikiNotFound => "WIKI_NOT_FOUND",
-            Self::Wiki => "WIKI_ERROR",
         }
     }
 }
@@ -58,8 +54,6 @@ impl fmt::Display for Error {
             Self::Index => "Could not open, update, or read the index",
             Self::PlanNotFound => "Retrieval plan was not found",
             Self::Plan => "Could not load or save the retrieval plan",
-            Self::WikiNotFound => "Wiki page was not found",
-            Self::Wiki => "Could not load or save the Wiki page",
         })
     }
 }

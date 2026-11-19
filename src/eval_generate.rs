@@ -20,7 +20,7 @@ use crate::eval_data::{
 };
 use crate::eval_stage::{dataset, invalid, js_string, missing, num};
 use crate::evidence_match::normalized;
-use crate::generate::{GeneratorSettings, generate};
+use crate::generate::{GeneratorSettings, generate, utf16_json, without_lone_surrogates};
 use crate::index_stage::{assign, items, object, string_field, text};
 use crate::registry::js_space;
 use crate::transform_stage::StageError;
@@ -42,15 +42,6 @@ pub struct GeneratorChoice {
     pub name: Option<String>,
     #[serde(default)]
     pub settings: Option<GeneratorSettings>,
-}
-
-/// Generation counts no trial.
-struct Uncounted;
-
-impl crate::embed::Charge for Uncounted {
-    fn charge(&self, _bytes: usize) -> Result<(), String> {
-        Ok(())
-    }
 }
 
 /// A slice of a document in UTF-16 code units.
@@ -150,22 +141,6 @@ impl Iterator for Excerpts {
     }
 }
 
-/// `JSON.stringify` of UTF-16 text, which writes a lone surrogate as an escape.
-fn utf16_json(units: &[u16]) -> String {
-    let mut out = String::from("\"");
-    for decoded in char::decode_utf16(units.iter().copied()) {
-        match decoded {
-            Ok(character) => {
-                let one = ConfigValue::String(character.to_string()).to_js_json();
-                out.push_str(&one[1..one.len() - 1]);
-            }
-            Err(error) => out.push_str(&format!("\\u{:04x}", error.unpaired_surrogate())),
-        }
-    }
-    out.push('"');
-    out
-}
-
 fn contains(haystack: &[u16], needle: &[u16]) -> bool {
     needle.is_empty()
         || haystack
@@ -178,45 +153,6 @@ struct Candidate {
     question: String,
     doc: String,
     quote: String,
-}
-
-/// JSON text with each lone surrogate escape (`\ud83d` without its pair) replaced by U+FFFD.
-/// `JSON.parse` accepted them; here such a quote no longer matches its excerpt and only that
-/// candidate is dropped.
-fn without_lone_surrogates(raw: &str) -> String {
-    let surrogate = |text: &str| {
-        u16::from_str_radix(text, 16)
-            .ok()
-            .filter(|unit| (0xd800..=0xdfff).contains(unit))
-    };
-    let escape_at = |text: &str, at: usize| {
-        text.get(at..at + 6)
-            .filter(|escape| escape.starts_with("\\u"))
-            .and_then(|escape| surrogate(&escape[2..]))
-    };
-    let mut out = String::with_capacity(raw.len());
-    let mut rest = raw;
-    while let Some(index) = rest.find('\\') {
-        out.push_str(&rest[..index]);
-        rest = &rest[index..];
-        match escape_at(rest, 0) {
-            Some(high) if high < 0xdc00 && escape_at(rest, 6).is_some_and(|low| low >= 0xdc00) => {
-                out.push_str(&rest[..12]);
-                rest = &rest[12..];
-            }
-            Some(_) => {
-                out.push_str("\\ufffd");
-                rest = &rest[6..];
-            }
-            None => {
-                let width = rest[1..].chars().next().map_or(0, char::len_utf8);
-                out.push_str(&rest[..1 + width]);
-                rest = &rest[1 + width..];
-            }
-        }
-    }
-    out.push_str(rest);
-    out
 }
 
 /// `generatedCases.parse(JSON.parse(raw))`: an object with only `cases`, each with only nonempty
@@ -358,7 +294,7 @@ pub fn generate_cases(
             &instructions,
             &input,
             CASES_SCHEMA,
-            &Uncounted,
+            &crate::generate::Uncounted,
             cancel,
         )?;
         let Some(found) = candidates(raw.text.as_deref()) else {

@@ -4,7 +4,7 @@
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
-import { HttpError, listenHttp, sendJson } from '../../project-serving.mjs';
+import { HttpError, listenHttp, sendJson } from './reference-config/project-serving.mjs';
 
 const queryText = z.string().refine((query) => Boolean(query.trim()));
 const searchRequest = z.strictObject({

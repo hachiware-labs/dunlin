@@ -96,6 +96,39 @@ export interface LoadCorpusFile {
   name?: string;
 }
 
+/** A command of a Wiki or PARA project, with the settings JavaScript resolved (spec 28.12). */
+export interface WikiCommandRequest {
+  /** The project's state.sqlite. */
+  state: string;
+  /** The project execution lock, taken while work that changes the project runs. */
+  lock?: string;
+  root: string;
+  configRoot: string;
+  artifacts: string;
+  corpus: string;
+  type: 'wiki' | 'para';
+  about: Record<string, unknown>;
+  /** The checked module arguments of `ingress`, `query` and `verify`. */
+  plan: Record<string, unknown>;
+  /** `serve.pages`, the directory of published pages. */
+  pages: string;
+  /** Each referenced chat model: `{ settings }`, or `{ code }` when it cannot be used. */
+  models: Record<string, { settings?: Record<string, unknown>; code?: 'MODEL_REQUIRED' | 'INVALID_MODEL' }>;
+  command: string;
+  args: (string | null)[];
+  values: Record<string, unknown>;
+  runId?: string;
+  /** Record the command as work in `wiki_work`. */
+  track?: boolean;
+  /** Print progress lines on standard error. */
+  printProgress?: boolean;
+  /** The directories `ingress` resolves paths against. */
+  cwd: string;
+  home: string;
+  /** The OCR fields of a load request, for `ingress`. */
+  load?: Record<string, unknown>;
+}
+
 export interface LoadCorpusRequest {
   /** The project's state.sqlite, which maps cached files to corpus versions. */
   state: string;
@@ -749,58 +782,6 @@ export interface IndexStatus {
   searchableDocuments: number;
 }
 
-export interface WikiBuildOptions extends OperationOptions {
-  id: string;
-  title: string;
-  documents: readonly DocumentRef[];
-}
-
-export interface WikiCitation {
-  number: number;
-  evidence: Evidence;
-  truncated: boolean;
-}
-
-export interface WikiChange {
-  document: DocumentRef;
-  reason: 'updated' | 'deleted' | 'restored';
-  previous: SourceRef | null;
-  current: SourceRef | null;
-}
-
-export interface WikiPage {
-  id: string;
-  title: string;
-  revision: number;
-  generatedAtMs: number;
-  status: 'current' | 'stale' | 'insufficient_evidence';
-  markdown: string;
-  citations: WikiCitation[];
-  changes: WikiChange[];
-  unavailable: { document: DocumentRef; reason: 'missing' | 'empty' }[];
-}
-
-export interface WikiImpact {
-  id: string;
-  title: string;
-  revision: number;
-  changes: WikiChange[];
-}
-
-export interface WikiAffectedOptions extends OperationOptions {
-  sourceId?: string | undefined;
-}
-
-export interface Wiki {
-  /** Creates or replaces a page recipe from the selected documents. */
-  build(options: WikiBuildOptions): Promise<WikiPage>;
-  /** Returns the page with citations validated against the current index. */
-  get(id: string, options?: OperationOptions): Promise<WikiPage | null>;
-  affected(options?: WikiAffectedOptions): Promise<WikiImpact[]>;
-  /** Rebuilds the page using the saved document identities. */
-  regenerate(id: string, options?: OperationOptions): Promise<WikiPage>;
-}
-
 export interface SyncOutcome {
   files: number;
   units: number;
@@ -814,11 +795,6 @@ export interface DeltaSyncOutcome {
   unchanged: number;
   /** Search units written for the added and updated documents. */
   indexedUnits: number;
-  wiki: {
-    status: 'complete' | 'partial';
-    regenerated: { id: string; revision: number; status: WikiPage['status'] }[];
-    failures: { pageId: string | null; code: DunlinErrorCode; message: string }[];
-  };
 }
 
 export interface McpOptions {
@@ -884,8 +860,6 @@ export type DunlinErrorCode =
   | 'INDEX_ERROR'
   | 'PLAN_NOT_FOUND'
   | 'PLAN_ERROR'
-  | 'WIKI_NOT_FOUND'
-  | 'WIKI_ERROR'
   | 'CLOSED'
   | 'NATIVE_UNAVAILABLE'
   | 'MCP_UNAVAILABLE';

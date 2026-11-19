@@ -1,5 +1,5 @@
 import { Dunlin, DunlinError } from 'dunlin';
-import type { DeltaSyncOutcome, DocumentSnapshot, EvaluationReport, Evidence, ExploreOutcome, OptimizationReport, ReadOutcome, RetrievalPlan, SearchOutcome, SourceDocument, SyncOutcome, WikiImpact, WikiPage } from 'dunlin';
+import type { DeltaSyncOutcome, DocumentSnapshot, EvaluationReport, Evidence, ExploreOutcome, OptimizationReport, ReadOutcome, RetrievalPlan, SearchOutcome, SourceDocument, SyncOutcome } from 'dunlin';
 
 async function publicContract(signal: AbortSignal, evidence: Evidence): Promise<void> {
   const database: Dunlin = await Dunlin.open('./knowledge', { signal });
@@ -40,16 +40,6 @@ async function publicContract(signal: AbortSignal, evidence: Evidence): Promise<
       const line: number = linked.via.line;
       void line;
     }
-    const wiki: WikiPage = await database.wiki.build({
-      id: 'architecture/auth', title: 'Authentication',
-      documents: exploration.evidence.map(({ evidence }) => evidence.source), signal,
-    });
-    const impact: WikiImpact[] = await database.wiki.affected({ sourceId: 'docs', signal });
-    if (impact.some(({ id }) => id === wiki.id)) {
-      await database.wiki.regenerate(wiki.id, { signal });
-    }
-    const latest: WikiPage | null = await database.wiki.get(wiki.id, { signal });
-    void latest;
     // @ts-expect-error Vector search is outside the current public contract.
     await database.search('OAuth', { mode: 'vector' });
   } catch (error) {

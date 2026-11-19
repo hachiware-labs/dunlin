@@ -123,7 +123,7 @@ test('serves an index over stdio like the former Node API server', { timeout: 12
   const expected = server(t, [reference, 'library', index], root, env);
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const { tools, call, both } = await compare(t, actual, expected);
-  assert.deepEqual(tools.map(({ name }) => name), ['knowledge.search', 'knowledge.read', 'knowledge.explore', 'knowledge.wiki_get']);
+  assert.deepEqual(tools.map(({ name }) => name), ['knowledge.search', 'knowledge.read', 'knowledge.explore']);
   const found = await call('knowledge.search', { query: 'pump', limit: 3 });
   assert.ok(found.structuredContent.hits.length > 0);
   await call('knowledge.search', { query: 'pump', sourceIds: ['docs'], unknown: true });
@@ -131,8 +131,6 @@ test('serves an index over stdio like the former Node API server', { timeout: 12
   await reads(call, found.structuredContent.hits[0].evidence);
   await call('knowledge.explore', { query: 'pump', maxSteps: 4 });
   await call('knowledge.explore', { query: 'pump', timeoutMs: 0 });
-  await call('knowledge.wiki_get', { id: 'missing' });
-  await call('knowledge.wiki_get', { id: '' });
   await call('knowledge.missing', {});
   await both('ping', {});
 });

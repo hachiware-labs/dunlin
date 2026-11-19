@@ -66,7 +66,6 @@
   },
   "dependencies": {
     "cheerio": "1.2.0",
-    "markdown-it": "15.0.3",
     "yaml": "2.9.0",
     "zod": "4.6.7"
   },
@@ -78,6 +77,7 @@
     "@modelcontextprotocol/server": "2.4.0",
     "@napi-rs/cli": "3.10.12",
     "@types/node": "^22.0.0",
+    "markdown-it": "15.0.3",
     "pdfjs-dist": "6.5.438",
     "typescript": "5.9.3"
   }

@@ -22,7 +22,7 @@ use url::Url;
 
 use crate::{
     Cancellation, CorpusBackend, DocumentFormat, Error, Evidence, IndexChanges, IndexStatus,
-    LineRange, ReadOutcome, Result, RetrievalMethod, SearchHit, SourceRef, SyncOutcome,
+    LineRange, ReadOutcome, Result, RetrievalMethod, SearchHit, SyncOutcome,
     corpus::{Corpus, CorpusBatch},
     japanese::{GAP, JapaneseTokenizer},
     legacy_delete::LegacyDeleteQuery,
@@ -670,12 +670,6 @@ impl KeywordSnapshot<'_> {
 
     pub fn object(&self, source_id: &str, object_id: &str) -> Result<Option<ReadOutcome>> {
         self.find_object(&object_key(source_id, object_id), &[])
-    }
-
-    pub fn object_ref(&self, source_id: &str, object_id: &str) -> Result<Option<SourceRef>> {
-        self.find_document(&object_key(source_id, object_id), &[])?
-            .map(|document| Ok(self.index.evidence(&document)?.source))
-            .transpose()
     }
 
     pub fn object_by_url(

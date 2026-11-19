@@ -2551,7 +2551,7 @@ serve:
 | `docling.rs`（npm） | Office と PDF の変換 | 中身は Rust なので、crate を直接使えるか確かめる。使えるまでは npm の口から呼ぶ |
 | `@ast-grep/napi` と言語の文法 | コードの宣言の位置 | 旧形式の設定の取り込みでだけ使っていたので、その経路とともに外した（段階2a）。コードの宣言の位置を使う機能を作るときは、`ast-grep-core` などの crate を直接使う |
 | `cheerio` | HTML から本文を取り出す | Rust（`scraper` など）に置き換える |
-| `markdown-it` | Wiki/PARA のページを HTML にする | Rust（すでに使っている `pulldown-cmark`）に置き換える |
+| `markdown-it` | Wiki/PARA のページを HTML にする | Rust の `pulldown-cmark` に置き換えた（段階5a）。markdown-it は、比べるテストの基準にだけ開発用の依存として残す |
 | `yaml` | `Dunlinfile.yaml` と設定の読み書き | Rust に置き換える。行番号付きのエラーを出せるライブラリを選ぶ |
 | `zod` | 引数と設定の検証 | Rust の型と `serde` に置き換える（26.5節） |
 | `sqlite-vec` | ベクトル索引の保存先の1つ | Rust から SQLite の拡張として読み込むか、標準の総当たり検索と hannoy に任せて外すかを決める |
@@ -2823,3 +2823,52 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 - 評価、根拠の位置対応、対応表、レポートと比較、評価の状態、辞書の提案に渡す取りこぼし、試行と採用の記録、評価データの管理と生成を Rust で行うようになった。Node.js API の `evaluate` と `optimize` も同じ部品で根拠単位に採点する。
 - JavaScript に残るのは、設定の検証と組み合わせ、モデルの解決、設定ファイル（YAML）の書き換え、ファイルの読み書き、辞書の提案の組み立て（Lindera の解析）、表示である。設定ファイルと表示は段階6で移す。
+
+### 28.12 段階5の進め方
+
+段階5では、Wiki/PARA の取り込み、執筆と引用の検証の進行、検査、ページの HTML 化、画面の配信を Rust のエンジンに移し、Node.js API の `wiki.rs` とまとめる。次の小段階に分ける。各小段階の終わりで、旧実装と同じプロジェクトと指示に対して、モデルへの要求の本文、出力、エラー、`state.sqlite` に保存するページ・資料・作業・指摘、公開する HTML ファイル、画面の応答が変わらないことを差分テストで確かめる。
+
+| 小段階 | 内容 |
+| --- | --- |
+| 5a | Markdown の HTML 化と、Wiki/PARA のコマンド（`ingress`、`query`、`verify`、`archive`、`undo`、`issue`、`cite`、`rules`、`instruct`、`save-answer`、`progress`）を Rust に移す。執筆と内容の検査のモデル呼び出し、引用の検証、ページの公開、作業の記録が含まれる |
+| 5b | 画面（Wiki/PARA の `serve`）を Rust に移す。段階3cの HTTP の部品を使い、画面からの指示は作業として順に実行する |
+| 5c | Node.js API の `wiki.*` を CLI と同じエンジンにまとめる（28.5節） |
+
+#### 5a から 5c の間に変えないもの
+
+- `state.sqlite` の Wiki の表（`wiki_pages`、`wiki_sources`、`wiki_jobs`、`wiki_issues`、`wiki_work`、`wiki_reviewed_material`、`wiki_content_pairs`）と、保存する JSON の形とキーの順。
+- 公開する HTML ファイル（本文、出典の一覧、末尾に埋め込むページの記録）と、原本へのリンク。
+- モデルへの要求の本文（指示、入力の JSON、zod から作った JSON Schema）と、応答の検査。エラーの番号、文言、終了コード。
+- 画面の HTML、状態コード、ヘッダー、フォームの値、指示を受け付ける規則と断る規則。
+
+#### コマンド（5a）
+
+- Wiki/PARA のコマンドは Node.js API の `Dunlin.wiki` を呼ぶ。JavaScript は、設定の検証（`validateWiki`。段階6で移す）、参照される対話用モデルの設定の解決（設定か、使えない理由）、OCR の実行環境の解決、HTML と Office のパースを受け持つ。
+- 作業の記録（`wiki_work` の順番待ち、実行中の段階と件数、結果やエラー）と実行の排他（`execution.lock`）も Rust で行う。作業の行は排他を取る前に記録するので、排他が取れないときも失敗した作業として残る。進行状況の行は Rust が標準エラーに書く。
+- 取り込みは、パスの解決とフォルダの走査、資料ごとの ID、パーサの振り分け、読み込み（段階2の `source_load`）、キーワード索引（`wiki-keyword`）への登録を Rust で行う。チャンクの設定（800 文字、重なり 100、NFKC）も以前と同じである。
+- Markdown の HTML 化は、`pulldown-cmark` の出来事を markdown-it 15（`html: false`）と同じ形で書き出す。改行の位置、`<hr>` と `<br>`、表、リンクの検査（`javascript:` などを断る）、URL の符号化（punycode を含む）、生の HTML を文字として書くことを合わせた。104 通りの Markdown で markdown-it と同じ HTML になることを確かめた。HTML のブロックとして読める行は、markdown-it と違って段落の中の Markdown を解釈せず、文字のまま段落にする。`~~~a~~~` のように `~` が3つ並ぶ書き方は、markdown-it と違って取り消し線にしない。
+- 質問の順位づけと内容の検査に使う単語の区切りは、ICU4X の辞書（`icu_segmenter`）で求める。Node.js の `Intl.Segmenter`（ICU4C）とは辞書の版が違うため、まれに区切りが変わる（「か月」をひとまとまりにするなど）。区切りが変わると、質問の順位と、内容の検査で比べる相手が変わり得る。
+- 内容の検査で関連度が同じ相手の順は、`localeCompare` に代えて ICU4X の root の照合順序で決める。Node.js は実行環境の既定のロケールを使うので、日本語の ID が並ぶ場合に順が変わり得る。画面の「最近更新したページ」の順も同じ照合順序で決める。
+- ファイルの読み書きの誤りは、Node.js と同じ番号と文言（`ENOENT: no such file or directory, open '...'` など）で返す。
+- 旧実装を写した基準（テストの `wiki-reference`）と、写した2つのプロジェクト（Wiki と PARA）で同じコマンドを実行し、モデルへの要求の本文、出力、エラー、7つの表、公開した HTML ファイル、`rules.md` が一致することを確かめた。対応できない形式の資料、ページ数の上限、JSON でない応答、検証できない引用、補足の記録、規則の追記と取り消し、資料の更新による改訂、内容の検査の3種類の指摘、PARA のアーカイブと取り消しを含む。サロゲートペアの途中で切れる抜粋（ページの 1200 単位、資料の 4500 単位）も、以前と同じエスケープで送る。時刻、資料を読んだ時刻、プロセス番号、SHA-256 は、出てきた順の記号に置き換えて比べる。
+
+#### 画面（5b）
+
+- `serve` は Node.js API の `Dunlin.wikiServe` を呼ぶ。HTTP は段階3cの hyper と tokio の部品（接続先と送信元の確認、合言葉、同時接続と大きさの上限、時間切れ）を使い、画面に要る規則（自分の Origin を許す、Basic 認証、`Access-Control-Allow-Credentials`）を加えた。
+- フォーム（URL エンコードと multipart）の解釈、アップロードの名前の検査と保存、指示から作業への変換、ページの HTML は旧実装と同じにした。指示は作業として記録し、1つずつ順に実行する。止めるときは、受け付けた作業を終えてから戻る。
+- アップロードの名前は、旧実装と同じく実行環境の `path.basename` の規則で取り出す。Windows では `a:b.txt` のドライブ名を落として `b.txt` にする。
+- 応答に `Connection: keep-alive` を付けない。HTTP/1.1 の既定と同じなので、接続の扱いは変わらない。
+- 旧実装の画面（テストの `wiki-reference` の `serveWiki`）と並べて起動し、トップ、ページ、運用の決まり、作業の状態、接続先・送信元・合言葉・パス・大きさの誤り、CORS の事前確認、フォームの誤り、アップロードの名前、11種類の指示とその結果のページに、同じ状態コード、ヘッダー、本文で答えることを確かめた。
+- 旧実装の HTTP の部品（`listenHttp`）、`project-wiki-work.mjs`、`project-wiki-inspection.mjs`、`authoring/html.mjs`、`authoring/uploads.mjs` を外した。`markdown-it` はテストの基準だけが使う開発用の依存にした。
+
+#### Node.js API の Wiki（5c）
+
+- Node.js API の `wiki.*` は、直接開いた索引の 2〜32 件の資料から抜粋でページを作り、同期のときに作り直し、MCP の `knowledge.wiki_get` で読むものだった。これは仕様（13〜16章）の Wiki と違うので、28.5節に従って仕様に合う CLI のエンジンを残し、`wiki.*`、`syncSource` と `syncDocuments` の結果の `wiki`、`knowledge.wiki_get`、エラーの番号 `WIKI_NOT_FOUND` と `WIKI_ERROR`、索引の `.dunlin-wiki-v1` への保存をなくした。npm での公開前なので、非推奨の期間は置かない。
+- Node.js からは、CLI と同じエンジンを `Dunlin.wiki`（コマンド）と `Dunlin.wikiServe`（画面）で呼べる。以前の索引に残る `.dunlin-wiki-v1` は読まない。
+
+#### 段階5の終わり
+
+- Wiki/PARA の取り込み、執筆と引用の検証、検査、ページの HTML 化、作業の記録、画面を Rust で行うようになった。Node.js API の Wiki も同じエンジンになった。
+- JavaScript に残るのは、設定の検証、モデルと OCR の実行環境の解決、HTML と Office のパース、表示である。設定の検証と表示は段階6で移す。
+- 単語の区切り、照合順序、文字の種類に ICU4X のデータ（`icu_segmenter`、`icu_collator`、`icu_properties`）と `idna` を加えたので、配布物は約 5.1 MB（5.2%）大きくなった。大半は日本語・中国語と東南アジアの言語の単語の辞書である。
+- JavaScript の `loadCorpus` と `chunkCorpus`（`project-content.mjs`）は、製品のコードからは使わなくなった。比べるテストが使うので残し、段階6で外す。

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { once } from 'node:events';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { channel } from 'node:diagnostics_channel';
@@ -13,12 +12,11 @@ import { Dunlin } from 'dunlin';
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { generatorSettings } from './models.mjs';
-import { chunkCorpus, ocrRequest, parserHost } from './project-content.mjs';
+import { ocrRequest, parserHost } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
 import { ensureEvaluation, selectDataset } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
-import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
-import { trackWork } from './project-wiki-work.mjs';
+import { validateWiki } from './project-wiki.mjs';
 import { embeddingSettings } from './project-vectors.mjs';
 import { changeTool, listedTools, projectOcr, toolsCatalog } from './project-tools.mjs';
 import { checkIndexTool, hannoy, indexToolPath } from './project-index-tool.mjs';
@@ -182,10 +180,10 @@ async function initialize(type, directory, values) {
       INSERT INTO project VALUES (1, NULL);`);
     ensureStages(db);
     ensureEvaluation(db);
-    if (!isSearchProject(type)) ensureWiki(db);
   } finally {
     db.close();
   }
+  if (!isSearchProject(type)) Dunlin.ensureWiki(paths.state);
   await writeFile(join(root, '.gitignore'), '.dunlin/\n.env\n.env.*\n', { flag: 'wx' }).catch((error) => {
     if (error.code !== 'EEXIST') throw error;
   });
@@ -745,6 +743,65 @@ function generatorChoice(project, values) {
   }
 }
 
+/**
+ * Serves the screen of a Wiki or PARA project in Rust (spec 28.12 step 5b) until SIGINT or SIGTERM,
+ * then waits for the queued work. JavaScript prints where it listens.
+ */
+async function serveWiki(project, settings) {
+  const type = project.config.init.type;
+  const token = settings.access.auth.type === 'token' ? process.env[settings.access.auth.token_env] : null;
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  try {
+    const result = await Dunlin.wikiServe({ base: await wikiRequest(project, 'serve', [], {}), settings, token }, {
+      ...parserHost(), listening: ({ port }) => console.error('Dunlin ' + type + ': ' + serveAddress(settings.host, port) + '/'),
+    }, { signal: controller.signal });
+    if (result.status === 'failed') throw stageFailure(result.error);
+  } finally {
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
+  }
+}
+
+/** The settings of a Wiki or PARA chat model, or the code of the error that stops its use. */
+function wikiModel(config, name) {
+  const model = config.models?.[name];
+  if (model?.kind !== 'chat' || typeof model.model !== 'string' || !model.model.trim()) return { code: 'MODEL_REQUIRED' };
+  try {
+    return { settings: generatorSettings(model.provider, resolveConfigValue(model.model, 'models.' + name + '.model'),
+      resolveConfigValue(model.base_url, 'models.' + name + '.base_url'), resolveApiKey(model.api_key_env, 'models.' + name),
+      { maxInputBytes: model.max_input_bytes }) };
+  } catch {
+    return { code: 'INVALID_MODEL' };
+  }
+}
+
+/**
+ * A command of a Wiki or PARA project in Rust (spec 28.12). JavaScript resolves the models and the
+ * OCR runtime and parses HTML and Office files. `track` records the command as work.
+ */
+async function wikiRequest(project, command, args, values, runId, { track = false, print = false } = {}) {
+  const plan = project.wikiPlan;
+  const names = [plan.ingress[2]?.model, plan.query[1]?.model, plan.content[0]?.model].filter((name) => typeof name === 'string');
+  const request = {
+    state: project.paths.state, lock: join(project.paths.data, 'execution.lock'), root: project.root, configRoot: project.configRoot,
+    artifacts: project.paths.artifacts, corpus: project.paths.corpus, type: project.config.init.type, about: project.config.about,
+    plan, pages: project.serveSettings.pages, models: Object.fromEntries(names.map((name) => [name, wikiModel(project.config, name)])),
+    command, args, values, runId: runId ?? undefined, track, printProgress: print, cwd: process.cwd(), home: homedir(),
+    ...((command === 'serve' || command === 'ingress' && !values['dry-run']) && { load: await ocrRequest(projectOcr(project.config.tools)) }),
+  };
+  return request;
+}
+
+async function wikiCommand(project, command, args, values, runId, options = {}, warnings = []) {
+  const result = await Dunlin.wiki(await wikiRequest(project, command, args, values, runId, options), parserHost());
+  if (result.status === 'failed') throw stageFailure(result.error);
+  warnings.push(...result.warnings);
+  return result.output;
+}
+
 /** An `evidence-map` command in Rust (spec 28.11 step 4a). `export` writes the map it shows. */
 async function evidenceMapCommand(project, action, reference, values) {
   if (action === 'export' && !values.output) throw new ProjectError(2, 'INVALID_EVAL_DATA', 'Use --output <file>.');
@@ -819,19 +876,6 @@ async function openBuild(paths, build) {
   }
   return Dunlin.open(index, { corpusBackend: 'sqlite', corpusDirectory: build.shared_corpus ? paths.corpus : undefined,
     ...keywordOptions(build.keyword, paths) });
-}
-
-async function waitForHttp(server, type, host) {
-  const close = () => server.close();
-  process.once('SIGINT', close);
-  process.once('SIGTERM', close);
-  try {
-    console.error('Dunlin ' + type + ': ' + serveAddress(host, server.address().port) + '/');
-    await once(server, 'close');
-  } finally {
-    process.off('SIGINT', close);
-    process.off('SIGTERM', close);
-  }
 }
 
 const indexOpens = channel('dunlin:index-open');
@@ -1070,36 +1114,14 @@ export async function runProjectCommand(command, args, explicitProject) {
         if (command === 'validate') data = { valid: true, type: project.config.init.type };
         else {
           const readOnly = Boolean(values['dry-run']) || ['cite', 'rules', 'progress'].includes(command) || command === 'verify' && !values.content;
-          const db = openState(project.paths, readOnly);
-          if (!readOnly) ensureWiki(db);
-          const execute = (action, input, args, id, progress) => runWiki(db, project, action, input, args, id, project.paths, {
-            atomicWrite, warnings, progress,
-            open: (path, keyword) => Dunlin.open(path, { corpusBackend: 'sqlite', ...keywordOptions(keyword) }),
-            chunk: (document) => chunkCorpus({ groups: [['docs', [document]]], unicode: 'nfkc' }, { size: 800, overlap: 100 })[0][0],
-          });
-          try {
-            if (command === 'serve') {
-              if (values['print-config']) throw new ProjectError(2, 'WRONG_PROJECT_TYPE', 'MCP launch settings are available for RAG/MCP projects.');
-              const server = await serveWiki(db, project, (action, input, options = {}, id, progress) =>
-                ['cite', 'rules', 'progress'].includes(action) || action === 'verify' && !options.content
-                  ? execute(action, input, options, id, progress)
-                  : withExecutionLock(project.paths, () => execute(action, input, options, id, progress)), serving);
-              await waitForHttp(server, project.config.init.type, serving.host);
-              await server.drainWork();
-              return;
-            }
-            if (!readOnly) runId = `run-${randomUUID()}`;
-            const input = values.persistent ? [null, ...positionals] : positionals;
-            data = readOnly
-              ? await execute(command, input, values, runId)
-              : await trackWork(db, runId, command, values.page, (progress) =>
-                withExecutionLock(project.paths, () => execute(command, input, values, runId, progress)), ({ run_id, stage, completed, total }) => {
-                  if (['ingress', 'query', 'instruct', 'verify'].includes(command)) console.error(
-                    `${run_id} ${stage}${total === undefined ? '' : ' ' + completed + '/' + total}`);
-                });
-          } finally {
-            db.close();
+          if (command === 'serve') {
+            if (values['print-config']) throw new ProjectError(2, 'WRONG_PROJECT_TYPE', 'MCP launch settings are available for RAG/MCP projects.');
+            await serveWiki(project, serving);
+            return;
           }
+          if (!readOnly) runId = `run-${randomUUID()}`;
+          const input = values.persistent ? [null, ...positionals] : positionals;
+          data = await wikiCommand(project, command, input, values, runId, { track: !readOnly, print: true }, warnings);
         }
       } else if (command === 'build' || stages.includes(command)) {
         if (!values['dry-run']) runId = `run-${randomUUID()}`;

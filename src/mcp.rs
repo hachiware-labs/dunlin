@@ -2,7 +2,7 @@
 //!
 //! The tools, their input schemas, argument checks and results are the ones the JavaScript server
 //! published. Without a host, the tools run on the open index: `knowledge.search` (keyword search),
-//! `knowledge.read`, `knowledge.explore` and `knowledge.wiki_get`. A project server passes a host
+//! `knowledge.read` and `knowledge.explore`. A project server passes a host
 //! instead (`serve::Serving`): `knowledge.search` runs the project search plan and `knowledge.read`
 //! reads from the serving build or an earlier one. The HTTP server answers `/mcp` with the same
 //! tools through `tools_json` and `call_json`.
@@ -65,12 +65,6 @@ fn explore_schema() -> String {
     format!(
         r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"query":{{"type":"string"}},"sourceIds":{},"seedLimit":{{"type":"integer","minimum":1,"maximum":100}},"maxSteps":{{"type":"integer","minimum":1,"maximum":100}},"timeoutMs":{{"type":"integer","minimum":1,"maximum":60000}}}},"required":["query"]}}"#,
         source_ids()
-    )
-}
-
-fn wiki_schema() -> String {
-    format!(
-        r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"id":{{"type":"string","minLength":1,"maxLength":128}}}},"required":["id"]}}"#
     )
 }
 
@@ -455,14 +449,6 @@ impl McpServer {
             ),
             explore_schema(),
         ));
-        tools.push((
-            tool(
-                "knowledge.wiki_get",
-                "Read a derived Wiki page and its currently valid citations.",
-                &wiki_schema(),
-            ),
-            wiki_schema(),
-        ));
         tools
     }
 
@@ -567,13 +553,6 @@ impl McpServer {
                         .explore(query, options, &cancel)
                         .map_err(native)?,
                 )
-            }
-            ("knowledge.wiki_get", None) => {
-                let page = self
-                    .database
-                    .wiki_get(string("id"), cancel)
-                    .map_err(native)?;
-                js_text(&serde_json::json!({ "page": page }))
             }
             _ => Err(format!("Tool {name} not found")),
         }

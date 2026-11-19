@@ -6,8 +6,8 @@ Node.js のプロジェクト CLI が `Dunlinfile.yaml` を読み、処理順と
 | --- | --- |
 | `tools/rag/cli.mjs`、`project.mjs` | コマンドの解析、対象プロジェクトの特定、構築・試行・採用、HTTP・MCP の起動 |
 | `project-modules.mjs`、`project-content.mjs` | YAML の各区切りの検証、モジュール順、入力の走査、抽出とチャンク化 |
-| `project-eval.mjs`、`project-dictionary.mjs` | 評価データと引用の位置対応、レポートの比較、ユーザー辞書の提案と候補設定への反映 |
-| `project-wiki.mjs` と関連モジュール | Wiki・PARA の生成、原本・出典・ページ版の管理、作業の進捗と画面 |
+| `project-eval.mjs`、`project-dictionary.mjs` | 評価データを選んだときの設定の書き換え、ユーザー辞書の提案と候補設定への反映。評価、引用の位置対応、レポートの比較は Rust（`src/eval_*.rs`） |
+| `project-wiki.mjs` | Wiki・PARA の設定の検証。ページの生成、引用の検証、原本・出典・ページ版の管理、HTML 化、作業の進捗、画面は Rust（`src/wiki_*.rs`、`src/markdown.rs`） |
 | `js/index.ts`、`src/node.rs` | TypeScript の API と N-API 境界。Rust の索引処理や検索は非同期のワーカーから実行 |
 | `src/engine.rs`、`src/japanese.rs`、`src/corpus.rs` | Tantivy の BM25、Lindera/IPADIC のトークナイザ、版を持つコーパス |
 | `src/vector.rs`、`tools/hannoy/` | `f32` の厳密ベクトル検索と、選択時に使う任意の近似ベクトル索引 |

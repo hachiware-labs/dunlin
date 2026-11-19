@@ -53,7 +53,7 @@ pub struct LoadRequest {
     pub files: Vec<LoadFile>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadFile {
     pub id: String,

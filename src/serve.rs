@@ -538,16 +538,16 @@ pub fn serve_stdio(
 // ---------------------------------------------------------------------------------------------
 // HTTP
 
-type Body = Full<Bytes>;
+pub(crate) type Body = Full<Bytes>;
 
-struct Reply {
-    status: u16,
-    headers: Vec<(&'static str, String)>,
-    body: String,
+pub(crate) struct Reply {
+    pub status: u16,
+    pub headers: Vec<(&'static str, String)>,
+    pub body: String,
 }
 
 impl Reply {
-    fn json(status: u16, body: String) -> Self {
+    pub(crate) fn json(status: u16, body: String) -> Self {
         Self {
             status,
             headers: vec![("content-type", "application/json; charset=utf-8".into())],
@@ -556,7 +556,7 @@ impl Reply {
     }
 
     /// `reject`: `{ error: { message, type, param, code } }`.
-    fn error(status: u16, code: &str, message: &str) -> Self {
+    pub(crate) fn error(status: u16, code: &str, message: &str) -> Self {
         let kind = if status < 500 {
             "invalid_request_error"
         } else {
@@ -593,7 +593,7 @@ impl Reply {
 }
 
 /// `hostname`: a host name or address, lowercase, or `None`.
-fn hostname(value: &str) -> Option<String> {
+pub(crate) fn hostname(value: &str) -> Option<String> {
     if value.is_empty()
         || value
             .chars()
@@ -625,7 +625,7 @@ fn hostname(value: &str) -> Option<String> {
 }
 
 /// `requestTarget`: the host name of the Host header and the authority with its port.
-fn request_target(value: &str, port: u16) -> Option<(String, String)> {
+pub(crate) fn request_target(value: &str, port: u16) -> Option<(String, String)> {
     if value
         .chars()
         .any(|c| c.is_whitespace() || "/@?#\\,%".contains(c))
@@ -707,7 +707,7 @@ struct Server {
 }
 
 /// Aborts the work of a request whose connection closed before it finished.
-struct AbortOnDrop(Option<Cancellation>);
+pub(crate) struct AbortOnDrop(pub Option<Cancellation>);
 
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
@@ -718,7 +718,7 @@ impl Drop for AbortOnDrop {
 }
 
 /// Counts a request against `max_concurrent` until it ends.
-struct Running<'a>(&'a AtomicUsize);
+pub(crate) struct Running<'a>(pub &'a AtomicUsize);
 
 impl Drop for Running<'_> {
     fn drop(&mut self) {
@@ -726,7 +726,7 @@ impl Drop for Running<'_> {
     }
 }
 
-fn header<'a>(request: &'a Request<Incoming>, name: &str) -> Option<&'a str> {
+pub(crate) fn header<'a>(request: &'a Request<Incoming>, name: &str) -> Option<&'a str> {
     request
         .headers()
         .get(name)

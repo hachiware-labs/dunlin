@@ -704,6 +704,12 @@ impl crate::adoption::AdoptHost for JsHost {
     }
 }
 
+impl crate::wiki_serve::WikiServeHost for JsHost {
+    fn listening(&self, port: u16) {
+        self.notify("listening", format!("{{\"port\":{port}}}"));
+    }
+}
+
 impl crate::search_stage::SearchHost for JsHost {
     fn index_tool(&self) -> std::result::Result<String, String> {
         crate::index_stage::IndexHost::index_tool(self)
@@ -1123,6 +1129,78 @@ pub fn run_transform<'env>(
     Ok(promise)
 }
 
+/// Runs a command of a Wiki or PARA project (see `wiki_commands`). `host(id, kind, args, bytes)`
+/// parses the HTML and Office files `ingress` reads. Resolves to
+/// `{ status: "done", output, warnings }` or a failed status.
+#[napi]
+pub fn wiki<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = JsHost::new(function);
+        let outcome = serde_json::from_str::<crate::wiki_project::WikiRequest>(&request)
+            .map_err(|error| {
+                crate::embed::EmbedError::plain(format!("Invalid Wiki request: {error}"))
+            })
+            .and_then(|request| crate::wiki_commands::run(&request, &host, &cancel));
+        let text = match outcome {
+            Ok(outcome) => format!(
+                "{{\"status\":\"done\",\"output\":{},\"warnings\":{}}}",
+                outcome.output.to_js_json(),
+                crate::config_value::ConfigValue::Array(outcome.warnings).to_js_json()
+            ),
+            Err(error) if error.aborted => {
+                deferred.reject(native_error(crate::Error::Aborted));
+                return;
+            }
+            Err(error) => failed_stage(error),
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
+}
+
+/// Serves the screen of a Wiki or PARA project (see `wiki_serve`) until `cancel` aborts, then
+/// finishes the queued work. `host` parses uploaded HTML and Office files and hears `listening`
+/// with `{ port }`. Resolves to `{ status: "done" }` or a failed status.
+#[napi]
+pub fn wiki_serve<'env>(
+    env: &'env Env,
+    request: String,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<String, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let host = Arc::new(JsHost::new(function));
+        let outcome = serde_json::from_str::<crate::wiki_serve::WikiServeRequest>(&request)
+            .map_err(|error| format!("Invalid Wiki serve request: {error}"))
+            .and_then(|request| crate::wiki_serve::serve(request, host, &cancel));
+        let text = match outcome {
+            Ok(()) => "{\"status\":\"done\"}".to_owned(),
+            Err(message) => failed_stage(crate::embed::EmbedError::plain(message)),
+        };
+        deferred.resolve(move |_| Ok(text));
+    });
+    Ok(promise)
+}
+
+/// Creates the tables of a Wiki or PARA project in `state.sqlite`.
+#[napi]
+pub fn ensure_wiki(state: String) -> Result<()> {
+    crate::eval_stage::open_state(&state, false)
+        .and_then(|connection| crate::wiki_project::ensure(&connection))
+        .map_err(|error| Error::new(Status::GenericFailure, error.message))
+}
+
 /// Loads source files for the `source` stage (see `source_load`). `host(id, kind, args, bytes)`
 /// parses the kinds Rust does not read and answers with `completeHostCall`. Resolves to
 /// `{ documents, warnings }` as JSON.
@@ -1337,6 +1415,12 @@ pub fn route_files(request: String) -> Result<String> {
 #[napi]
 pub fn matches_glob(path: String, pattern: String) -> bool {
     crate::glob::matches(&path, &pattern)
+}
+
+/// Markdown as HTML, as markdown-it renders it with `{ html: false }` (spec 28.12 step 5a).
+#[napi]
+pub fn render_markdown(markdown: String) -> String {
+    crate::markdown::render(&markdown)
 }
 
 /// Describes every registered module as JSON, in registration order.
@@ -1677,56 +1761,6 @@ impl NativeDatabase {
                 .map_err(|_| crate::Error::Invalid("Invalid evidence"))?;
             json(database.describe_evidence(&evidence, &cancel)?)
         }))
-    }
-
-    #[napi]
-    pub fn wiki_build(
-        &self,
-        options: String,
-        cancel: &NativeCancellation,
-    ) -> Result<AsyncTask<Job<Json>>> {
-        let database = self.database()?;
-        let cancel = cancel.0.clone();
-        Ok(task(move || {
-            let options = serde_json::from_str(&options)
-                .map_err(|_| crate::Error::Invalid("Invalid Wiki build options"))?;
-            json(database.wiki_build(options, &cancel)?)
-        }))
-    }
-
-    #[napi]
-    pub fn wiki_get(
-        &self,
-        id: String,
-        cancel: &NativeCancellation,
-    ) -> Result<AsyncTask<Job<Json>>> {
-        let database = self.database()?;
-        let cancel = cancel.0.clone();
-        Ok(task(move || json(database.wiki_get(&id, &cancel)?)))
-    }
-
-    #[napi]
-    pub fn wiki_affected(
-        &self,
-        source_id: Option<String>,
-        cancel: &NativeCancellation,
-    ) -> Result<AsyncTask<Job<Json>>> {
-        let database = self.database()?;
-        let cancel = cancel.0.clone();
-        Ok(task(move || {
-            json(database.wiki_affected(source_id.as_deref(), &cancel)?)
-        }))
-    }
-
-    #[napi]
-    pub fn wiki_regenerate(
-        &self,
-        id: String,
-        cancel: &NativeCancellation,
-    ) -> Result<AsyncTask<Job<Json>>> {
-        let database = self.database()?;
-        let cancel = cancel.0.clone();
-        Ok(task(move || json(database.wiki_regenerate(&id, &cancel)?)))
     }
 
     /// Runs a project search plan (see `search_stage`). `host(id, kind, args, bytes)` answers

@@ -138,6 +138,195 @@ pub fn posix_resolve(base: &str, path: &str) -> String {
     }
 }
 
+// Used by Wiki and PARA projects, which only the Node.js addon has.
+#[cfg(any(feature = "node", test))]
+/// `path.relative(from, to)` for absolute paths on the current platform.
+pub fn relative(from: &str, to: &str) -> String {
+    if cfg!(windows) {
+        win32_relative(from, to)
+    } else {
+        posix_relative(from, to)
+    }
+}
+
+// Used by Wiki and PARA projects, which only the Node.js addon has.
+#[cfg(any(feature = "node", test))]
+/// `path.join(base, ...parts)` for an absolute base and plain segments.
+pub fn join(base: &str, parts: &[&str]) -> String {
+    let separator = if cfg!(windows) { "\\" } else { "/" };
+    let mut joined = base.to_owned();
+    for part in parts {
+        joined.push_str(separator);
+        joined.push_str(part);
+    }
+    resolve(base, &joined)
+}
+
+// Used by Wiki and PARA projects, which only the Node.js addon has.
+#[cfg(any(feature = "node", test))]
+fn lower(text: &str) -> Vec<char> {
+    // One character for one, so that indices still point into the original.
+    text.chars()
+        .map(|c| {
+            let mut lower = c.to_lowercase();
+            match (lower.next(), lower.next()) {
+                (Some(single), None) => single,
+                _ => c,
+            }
+        })
+        .collect()
+}
+
+// Used by Wiki and PARA projects, which only the Node.js addon has.
+#[cfg(any(feature = "node", test))]
+pub fn win32_relative(from: &str, to: &str) -> String {
+    if from == to {
+        return String::new();
+    }
+    let from_orig = win32_resolve(from, "");
+    let to_orig = win32_resolve(to, "");
+    if from_orig == to_orig {
+        return String::new();
+    }
+    let from: Vec<char> = lower(&from_orig);
+    let to: Vec<char> = lower(&to_orig);
+    let to_chars: Vec<char> = to_orig.chars().collect();
+    if from == to {
+        return String::new();
+    }
+    let slice = |start: usize, end: usize| to_chars[start..end].iter().collect::<String>();
+    let mut from_start = 0;
+    while from_start < from.len() && from[from_start] == '\\' {
+        from_start += 1;
+    }
+    let mut from_end = from.len();
+    while from_end > from_start + 1 && from[from_end - 1] == '\\' {
+        from_end -= 1;
+    }
+    let from_len = from_end - from_start;
+    let mut to_start = 0;
+    while to_start < to.len() && to[to_start] == '\\' {
+        to_start += 1;
+    }
+    let mut to_end = to.len();
+    while to_end > to_start + 1 && to[to_end - 1] == '\\' {
+        to_end -= 1;
+    }
+    let to_len = to_end - to_start;
+    let length = from_len.min(to_len);
+    let mut last_common: isize = -1;
+    let mut i = 0;
+    while i < length {
+        let code = from[from_start + i];
+        if code != to[to_start + i] {
+            break;
+        } else if code == '\\' {
+            last_common = i as isize;
+        }
+        i += 1;
+    }
+    if i != length {
+        if last_common == -1 {
+            return to_orig;
+        }
+    } else {
+        if to_len > length {
+            if to[to_start + i] == '\\' {
+                return slice(to_start + i + 1, to_chars.len());
+            }
+            if i == 2 {
+                return slice(to_start + i, to_chars.len());
+            }
+        }
+        if from_len > length {
+            if from[from_start + i] == '\\' {
+                last_common = i as isize;
+            } else if i == 2 {
+                last_common = 3;
+            }
+        }
+        if last_common == -1 {
+            last_common = 0;
+        }
+    }
+    let mut out = String::new();
+    let mut i = (from_start as isize + last_common + 1) as usize;
+    while i <= from_end {
+        if i == from_end || from[i] == '\\' {
+            out.push_str(if out.is_empty() { ".." } else { "\\.." });
+        }
+        i += 1;
+    }
+    let mut to_start = (to_start as isize + last_common) as usize;
+    if !out.is_empty() {
+        return out + &slice(to_start, to_end);
+    }
+    if to_chars.get(to_start) == Some(&'\\') {
+        to_start += 1;
+    }
+    slice(to_start, to_end)
+}
+
+// Used by Wiki and PARA projects, which only the Node.js addon has.
+#[cfg(any(feature = "node", test))]
+pub fn posix_relative(from: &str, to: &str) -> String {
+    if from == to {
+        return String::new();
+    }
+    let from = posix_resolve(from, "");
+    let to = posix_resolve(to, "");
+    if from == to {
+        return String::new();
+    }
+    let from: Vec<char> = from.chars().collect();
+    let to: Vec<char> = to.chars().collect();
+    let from_start = 1;
+    let from_end = from.len();
+    let from_len = from_end - from_start;
+    let to_start = 1;
+    let to_len = to.len() - to_start;
+    let length = from_len.min(to_len);
+    let mut last_common: isize = -1;
+    let mut i = 0;
+    while i < length {
+        let code = from[from_start + i];
+        if code != to[to_start + i] {
+            break;
+        } else if code == '/' {
+            last_common = i as isize;
+        }
+        i += 1;
+    }
+    if i == length {
+        if to_len > length {
+            if to[to_start + i] == '/' {
+                return to[to_start + i + 1..].iter().collect();
+            }
+            if i == 0 {
+                return to[to_start + i..].iter().collect();
+            }
+        } else if from_len > length {
+            if from[from_start + i] == '/' {
+                last_common = i as isize;
+            } else if i == 0 {
+                last_common = 0;
+            }
+        }
+    }
+    let mut out = String::new();
+    let mut i = (from_start as isize + last_common + 1) as usize;
+    while i <= from_end {
+        if i == from_end || from[i] == '/' {
+            out.push_str(if out.is_empty() { ".." } else { "/.." });
+        }
+        i += 1;
+    }
+    let rest: String = to[(to_start as isize + last_common) as usize..]
+        .iter()
+        .collect();
+    out + &rest
+}
+
 /// Node's `normalizeString`: drops empty and `.` segments and applies `..`.
 fn normalize(
     path: &str,
@@ -191,6 +380,34 @@ mod tests {
             ["C:\\proj", "", "C:\\proj"],
         ] {
             assert_eq!(win32_resolve(base, path), expected, "{base} + {path}");
+        }
+    }
+
+    #[test]
+    fn relates_paths_like_node() {
+        for [from, to, expected] in [
+            ["C:\\proj", "C:\\proj\\site\\a.html", "site\\a.html"],
+            [
+                "C:\\proj\\site\\x",
+                "C:\\proj\\.dunlin\\a.bin",
+                "..\\..\\.dunlin\\a.bin",
+            ],
+            ["C:\\proj", "c:\\PROJ", ""],
+            ["C:\\proj", "D:\\x", "D:\\x"],
+            ["C:\\", "C:\\x", "x"],
+            ["C:\\proj\\a", "C:\\", "..\\.."],
+            ["C:\\proj", "C:\\projects", "..\\projects"],
+        ] {
+            assert_eq!(win32_relative(from, to), expected, "{from} -> {to}");
+        }
+        for [from, to, expected] in [
+            ["/proj", "/proj/site/a.html", "site/a.html"],
+            ["/proj/site/x", "/proj/.dunlin/a.bin", "../../.dunlin/a.bin"],
+            ["/", "/x", "x"],
+            ["/proj/a", "/", "../.."],
+            ["/proj", "/projects", "../projects"],
+        ] {
+            assert_eq!(posix_relative(from, to), expected, "{from} -> {to}");
         }
     }
 

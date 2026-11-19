@@ -4,10 +4,9 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvalDataRequest, EvalDataOutcome, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
+  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, WikiCommandRequest, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvalDataRequest, EvalDataOutcome, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
-  RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk, Wiki, WikiBuildOptions,
-  WikiImpact, WikiPage,
+  RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk,
 } from './types.js';
 
 export * from './types.js';
@@ -47,10 +46,6 @@ interface NativeDatabase {
   evalData(request: string, cancel: NativeCancellation): Promise<string>;
   dictionaryMisses(request: string, cancel: NativeCancellation): Promise<string>;
   serveMcp(options: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<void>;
-  wikiBuild(options: string, cancel: NativeCancellation): Promise<WikiPage>;
-  wikiGet(id: string, cancel: NativeCancellation): Promise<WikiPage | null>;
-  wikiAffected(sourceId: string | undefined, cancel: NativeCancellation): Promise<WikiImpact[]>;
-  wikiRegenerate(id: string, cancel: NativeCancellation): Promise<WikiPage>;
   close(): Promise<void>;
 }
 
@@ -89,6 +84,10 @@ interface NativeBinding {
   answerQuestion(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   serveProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   matchesGlob(path: string, pattern: string): boolean;
+  renderMarkdown(markdown: string): string;
+  wiki(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  ensureWiki(state: string): void;
+  wikiServe(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   readModuleArgs(name: string, args: string): string;
   readSourceFiles(files: { path: string; limit: number }[], maxBytes: number, cancel: NativeCancellation): Promise<SourceFileRead[]>;
   storeOriginals(directory: string, files: { sha256: string; bytes: Uint8Array }[], cancel: NativeCancellation): Promise<(string | null)[]>;
@@ -169,7 +168,7 @@ async function cancellable<T>(
 
 function translateNativeError(error: unknown): DunlinError {
   if (error instanceof DunlinError) return error;
-  const match = error instanceof Error && /^(LOAD_FAILED|INVALID_ARGUMENT|IO_ERROR|BUSY|ABORTED|TIMEOUT|NOT_FOUND|STALE_EVIDENCE|INDEX_ERROR|PLAN_NOT_FOUND|PLAN_ERROR|WIKI_NOT_FOUND|WIKI_ERROR)\|(.+)$/u.exec(error.message);
+  const match = error instanceof Error && /^(LOAD_FAILED|INVALID_ARGUMENT|IO_ERROR|BUSY|ABORTED|TIMEOUT|NOT_FOUND|STALE_EVIDENCE|INDEX_ERROR|PLAN_NOT_FOUND|PLAN_ERROR)\|(.+)$/u.exec(error.message);
   return match ? new DunlinError(match[1] as DunlinErrorCode, match[2]) : new DunlinError('INDEX_ERROR', 'The native operation failed');
 }
 
@@ -288,57 +287,11 @@ function evidenceInput(evidence: Evidence): Evidence {
   };
 }
 
-function validateWikiId(id: string): void {
-  if (typeof id !== 'string' || id.length === 0 || id.length > 128) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected a Wiki page ID');
-  }
-}
-
-function wikiRequest({ id, title, documents }: WikiBuildOptions): string {
-  validateWikiId(id);
-  if (typeof title !== 'string' || Buffer.byteLength(title) > 512) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected a Wiki title of at most 512 UTF-8 bytes');
-  }
-  if (!Array.isArray(documents) || documents.length < 2 || documents.length > 32) {
-    throw new DunlinError('INVALID_ARGUMENT', 'A Wiki page requires 2–32 distinct documents');
-  }
-  const references = Array.from(documents, (document) => {
-    const { sourceId, objectId } = document ?? {};
-    if (typeof sourceId !== 'string' || sourceId.length > 64
-      || typeof objectId !== 'string' || Buffer.byteLength(objectId) > 128 * 1024) {
-      throw new DunlinError('INVALID_ARGUMENT', 'Expected sourceId and objectId for each Wiki document');
-    }
-    return { sourceId, objectId };
-  });
-  return JSON.stringify({ id, title, documents: references });
-}
-
 export class Dunlin {
   #database: NativeDatabase | undefined;
   #lifetime = new AbortController();
   #pending = new Set<Promise<unknown>>();
   #closing: Promise<void> | undefined;
-
-  readonly wiki: Wiki = {
-    build: async (options) => {
-      const request = wikiRequest(options);
-      return this.#run(options.signal, (database, cancel) => database.wikiBuild(request, cancel));
-    },
-    get: async (id, { signal } = {}) => {
-      validateWikiId(id);
-      return this.#run(signal, (database, cancel) => database.wikiGet(id, cancel));
-    },
-    affected: async ({ sourceId, signal } = {}) => {
-      if (sourceId !== undefined && typeof sourceId !== 'string') {
-        throw new DunlinError('INVALID_ARGUMENT', 'Expected a source ID');
-      }
-      return this.#run(signal, (database, cancel) => database.wikiAffected(sourceId, cancel));
-    },
-    regenerate: async (id, { signal } = {}) => {
-      validateWikiId(id);
-      return this.#run(signal, (database, cancel) => database.wikiRegenerate(id, cancel));
-    },
-  };
 
   private constructor(database: NativeDatabase) {
     this.#database = database;
@@ -585,6 +538,42 @@ export class Dunlin {
     return native().matchesGlob(path, pattern);
   }
 
+  /**
+   * Run a command of a Wiki or PARA project (spec 28.12): `ingress`, `query`, `verify`, `archive`,
+   * `undo`, `issue`, `cite`, `rules`, `instruct`, `save-answer` or `progress`. `host.parse` reads
+   * the HTML and Office files `ingress` loads. Failures resolve to `{ status: "failed", error }`.
+   */
+  static async wiki(request: WikiCommandRequest, host: Partial<LoadCorpusHost> = {}, { signal }: OperationOptions = {}): Promise<
+    { status: 'done'; output: unknown; warnings: Record<string, unknown>[] } | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } }> {
+    const text = await cancellable(signal, (cancel) => native().wiki(configJson(request), hostCallback(host), cancel));
+    return JSON.parse(text) as { status: 'done'; output: unknown; warnings: Record<string, unknown>[] } | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } };
+  }
+
+  /**
+   * Serve the screen of a Wiki or PARA project (spec 28.12): pages, sources and work, and forms
+   * whose instructions run as recorded work. Settles when `signal` aborts and the queued work ends.
+   */
+  static async wikiServe(request: { base: WikiCommandRequest; settings: Record<string, unknown>; token?: string | null },
+    host: Partial<LoadCorpusHost> & { listening?: (address: { port: number }) => void } = {}, { signal }: OperationOptions = {}): Promise<
+    { status: 'done' } | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } }> {
+    const text = await cancellable(signal, (cancel) => native().wikiServe(configJson(request), hostCallback(host as Partial<ServeProjectHost>), cancel));
+    return JSON.parse(text) as { status: 'done' } | { status: 'failed'; error: { code?: string; message: string; exitCode?: number } };
+  }
+
+  /** Create the tables of a Wiki or PARA project in its `state.sqlite`. */
+  static ensureWiki(state: string): void {
+    try {
+      native().ensureWiki(absolutePath(state));
+    } catch (error) {
+      throw translateNativeError(error);
+    }
+  }
+
+  /** Markdown as HTML, as markdown-it 15 renders it with `{ html: false }` (Wiki and PARA pages). */
+  static renderMarkdown(markdown: string): string {
+    return native().renderMarkdown(markdown);
+  }
+
   /** Describe every registered module, in registration order. */
   static describeModules(): ModuleDescription[] {
     try {
@@ -666,7 +655,7 @@ export class Dunlin {
     return this.#run(signal, (database, cancel) => database.replaceDocuments(sourceId, request, cancel));
   }
 
-  /** Applies filesystem changes and regenerates the Wiki pages affected by this source. */
+  /** Applies the changes of a filesystem source to the index. */
   async syncSource(source: FilesystemSource, { signal }: OperationOptions = {}): Promise<DeltaSyncOutcome> {
     const path = filesystemPath(source);
     return this.#run(signal, (database, cancel) => database.syncSource(source.id, path, cancel));
@@ -836,7 +825,7 @@ export class Dunlin {
 
   /**
    * Serve MCP on standard input and output in Rust (spec 28.10 step 3c). Without `search`, the tools
-   * search, read, explore and read Wiki pages of this index. With `search` (and `read`), a project
+   * search, read and explore this index. With `search` (and `read`), a project
    * answers `knowledge.search` and `knowledge.read` itself. `closed` settles when the client closes
    * standard input.
    */

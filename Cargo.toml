@@ -19,7 +19,13 @@ dunce = "1"
 http-body-util = { version = "0.1", optional = true }
 hyper = { version = "1", optional = true, features = ["server", "http1"] }
 hyper-util = { version = "0.1", optional = true, features = ["tokio"] }
+idna = "1.1"
 icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }
+# Word boundaries as Intl.Segmenter finds them, for Wiki questions and content checks (spec 28.12).
+icu_segmenter = { version = "2.4", default-features = false, features = ["compiled_data"] }
+# String.prototype.localeCompare for the order of Wiki content checks (spec 28.12).
+icu_collator = { version = "2.4", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "2.4", default-features = false, features = ["compiled_data"] }
 lindera = { version = "=6.2.0", default-features = false, features = ["embed-ipadic"] }
 memmap2 = { version = "0.9", optional = true }
 napi = { version = "3", default-features = false, features = ["napi8", "serde-json"], optional = true }
@@ -52,6 +58,13 @@ ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 yaml-rust2 = { version = "0.13.0", default-features = false }
+
+# Whether the process that queued Wiki work still runs, as process.kill(pid, 0) tells.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2"

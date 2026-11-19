@@ -87,16 +87,8 @@ async function installAndSearch(name, tarballs) {
       const explored = await database.explore('OAuth', { maxSteps: 5 });
       assert.equal(explored.status, 'complete');
       assert.deepEqual(explored.evidence.map(({ evidence }) => evidence.source.sourceId), ['docs', 'policies']);
-      const wiki = await database.wiki.build({
-        id: 'auth/oauth', title: 'OAuth',
-        documents: explored.evidence.map(({ evidence }) => evidence.source),
-      });
-      assert.equal(wiki.citations.length, 2);
       const removed = await database.syncDocuments('policies', []);
       assert.deepEqual(removed.deleted, ['policy.txt']);
-      assert.deepEqual(removed.wiki.regenerated, [{ id: wiki.id, revision: 2, status: 'insufficient_evidence' }]);
-      assert.equal((await database.wiki.get(wiki.id)).status, 'insufficient_evidence');
-      assert.deepEqual(await database.wiki.affected(), []);
     } finally {
       await database.close();
     }

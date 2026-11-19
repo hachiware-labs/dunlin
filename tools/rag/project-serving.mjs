@@ -1,16 +1,16 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
-import { once } from 'node:events';
-import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 
 import { Dunlin } from 'dunlin';
+
+// Serving runs in Rust (spec 28.10 step 3c and 28.12 step 5b). JavaScript checks the serve section,
+// applies the command line overrides and reads the access token.
 
 export const isSearchProject = (type) => type === 'mcp' || type === 'rag';
 
 const limits = { max_request_bytes: 1048576, request_timeout_seconds: 120, max_concurrent: 8 };
 const access = { allowed_hosts: ['localhost', '127.0.0.1'], allowed_origins: [], auth: { type: 'none', token_env: null } };
 const endpoints = { rag: ['responses', 'search', 'mcp'], wiki: ['web'], para: ['web'] };
-const envName = /^[A-Za-z_][A-Za-z0-9_]*$/u;
 
 export function serveTemplate(type) {
   return type === 'mcp' ? { transport: 'stdio' } : {
@@ -19,24 +19,6 @@ export function serveTemplate(type) {
     ...(isSearchProject(type) ? {} : { pages: './site' }),
   };
 }
-
-function hostname(value) {
-  if (typeof value !== 'string' || !value || /[\s/@?#\\,%]/u.test(value)) return null;
-  const host = value.replace(/^\[([^\]]+)\]$/u, '$1').toLowerCase();
-  if (isIP(host)) return host;
-  const domain = /^[a-z\d](?:[a-z\d.-]*[a-z\d])?$/iu.test(host) && host.length <= 253;
-  return domain && URL.parse('http://' + host)?.hostname === host ? host : null;
-}
-
-function origin(value) {
-  const url = typeof value === 'string' && URL.parse(value);
-  return url && ['http:', 'https:'].includes(url.protocol) && value === url.origin ? value : null;
-}
-
-export function isLoopback(host) {
-  return host === 'localhost' || host === '::1' || isIP(host) === 4 && host.startsWith('127.');
-}
-
 
 /** Validates a serve section in Rust and reports each problem through `issue`. */
 export function validateServe(type, input, issue) {
@@ -63,34 +45,6 @@ export function serveAddress(host, port) {
   return 'http://' + (isIP(host) === 6 ? '[' + host + ']' : host) + ':' + port;
 }
 
-export class HttpError extends Error {
-  constructor(status, code, message) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
-
-function requestTarget(request, port) {
-  const value = request.headers.host;
-  if (typeof value !== 'string' || /[\s/@?#\\,%]/u.test(value)) return null;
-  const match = /^(\[[a-f\d:.]+\]|[\w.-]+)(?::(\d+))?$/iu.exec(value);
-  const name = match && hostname(match[1]);
-  if (!name || match[2] && (+match[2] > 65535 || +match[2] < 1)) return null;
-  return { name, authority: match[2] ? value : port === 80 ? value : value + ':' + port };
-}
-
-function authorized(value, digest, basic) {
-  if (!digest) return true;
-  const bearer = typeof value === 'string' && /^Bearer ([^\s]+)$/iu.exec(value);
-  let password = bearer?.[1];
-  if (basic && !password && typeof value === 'string' && /^Basic [A-Za-z0-9+/=]+$/iu.test(value)) {
-    const credentials = Buffer.from(value.slice(6), 'base64').toString('utf8');
-    if (credentials.startsWith('dunlin:')) password = credentials.slice(7);
-  }
-  return typeof password === 'string' && timingSafeEqual(createHash('sha256').update(password).digest(), digest);
-}
-
 export function serveCredential(settings) {
   const { auth } = settings.access;
   const token = auth.type === 'token' ? process.env[auth.token_env] : null;
@@ -98,115 +52,4 @@ export function serveCredential(settings) {
     throw Object.assign(new Error('Set a nonempty token in the configured environment variable.'), { code: 'AUTH_TOKEN_REQUIRED', exitCode: 2 });
   }
   return token && createHash('sha256').update(token).digest();
-}
-
-export function listenHttp(settings, handle, { browser = false } = {}) {
-  const digest = serveCredential(settings);
-  const hosts = new Set(settings.access.allowed_hosts.map(hostname));
-  const origins = new Set(settings.access.allowed_origins);
-  const timeout = settings.limits.request_timeout_seconds * 1000;
-  let running = 0;
-  const server = createServer({ headersTimeout: Math.min(60000, timeout), requestTimeout: timeout, connectionsCheckingInterval: Math.min(1000, timeout) },
-    async (request, response) => {
-      response.setHeader('Cache-Control', 'no-store');
-      response.setHeader('X-Content-Type-Options', 'nosniff');
-      const target = requestTarget(request, server.address().port);
-      const source = request.headers.origin;
-      if (!target || !hosts.has(target.name)) return reject(request, response, 403, 'HOST_FORBIDDEN', 'This Host is not allowed.');
-      const ownOrigin = new URL('http://' + target.authority).origin;
-      if (source !== undefined && !(browser && source === ownOrigin) && !origins.has(source)) {
-        return reject(request, response, 403, 'ORIGIN_FORBIDDEN', 'This Origin is not allowed.');
-      }
-      if (source) {
-        response.setHeader('Access-Control-Allow-Origin', source);
-        response.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id, MCP-Protocol-Version');
-        response.setHeader('Vary', 'Origin');
-        if (browser && digest) response.setHeader('Access-Control-Allow-Credentials', 'true');
-      }
-      if (request.method === 'OPTIONS' && source && request.headers['access-control-request-method']) {
-        response.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-        response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Session-Id, Last-Event-ID');
-        response.writeHead(204).end();
-        return;
-      }
-      if (!authorized(request.headers.authorization, digest, browser)) {
-        response.setHeader('WWW-Authenticate', browser ? 'Basic realm="Dunlin", charset="UTF-8"' : 'Bearer realm="Dunlin"');
-        return reject(request, response, 401, 'AUTH_REQUIRED', 'Valid authentication is required.');
-      }
-      if (running >= settings.limits.max_concurrent) return reject(request, response, 429, 'REQUEST_LIMIT', 'Too many concurrent requests.');
-      if (!request.url?.startsWith('/') || request.url.startsWith('//') || request.url.includes('\\')) {
-        return reject(request, response, 400, 'INVALID_REQUEST', 'Expected a local request path.');
-      }
-      const length = Number(request.headers['content-length'] ?? 0);
-      if (length > settings.limits.max_request_bytes) return reject(request, response, 413, 'BODY_LIMIT', 'The request body is too large.');
-      const controller = new AbortController();
-      const disconnect = () => { if (!response.writableEnded) controller.abort(new HttpError(408, 'REQUEST_CLOSED', 'The request ended.')); };
-      response.once('close', disconnect);
-      const url = new URL(request.url, ownOrigin);
-      running++;
-      const timer = setTimeout(() => {
-        const reason = new HttpError(408, 'REQUEST_TIMEOUT', 'The request exceeded its time limit.');
-        controller.abort(reason);
-        reject(request, response, reason.status, reason.code, reason.message);
-      }, timeout);
-      try {
-        const bytes = length > 0 || request.headers['transfer-encoding']
-          ? await readBody(request, settings.limits.max_request_bytes, controller.signal) : Buffer.alloc(0);
-        await handle(request, response, { url, origin: source, signal: controller.signal, body: bytes,
-          connection: { address: request.socket.remoteAddress ?? null, host: target.name, origin: source ?? null } });
-      } catch (error) {
-        const status = error.status ?? (error.exitCode === 2 ? 400 : error.exitCode === 3 ? 503 : 500);
-        const message = error.status || error.exitCode ? error.message : 'The request could not be completed.';
-        reject(request, response, status, error.code ?? 'EXECUTION_FAILED', message);
-      } finally {
-        clearTimeout(timer);
-        response.off('close', disconnect);
-        running--;
-      }
-    });
-  return (async () => {
-    server.listen(settings.port, settings.host);
-    await once(server, 'listening');
-    return server;
-  })();
-}
-
-function readBody(request, limit, signal) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-    const cleanup = () => {
-      request.off('data', data);
-      request.off('end', end);
-      request.off('error', fail);
-      signal.removeEventListener('abort', aborted);
-    };
-    const fail = (error) => { cleanup(); reject(error); };
-    const aborted = () => fail(signal.reason);
-    const end = () => { cleanup(); resolve(Buffer.concat(chunks, size)); };
-    const data = (chunk) => {
-      size += chunk.length;
-      if (size > limit) fail(new HttpError(413, 'BODY_LIMIT', 'The request body is too large.'));
-      else chunks.push(chunk);
-    };
-    if (signal.aborted) return aborted();
-    if (request.readableEnded) return end();
-    request.on('data', data);
-    request.once('end', end);
-    request.once('error', fail);
-    signal.addEventListener('abort', aborted, { once: true });
-  });
-}
-
-function reject(request, response, status, code, message) {
-  request.resume();
-  if (response.writableEnded || response.destroyed) return;
-  if (response.headersSent) { response.destroy(); return; }
-  if (status === 408 || status === 413) response.setHeader('Connection', 'close');
-  sendJson(response, status, { error: { message, type: status < 500 ? 'invalid_request_error' : 'server_error', param: null, code } });
-}
-
-export function sendJson(response, status, data) {
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-  response.end(JSON.stringify(data));
 }

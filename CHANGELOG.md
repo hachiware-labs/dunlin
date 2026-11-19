@@ -9,6 +9,7 @@
 - `dictionary suggest` と `dictionary add` を追加しました。調整用の評価から辞書候補と確認用の質問を出し、候補設定で試せます。
 - `eval-data generate` が評価ケースのない文書から順に読み、`--count` で指定した件数まで候補を作るようにしました。引用を検証できない候補だけを除き、理由ごとの件数を表示します。`eval-data review` は `--case` を繰り返して複数件を確認できます。
 - リリース用の npm パッケージを組み立てる `npm run release:prepare` と、手動実行のワークフロー **Release Dunlin**、MCP Registry 用の `server.json` を追加しました。
+- Node.js API から、直接開いた索引の資料を抜粋してページを作る `kb.wiki`、同期の結果の `wiki`、MCP の道具 `knowledge.wiki_get` をなくしました。Wiki と PARA は、CLI と同じ実装を `Dunlin.wiki` と `Dunlin.wikiServe` で呼べます。
 - README を CLI 利用者向けにし、Node.js API、検索評価、Wiki・PARA、設定や運用のガイドを整備しました。
 
 ### 以前のプロジェクトから移行する

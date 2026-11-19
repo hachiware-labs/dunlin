@@ -86,12 +86,11 @@ const result = await kb.syncSource({
 });
 console.log(result.added, result.updated, result.deleted);
 console.log(result.unchanged, result.indexedUnits);
-console.log(result.wiki.regenerated, result.wiki.failures);
 ```
 
-外部から取得済みの文書には `syncDocuments(sourceId, documents)` を使います。配列にはそのソースの現在の全資料を渡します。配列から外れた ID は削除として扱い、空配列でソースを空にできます。指定したファイルやディレクトリ自体を開けない場合は同期を中止します。ソース全体を削除して Wiki も更新する場合は `syncDocuments(sourceId, [])` を使います。
+外部から取得済みの文書には `syncDocuments(sourceId, documents)` を使います。配列にはそのソースの現在の全資料を渡します。配列から外れた ID は削除として扱い、空配列でソースを空にできます。指定したファイルやディレクトリ自体を開けない場合は同期を中止します。ソース全体を削除する場合は `syncDocuments(sourceId, [])` を使います。
 
-索引のコミット後、同期したソースの資料の版や URL に変化がある Wiki ページを再生成します。復元された参照も対象です。同期の途中で入力の検証や走査が失敗した場合は、変更をコミットしません。コミット後に Wiki の再生成が失敗した場合は `wiki.status` が `partial` になり、`wiki.failures` に理由が入ります。同じ入力で再試行すると、索引の変更がなくても残りの再生成を試みます。
+同期の途中で入力の検証や走査が失敗した場合は、変更をコミットしません。
 
 同期は API を呼び出した時に実行します。`addSource` と `replaceDocuments` は一括置換用の API です。
 
@@ -163,40 +162,25 @@ console.log(result.stopReason, result.issues);
 - 最初の検索、検索候補のリンク調査、各リンクの追跡はそれぞれ 1 ステップです。既定の上限は 12 ステップと 1,000 ms です。`seedLimit` で探索を始める検索候補の件数を指定でき、既定値はアクティブプランの件数です。資料ごとに未訪問のリンクを最大 16 件たどります。
 - 時間切れ、キャンセル、ステップ上限では、取得済みの根拠と停止理由を `partial` として返します。検索候補の一部を取得した後に索引エラーが起きた場合も、それまでの根拠を `search_failed` とともに返します。リンク先が見つからない、空である、読み取れない、またはリンク件数上限に達した場合は `issues` に記録します。時間予算はネイティブワーカーの待ち時間を含みます。停止は協調的で、実行中の索引検索や Markdown 解析がチェックポイントに戻るまで応答が遅れる場合があります。
 
-## 根拠付き Wiki
+## Wiki と PARA
 
-`wiki.build` は、現在の索引で指定した 2〜32 件の文書の本文を抜粋し、Markdown ページを作ります。各引用番号は `citations` の番号と対応し、出典 URL・版・行範囲を確認できます。文書ごとに最初の非空行から最大 12 行、4 KiB までを抜粋します。途中で短縮した行は `truncated` で区別できます。
+Wiki と PARA のページは、Dunlinfile のプロジェクト（`dunlin init wiki`、`dunlin init para`）で書きます。資料の取り込み、質問、検査、アーカイブ、内容への指示、画面は CLI のコマンドで行います。ページはモデルが書き、Dunlin が引用を原本の版と範囲に照らして確かめてから保存します。 [Wiki・PARA の操作](wiki.md)
 
-```ts
-const page = await kb.wiki.build({
-  id: 'architecture/authentication',
-  title: '認証方式',
-  documents: [
-    { sourceId: 'notes', objectId: 'architecture.md' },
-    { sourceId: 'policies', objectId: 'security/authentication.md' },
-  ],
-});
-console.log(page.markdown);
-const reopened = await kb.wiki.get(page.id);
-```
-
-ページの資料一覧、引用の版、生成時刻、リビジョンは永続化されます。ページを取得すると、その時点の索引と保存した依存情報を照合します。更新・削除・復元が見つかったページは `stale` になり、影響を受けた引用と抜粋は閲覧結果から外れます。存在しないページの `get` は `null` を返します。
-
-参照元の変更は索引に反映された時点で検知します。`syncSource` と `syncDocuments` は影響ページを自動で再生成します。一括置換後などに手動で確認する場合は `wiki.affected()` で影響ページと資料ごとの変更理由を取得できます。`sourceId` を指定すると、そのソースの変更に絞れます。
+Node.js からは、CLI と同じ Rust の実装を `Dunlin.wiki(request)` と `Dunlin.wikiServe(request)` で呼べます。`request` には、プロジェクトの場所、検証済みの設定（`about`、`plan`、`pages`）、解決済みのモデル、コマンドと引数を渡します。形は `WikiCommandRequest` 型のとおりで、CLI もこの形で呼びます。`Dunlin.wiki` は `{ status: 'done', output, warnings }` か `{ status: 'failed', error }` を返します。`output` は CLI の `--json` の `data` と同じです。
 
 ```ts
-const affected = await kb.wiki.affected({ sourceId: 'policies' });
-for (const { id, changes } of affected) {
-  console.log(id, changes);
-  await kb.wiki.regenerate(id);
-}
+// project: WikiCommandRequest のうち、コマンドと引数以外の項目
+const result = await Dunlin.wiki({ ...project, command: 'query', args: ['フィルターの交換周期は'], values: {} });
+if (result.status === 'done') console.log(result.output);
 ```
 
-再生成は保存済みの資料一覧を使い、現在の索引から引用とリビジョンを更新します。削除・空文書で引用が不足する場合は `insufficient_evidence` と `unavailable` を返します。欠けた資料の ID は保持し、索引に復元されたときにも影響を検知します。
+`Dunlin.wikiServe({ base, settings, token })` は、プロジェクトの画面をブラウザ向けに提供します。画面からの指示は作業として記録し、順に実行します。`signal` を止めると、受け付けた作業を終えてから戻ります。
+
+以前の版にあった、直接開いた索引の資料から抜粋でページを作る `kb.wiki`（`build`、`get`、`affected`、`regenerate`）、同期の結果の `wiki`、MCP の道具 `knowledge.wiki_get` はなくしました。
 
 ## Node.js API から MCP を提供する
 
-`kb.serveMcp()` は、直接開いた索引を stdio で公開します。既定のツールは `knowledge.search`、`knowledge.read`、`knowledge.explore`、`knowledge.wiki_get` です。サーバーは `dunlin` の Rust の部分（MCP の Rust SDK）で動くので、別のパッケージは要りません。Dunlinfile を使う場合は CLI の起動手順を参照してください。[CLI の起動手順](mcp.md)
+`kb.serveMcp()` は、直接開いた索引を stdio で公開します。既定のツールは `knowledge.search`、`knowledge.read`、`knowledge.explore` です。サーバーは `dunlin` の Rust の部分（MCP の Rust SDK）で動くので、別のパッケージは要りません。Dunlinfile を使う場合は CLI の起動手順を参照してください。[CLI の起動手順](mcp.md)
 
 ```js
 import { Dunlin } from 'dunlin';

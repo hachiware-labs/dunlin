@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { revision } from './authoring/files.mjs';
+import { revision } from './files.mjs';
 
 const side = z.object({ item: z.number().int().positive(), quote: z.string().min(1) }).strict();
 const findings = z.object({ issues: z.array(z.object({

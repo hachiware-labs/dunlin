@@ -29,10 +29,6 @@ test('stdio publishes search and read using the same persisted knowledge base', 
       await database.addSource({ id: 'policies', kind: 'filesystem', path: policy });
       await database.replaceDocuments('web', [imported]);
       await database.activatePlan('keyword-coverage-v1');
-      await database.wiki.build({
-        id: 'auth/oauth', title: 'OAuth notes',
-        documents: [{ sourceId: 'docs', objectId: 'source.md' }, { sourceId: 'policies', objectId: 'policy.txt' }],
-      });
     } finally {
       await database.close();
     }
@@ -41,9 +37,7 @@ test('stdio publishes search and read using the same persisted knowledge base', 
       args: [fileURLToPath(new URL('../examples/mcp.mjs', import.meta.url)), store],
     }));
     const { tools } = await client.listTools();
-    for (const name of ['knowledge.explore', 'knowledge.read', 'knowledge.search', 'knowledge.wiki_get']) {
-      assert.ok(tools.some((tool) => tool.name === name), `Expected MCP tool ${name}`);
-    }
+    assert.deepEqual(tools.map(({ name }) => name).sort(), ['knowledge.explore', 'knowledge.read', 'knowledge.search']);
     const result = await client.callTool({ name: 'knowledge.search', arguments: { query: '日本語' } });
     assert.equal(result.isError, undefined);
     assert.equal(result.structuredContent.totalHits, 1);
@@ -62,9 +56,6 @@ test('stdio publishes search and read using the same persisted knowledge base', 
     assert.deepEqual(remoteEvidence.range, { startLine: 3, endLine: 4 });
     const remoteRead = await client.callTool({ name: 'knowledge.read', arguments: { evidence: remoteEvidence } });
     assert.equal(remoteRead.structuredContent.content, '## Setup\nimported evidence');
-    const wiki = await client.callTool({ name: 'knowledge.wiki_get', arguments: { id: 'auth/oauth' } });
-    assert.equal(wiki.structuredContent.page.status, 'current');
-    assert.equal(wiki.structuredContent.page.citations.length, 2);
   } finally {
     await client.close();
     await rm(root, { recursive: true, force: true, maxRetries: 5 });

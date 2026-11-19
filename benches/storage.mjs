@@ -50,12 +50,14 @@ try {
   const corpus = new DatabaseSync(await find(data, 'corpus.sqlite'), { readOnly: true });
   let chunkBytes = 0;
   let searchTextBytes = 0;
+  let rebuilt = 0;
   let chunkCount = 0;
   for (const { chunks } of corpus.prepare('SELECT chunks FROM chunk_sets').iterate()) {
     chunkBytes += Buffer.byteLength(chunks);
     for (const chunk of JSON.parse(chunks)) {
       chunkCount++;
-      if (chunk.searchText !== undefined) searchTextBytes += Buffer.byteLength(JSON.stringify(chunk.searchText)) + '"searchText":,'.length;
+      if (chunk.searchText === true) rebuilt++;
+      else if (chunk.searchText !== undefined) searchTextBytes += Buffer.byteLength(JSON.stringify(chunk.searchText)) + '"searchText":,'.length;
     }
   }
   const revisions = corpus.prepare('SELECT count(*) AS count, sum(length(record)) AS bytes FROM revisions').get();
@@ -74,6 +76,7 @@ try {
     chunks: chunkCount,
     chunk_sets_bytes: chunkBytes,
     search_text_bytes: searchTextBytes,
+    search_text_rebuilt_on_read: rebuilt,
     index_bytes: index ? await bytes(index) : 0,
     index_store_bytes: storeBytes,
   }, null, 2));

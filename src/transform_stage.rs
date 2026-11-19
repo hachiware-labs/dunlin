@@ -433,15 +433,20 @@ struct Cache<'a> {
 }
 
 impl Cache<'_> {
-    fn read(&self, key: &str) -> Result<Option<Vec<ConfigValue>>, StageError> {
+    /// The cached chunks of a document, with their `searchText` rebuilt from `content`.
+    fn read(&self, key: &str, content: &str) -> Result<Option<Vec<ConfigValue>>, StageError> {
         if self.force {
             return Ok(None);
         }
-        crate::stage_store::read_chunking(self.connection, key)
+        let Some(mut chunks) = crate::stage_store::read_chunking(self.connection, key)? else {
+            return Ok(None);
+        };
+        crate::stage_store::restore_chunks(&mut chunks, content)?;
+        Ok(Some(chunks))
     }
 
-    /// Writes entries in one transaction.
-    fn write(&self, entries: &[(String, &[ConfigValue])]) -> Result<(), StageError> {
+    /// Writes entries, each with its document's content, in one transaction.
+    fn write(&self, entries: &[(String, &[ConfigValue], &str)]) -> Result<(), StageError> {
         crate::stage_store::write_chunkings(self.connection, entries, self.replace)
     }
 }
@@ -520,7 +525,7 @@ fn length_chunks(
                 ));
             }
             let key = ConfigValue::Array(key).to_js_json();
-            match cache.read(&key)? {
+            match cache.read(&key, &document.content)? {
                 Some(saved) => output[group][index] = saved,
                 None => pending.push((group, index, key)),
             }
@@ -562,9 +567,15 @@ fn length_chunks(
         for ((group, index, _), chunks) in batch.iter().zip(chunked) {
             output[*group][*index] = chunks.iter().map(chunk_value).collect();
         }
-        let entries: Vec<(String, &[ConfigValue])> = batch
+        let entries: Vec<(String, &[ConfigValue], &str)> = batch
             .iter()
-            .map(|(group, index, key)| (key.clone(), output[*group][*index].as_slice()))
+            .map(|(group, index, key)| {
+                (
+                    key.clone(),
+                    output[*group][*index].as_slice(),
+                    groups[*group][*index].content.as_str(),
+                )
+            })
             .collect();
         cache.write(&entries)?;
         start = end;
@@ -634,7 +645,7 @@ fn semantic_chunks(
                 .to_js_json()
                 .as_bytes(),
             );
-            if let Some(saved) = cache.read(&key)? {
+            if let Some(saved) = cache.read(&key, &document.content)? {
                 chunks.push(saved);
                 continue;
             }
@@ -718,7 +729,7 @@ fn semantic_chunks(
                 }
             }
             let merged: Vec<ConfigValue> = merged.iter().map(chunk_value).collect();
-            cache.write(&[(key, merged.as_slice())])?;
+            cache.write(&[(key, merged.as_slice(), document.content.as_str())])?;
             chunks.push(merged);
         }
         output.push(chunks);
@@ -884,7 +895,9 @@ mod tests {
 
     #[test]
     fn chunks_records_and_reuses_the_stage() {
-        let project = state("# A\nOne. Two. Three.\n");
+        // Full-width letters, so that the NFKC text differs from the chunk's text.
+        let content = "# Ａ\nＯｎｅ. Two. Three.\n";
+        let project = state(content);
         let request = TransformRequest {
             state: project.state.clone(),
             corpus: project.corpus.clone(),
@@ -909,7 +922,16 @@ mod tests {
         assert_eq!(first.output.get("key"), Some(&text(&id)));
         let chunks = first_chunks(&project, &first.output);
         assert!(chunks.len() > 1);
-        assert!(chunks[0].get("searchText").is_some());
+        // The stored chunk set leaves out the NFKC text; reading rebuilds it, and the chunk set ID
+        // covers the rebuilt text.
+        assert_eq!(chunks[0].get("searchText"), Some(&ConfigValue::Bool(true)));
+        let mut restored = chunks.clone();
+        crate::stage_store::restore_chunks(&mut restored, content).unwrap();
+        assert_eq!(restored[0].get("searchText"), Some(&text("# A\nOne.")));
+        assert_eq!(
+            first.output.get("chunks").unwrap().to_js_json(),
+            format!("[[\"{}\"]]", crate::stage_store::chunk_set_id(&restored))
+        );
 
         let again = run(&request, &Free, &cancel).unwrap();
         assert!(again.reused);
@@ -925,7 +947,7 @@ mod tests {
             number(8),
             number(0),
             text("markdown"),
-            text(&sha256_hex("# A\nOne. Two. Three.\n".as_bytes())),
+            text(&sha256_hex(content.as_bytes())),
         ])
         .to_js_json();
         assert_eq!(
@@ -943,6 +965,19 @@ mod tests {
             )
             .unwrap();
         assert_eq!(latest, id);
+
+        // Without the recorded stage and version lookup, the cached chunking gives the same IDs.
+        connection
+            .execute_batch(
+                "DELETE FROM stage_outputs WHERE stage = 'transform'; DELETE FROM latest_stage;
+                 DELETE FROM transform_outputs;",
+            )
+            .unwrap();
+        corpus.execute("DELETE FROM version_chunkings", []).unwrap();
+        let cached = run(&request, &Free, &cancel).unwrap();
+        assert!(!cached.reused);
+        assert_eq!(cached.output.get("chunks"), first.output.get("chunks"));
+        assert_eq!(cached.output.get("id"), first.output.get("id"));
     }
 
     #[test]

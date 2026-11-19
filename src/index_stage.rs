@@ -782,7 +782,9 @@ pub fn run(
                     };
                     let (source, transformed) = without_kept(&source, &transformed, &kept);
                     let source = crate::stage_store::expand_source(&corpus, source)?;
-                    let transformed = crate::stage_store::expand_transform(&corpus, transformed)?;
+                    let mut transformed =
+                        crate::stage_store::expand_transform(&corpus, transformed)?;
+                    crate::stage_store::restore_transform(&source, &mut transformed)?;
                     let groups = items(field(&source, "groups"));
                     let chunks = items(field(&transformed, "chunks"));
                     let mut unused: Vec<String> = baseline

@@ -344,7 +344,103 @@ pub(crate) fn chunk_set_id(chunks: &[ConfigValue]) -> String {
     sha256_hex(ConfigValue::Array(chunks.to_vec()).to_js_json().as_bytes())
 }
 
-/// The chunks cached for a document and chunk settings.
+/// The text of a chunk's byte range in `content`.
+fn chunk_text<'a>(chunk: &ConfigValue, content: &'a str) -> Option<&'a str> {
+    let range = chunk.get("byteRange")?;
+    let bound = |name: &str| match range.get(name) {
+        Some(ConfigValue::Number(value)) if *value >= 0.0 && value.fract() == 0.0 => {
+            Some(*value as usize)
+        }
+        _ => None,
+    };
+    content.get(bound("start")?..bound("end")?)
+}
+
+/// The chunks as `chunk_sets` stores them: a `searchText` that is the NFKC form of the chunk's
+/// text becomes `true`, and reading rebuilds it (spec 28.14). The chunk set ID covers the text.
+pub(crate) fn stored_chunks(chunks: &[ConfigValue], content: &str) -> Vec<ConfigValue> {
+    chunks
+        .iter()
+        .map(|chunk| {
+            let ConfigValue::Object(entries) = chunk else {
+                return chunk.clone();
+            };
+            let derived = match (chunk.get("searchText"), chunk_text(chunk, content)) {
+                (Some(ConfigValue::String(search)), Some(text)) => {
+                    *search == crate::chunk::nfkc(text)
+                }
+                _ => false,
+            };
+            if !derived {
+                return chunk.clone();
+            }
+            let mut entries = entries.clone();
+            put(&mut entries, "searchText", Some(ConfigValue::Bool(true)));
+            ConfigValue::Object(entries)
+        })
+        .collect()
+}
+
+/// Rebuilds each `searchText` that `stored_chunks` left out, from the document's content.
+pub(crate) fn restore_chunks(chunks: &mut [ConfigValue], content: &str) -> Result<(), StageError> {
+    for chunk in chunks {
+        if chunk.get("searchText") != Some(&ConfigValue::Bool(true)) {
+            continue;
+        }
+        let search = chunk_text(chunk, content)
+            .map(crate::chunk::nfkc)
+            .ok_or_else(|| StageError::plain("A saved chunk set does not match its document."))?;
+        if let ConfigValue::Object(entries) = chunk {
+            put(entries, "searchText", Some(ConfigValue::String(search)));
+        }
+    }
+    Ok(())
+}
+
+/// Rebuilds the `searchText` of an expanded transform stage from the expanded source stage, whose
+/// groups and documents are in the same order.
+pub(crate) fn restore_transform(
+    source: &ConfigValue,
+    transform: &mut ConfigValue,
+) -> Result<(), StageError> {
+    let groups = match source.get("groups") {
+        Some(ConfigValue::Array(groups)) => groups.as_slice(),
+        _ => &[],
+    };
+    let ConfigValue::Object(entries) = transform else {
+        return Ok(());
+    };
+    let Some((_, ConfigValue::Array(chunks))) =
+        entries.iter_mut().find(|(name, _)| name == "chunks")
+    else {
+        return Ok(());
+    };
+    for (group, sets) in groups.iter().zip(chunks.iter_mut()) {
+        let documents = match group {
+            ConfigValue::Array(pair) => match pair.get(1) {
+                Some(ConfigValue::Array(documents)) => documents.as_slice(),
+                _ => &[],
+            },
+            _ => &[],
+        };
+        let ConfigValue::Array(sets) = sets else {
+            continue;
+        };
+        for (document, set) in documents.iter().zip(sets.iter_mut()) {
+            if let ConfigValue::Array(set) = set {
+                let content = document
+                    .get("content")
+                    .and_then(ConfigValue::as_str)
+                    .unwrap_or_default();
+                restore_chunks(set, content)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The chunks cached for a document and chunk settings, as stored: `restore_chunks` rebuilds their
+/// `searchText`.
 pub(crate) fn read_chunking(
     corpus: &Connection,
     key: &str,
@@ -365,10 +461,11 @@ pub(crate) fn read_chunking(
 }
 
 /// Saves chunk sets and the chunkings that lead to them, in one transaction. `replace` overwrites
-/// a cached chunking (a forced `chunk.semantic`, whose model output can change).
+/// a cached chunking (a forced `chunk.semantic`, whose model output can change). Each entry has
+/// the document's content, which `stored_chunks` compares with.
 pub(crate) fn write_chunkings(
     corpus: &Connection,
-    entries: &[(String, &[ConfigValue])],
+    entries: &[(String, &[ConfigValue], &str)],
     replace: bool,
 ) -> Result<(), StageError> {
     corpus.execute_batch("BEGIN IMMEDIATE").map_err(sql)?;
@@ -383,10 +480,10 @@ pub(crate) fn write_chunkings(
                 "INSERT OR IGNORE INTO chunkings VALUES (?, ?)"
             })
             .map_err(sql)?;
-        for (key, chunks) in entries {
-            let json = ConfigValue::Array(chunks.to_vec()).to_js_json();
-            let id = sha256_hex(json.as_bytes());
-            set.execute(params![id, json]).map_err(sql)?;
+        for (key, chunks, content) in entries {
+            let id = chunk_set_id(chunks);
+            let stored = ConfigValue::Array(stored_chunks(chunks, content)).to_js_json();
+            set.execute(params![id, stored]).map_err(sql)?;
             chunking.execute(params![chunk_key(key), id]).map_err(sql)?;
         }
         Ok(())

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import { Dunlin } from 'dunlin';
-import { originalForDigest, readOriginal } from '../../rag/authoring/uploads.mjs';
+import { originalForDigest, readOriginal } from '../originals.mjs';
 
 const runNode = promisify(execFile);
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));

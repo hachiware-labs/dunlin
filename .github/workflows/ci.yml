@@ -54,6 +54,8 @@ jobs:
       - run: npm --prefix tools/rag ci
       - name: Verify the CLI and project workflows
         run: npm --prefix tools/rag test
+      - name: Verify the document import tool
+        run: npm --prefix tools/import test
       - run: npm run test:package
       - uses: actions/upload-artifact@v4
         with:

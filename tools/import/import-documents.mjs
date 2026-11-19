@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { load } from 'cheerio';
 import { Dunlin } from 'dunlin';
-import { prepareDocument } from '../rag/authoring/uploads.mjs';
+import { prepareDocument } from './originals.mjs';
 
 const documentLimit = 1024 * 1024;
 const htmlLimit = 4 * documentLimit;

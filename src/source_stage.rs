@@ -295,11 +295,7 @@ mod tests {
 
     struct NoHost;
 
-    impl Host for NoHost {
-        fn parse(&self, _file: &LoadFile, _bytes: &[u8]) -> Result<ConfigValue, String> {
-            Err("unsupported".into())
-        }
-    }
+    impl Host for NoHost {}
 
     #[test]
     fn records_the_stage_and_reuses_it() {

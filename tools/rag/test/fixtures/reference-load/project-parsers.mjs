@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { basename, extname, join, matchesGlob } from 'node:path';
 import { z } from 'zod';
 
-import { resolveConfigValue } from '../../../config.mjs';
-import { isPlainDocument } from '../../../ingest-files.mjs';
+import { resolveConfigValue } from '../cli-reference/config.mjs';
+import { isPlainDocument } from '../cli-reference/ingest-files.mjs';
 
 export const officeExtensions = new Set(['.docx', '.xlsx', '.pptx']);
 export const htmlExtensions = new Set(['.html', '.htm']);

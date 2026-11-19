@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 import { Dunlin } from 'dunlin';
 
-import { parserRoutes, routeFiles } from '../project-parsers.mjs';
+import { parserRoutes, routeFiles } from './fixtures/cli-reference/project-parsers.mjs';
 import { scanFolder as referenceScan } from './fixtures/reference-load/project-content.mjs';
 import { parserKind, resolveParser } from './fixtures/reference-load/project-parsers.mjs';
 

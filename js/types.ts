@@ -2,6 +2,21 @@ export interface OperationOptions {
   signal?: AbortSignal | undefined;
 }
 
+/** Where the CLI runs, for `Dunlin.runCli`. */
+export interface CliRunOptions {
+  /** `process.execPath` and the launcher script, which `serve --print-config` reports. */
+  execPath: string;
+  cli: string;
+  /** The package root, which holds `dist/tools` and `tools/rag/parsers`. */
+  package: string;
+  /** The `tools` folder of the platform package, when it is installed. */
+  nativeTools?: string | undefined;
+  /** `os.homedir()`. */
+  home: string;
+  serving?(active: boolean): void;
+  opened?(path: string): void;
+}
+
 export type CorpusBackend = 'sqlite' | 'json';
 
 export interface OpenOptions extends OperationOptions {
@@ -150,8 +165,8 @@ export interface LoadCorpusRequest {
   files: LoadCorpusFile[];
 }
 
+/** Hears how a load progresses. Every file kind is read in Rust (spec 28.13 step 6a). */
 export interface LoadCorpusHost {
-  parse(file: LoadCorpusFile, bytes: Buffer): Promise<unknown> | unknown;
   progress?(completed: number): void;
 }
 

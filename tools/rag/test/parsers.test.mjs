@@ -11,8 +11,8 @@ import { promisify } from 'node:util';
 import { Dunlin } from 'dunlin';
 import { parse, stringify } from 'yaml';
 
-import { ragTemplate, validateRag } from '../project-modules.mjs';
-import { parserRoutes, routeFiles } from '../project-parsers.mjs';
+import { ragTemplate, validateRag } from './fixtures/cli-reference/project-modules.mjs';
+import { parserRoutes, routeFiles } from './fixtures/cli-reference/project-parsers.mjs';
 
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const fixture = fileURLToPath(new URL('./fixtures/parser.mjs', import.meta.url));

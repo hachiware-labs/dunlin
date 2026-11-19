@@ -5,8 +5,10 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { projectCommands } from '../tools/rag/project.mjs';
-import { describeModules } from '../tools/rag/project-modules.mjs';
+import { Dunlin } from 'dunlin';
+
+const projectCommands = Dunlin.cliCommands();
+const describeModules = () => Dunlin.describeModules();
 
 const docs = new URL('../docs/', import.meta.url);
 const cli = fileURLToPath(new URL('../tools/rag/cli.mjs', import.meta.url));

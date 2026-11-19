@@ -1,10 +1,10 @@
 // The JavaScript configuration validation that the Rust validator replaced, copied for tests.
 import { readFile } from 'node:fs/promises';
 
-import { atomicWrite, revision, withWriteLock } from '../../../authoring/files.mjs';
-import { lightonModel } from '../../../parsers/catalog.mjs';
-import { managedOcrVersion, setupManagedOcr } from '../../../parsers/lighton-setup.mjs';
-import { hannoy, installIndexTool } from '../../../project-index-tool.mjs';
+import { atomicWrite, revision, withWriteLock } from '../cli-reference/authoring/files.mjs';
+import { lightonModel } from '../cli-reference/parsers/catalog.mjs';
+import { managedOcrVersion, setupManagedOcr } from '../cli-reference/parsers/lighton-setup.mjs';
+import { hannoy, installIndexTool } from '../cli-reference/project-index-tool.mjs';
 import { isSearchProject } from './project-serving.mjs';
 
 export const toolsCatalog = new Map([

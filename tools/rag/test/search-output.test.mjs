@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 import { Dunlin } from 'dunlin';
 
-import { chunkCorpus } from '../project-content.mjs';
+import { chunkCorpus } from './fixtures/cli-reference/project-content.mjs';
 import { sourceRange } from './fixtures/source-range-reference.mjs';
 
 const content = [

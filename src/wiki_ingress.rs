@@ -403,18 +403,13 @@ fn list_files(directory: &str, found: &mut Vec<String>) -> Result<(), StageError
     Ok(())
 }
 
-/// The host of a load: JavaScript parsers, and progress recorded as `extracting_sources`.
+/// The progress of a load, recorded as `extracting_sources`.
 struct LoadHost<'a> {
-    inner: &'a dyn Host,
     tracker: &'a Tracker,
     total: usize,
 }
 
 impl Host for LoadHost<'_> {
-    fn parse(&self, file: &LoadFile, bytes: &[u8]) -> Result<ConfigValue, String> {
-        self.inner.parse(file, bytes)
-    }
-
     fn progress(&self, completed: usize) {
         self.tracker
             .progress("extracting_sources", Some((completed, self.total)));
@@ -433,7 +428,6 @@ pub(crate) fn ingress(
     project: &Project<'_>,
     connection: &Connection,
     tracker: &Tracker,
-    host: &dyn Host,
     warnings: &mut Vec<ConfigValue>,
 ) -> Result<ConfigValue, StageError> {
     let request = project.request;
@@ -615,22 +609,15 @@ pub(crate) fn ingress(
             .map_err(|error| StageError::plain(format!("Invalid load request: {error}")))?;
     load_request.files = loading.iter().map(|(_, file)| file.clone()).collect();
     tracker.progress("extracting_sources", Some((0, total)));
-    let loaded = crate::source_load::load(
-        &load_request,
-        &LoadHost {
-            inner: host,
-            tracker,
-            total,
-        },
-        project.cancel,
-    )
-    .map_err(|error| {
-        if error.aborted {
-            StageError::aborted()
-        } else {
-            StageError::plain(error.message)
-        }
-    })?;
+    let loaded =
+        crate::source_load::load(&load_request, &LoadHost { tracker, total }, project.cancel)
+            .map_err(|error| {
+                if error.aborted {
+                    StageError::aborted()
+                } else {
+                    StageError::plain(error.message)
+                }
+            })?;
     warnings.extend(loaded.warnings);
     let mut by_index: HashMap<usize, ConfigValue> = loading
         .iter()

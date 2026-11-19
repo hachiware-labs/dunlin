@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { loadCorpus } from '../project-content.mjs';
-import { defaultRoutes } from '../project-parsers.mjs';
+import { loadCorpus } from './fixtures/cli-reference/project-content.mjs';
+import { defaultRoutes } from './fixtures/cli-reference/project-parsers.mjs';
 
 async function fixture(t, files) {
   const root = await mkdtemp(join(tmpdir(), 'dunlin-load-'));

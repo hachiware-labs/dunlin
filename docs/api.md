@@ -189,3 +189,7 @@ const kb = await Dunlin.open('./knowledge');
 const server = await kb.serveMcp({ transport: 'stdio' });
 // アプリケーションの終了時に await server.close()、続けて await kb.close()。
 ```
+
+## Node.js から CLI を実行する
+
+`dunlin` コマンドの入口は、`Dunlin.runCli(args, options)` を呼ぶだけの起動役です。コマンドの解釈、実行、表示はすべて Rust で行います。`args` には `process.argv.slice(2)` と同じ形の引数を渡します。結果は標準出力と標準エラーに書かれ、戻り値は終了コードです。`options` には、`serve --print-config` が示す `execPath` と `cli`、パッケージのフォルダ（`package`）、ホームディレクトリ（`home`）を渡します。`serving(active)` はサーバーの開始と終了を知らせるので、その間だけ SIGINT と SIGTERM で `signal` を止めます。コマンドと使用法の一覧は `Dunlin.cliCommands()` で読めます。

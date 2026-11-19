@@ -15,7 +15,7 @@ use crate::eval_stage::open_state;
 use crate::index_stage::{assign, items, object, sql, string_field, text, truthy};
 use crate::node_path;
 use crate::registry::js_space;
-use crate::source_load::{Host, sha256_hex};
+use crate::source_load::sha256_hex;
 use crate::source_stage::iso_now;
 use crate::transform_stage::StageError;
 use crate::wiki_project::{
@@ -214,11 +214,7 @@ pub(crate) fn read_only(command: &str, values: &ConfigValue) -> bool {
 }
 
 /// Runs a command: as recorded work under the execution lock when it changes the project.
-pub fn run(
-    request: &WikiRequest,
-    host: &dyn Host,
-    cancel: &Cancellation,
-) -> Result<WikiOutcome, StageError> {
+pub fn run(request: &WikiRequest, cancel: &Cancellation) -> Result<WikiOutcome, StageError> {
     let command = request.command.as_str();
     let read_only = read_only(command, &request.values);
     let connection = open_state(&request.state, read_only)?;
@@ -243,12 +239,12 @@ pub fn run(
                 } else {
                     lock(request.lock.as_deref())?
                 };
-                execute(&project, &connection, tracker, host, &mut warnings)
+                execute(&project, &connection, tracker, &mut warnings)
             },
             ConfigValue::clone,
         )?
     } else {
-        execute(&project, &connection, &Tracker::none(), host, &mut warnings)?
+        execute(&project, &connection, &Tracker::none(), &mut warnings)?
     };
     Ok(WikiOutcome { output, warnings })
 }
@@ -258,7 +254,6 @@ pub(crate) fn execute(
     project: &Project<'_>,
     connection: &Connection,
     tracker: &Tracker,
-    host: &dyn Host,
     warnings: &mut Vec<ConfigValue>,
 ) -> Result<ConfigValue, StageError> {
     let command = project.request.command.as_str();
@@ -289,7 +284,7 @@ pub(crate) fn execute(
         "instruct" => instruct(project, connection, tracker),
         "query" => crate::wiki_ingress::query(project, connection, tracker),
         "verify" => crate::wiki_ingress::verify(project, connection, tracker),
-        "ingress" => crate::wiki_ingress::ingress(project, connection, tracker, host, warnings),
+        "ingress" => crate::wiki_ingress::ingress(project, connection, tracker, warnings),
         _ => Err(coded(2, "INVALID_ARGUMENT", "Unknown authoring command.")),
     }
 }

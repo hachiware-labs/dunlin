@@ -7,10 +7,10 @@ import { pathToFileURL } from 'node:url';
 
 import { Dunlin } from 'dunlin';
 
-import { revision } from '../../../authoring/files.mjs';
-import { listFiles } from '../../../ingest-files.mjs';
-import { convertOffice } from '../../../parsers/documents.mjs';
-import { managedOcrVersion } from '../../../parsers/lighton-setup.mjs';
+import { revision } from '../cli-reference/authoring/files.mjs';
+import { listFiles } from '../cli-reference/ingest-files.mjs';
+import { convertOffice } from '../cli-reference/parsers/documents.mjs';
+import { managedOcrVersion } from '../cli-reference/parsers/lighton-setup.mjs';
 import { commandIdentity, commandVersion, defaultRoutes, parserKind, parseWithCommand, resolveParser } from './project-parsers.mjs';
 // Trials moved to Rust (spec 28.11 step 4c). Outside a trial these passed the signal through and checked nothing.
 const trialCheckpoint = () => {};

@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { loadCorpus } from '../project-content.mjs';
-import { defaultRoutes, parserRoutes } from '../project-parsers.mjs';
+import { loadCorpus } from './fixtures/cli-reference/project-content.mjs';
+import { defaultRoutes, parserRoutes } from './fixtures/cli-reference/project-parsers.mjs';
 import { loadCorpus as referenceLoad } from './fixtures/reference-load/project-content.mjs';
 
 const fixture = fileURLToPath(new URL('./fixtures/parser.mjs', import.meta.url));

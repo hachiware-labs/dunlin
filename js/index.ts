@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 import { DunlinError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, WikiCommandRequest, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvalDataRequest, EvalDataOutcome, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
+  ChunkDocument, ChunkOptions, CliRunOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, WikiCommandRequest, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvalDataRequest, EvalDataOutcome, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk,
 } from './types.js';
@@ -85,7 +85,11 @@ interface NativeBinding {
   serveProject(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   matchesGlob(path: string, pattern: string): boolean;
   renderMarkdown(markdown: string): string;
-  wiki(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
+  stringifyYaml(json: string): string;
+  runCli(args: string[], options: { execPath: string; cli: string; package: string; nativeTools?: string | undefined; home: string },
+    host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<number>;
+  cliCommands(): string[][];
+  wiki(request: string, cancel: NativeCancellation): Promise<string>;
   ensureWiki(state: string): void;
   wikiServe(request: string, host: (...args: unknown[]) => void, cancel: NativeCancellation): Promise<string>;
   readModuleArgs(name: string, args: string): string;
@@ -138,7 +142,7 @@ function hostCallback(host: Partial<LoadCorpusHost> & IndexStageHost & Partial<T
         : kind === 'search_models' ? host.searchModels!(JSON.parse(args) as Record<string, unknown>)
         : kind === 'mcp_search' ? host.mcpSearch!(JSON.parse(args) as McpSearchArguments)
         : kind === 'mcp_read' ? host.mcpRead!(JSON.parse(args) as Evidence)
-        : host.parse!(JSON.parse(args) as LoadCorpusFile, bytes))
+        : Promise.reject(new Error('Unknown host call: ' + kind)) as Promise<unknown>)
       .then((result) => native().completeHostCall(id, configJson(result), null),
         (error: unknown) => native().completeHostCall(id, null, error instanceof Error ? error.message : String(error)));
   };
@@ -381,10 +385,10 @@ export class Dunlin {
 
   /**
    * Load source files for the source stage: read, hash, look up the extraction cache in state.sqlite,
-   * decode text files, store originals and cache rows. Files of other kinds go to `host.parse`,
-   * which returns `{ content, format, locations?, parser? }`. Documents keep the input order.
+   * and parse every file kind (text, HTML, Office, PDF, OCR and loader.command), store originals and
+   * cache rows. Documents keep the input order.
    */
-  static async loadCorpus(request: LoadCorpusRequest, host: LoadCorpusHost, { signal }: OperationOptions = {}): Promise<LoadedCorpus> {
+  static async loadCorpus(request: LoadCorpusRequest, host: LoadCorpusHost = {}, { signal }: OperationOptions = {}): Promise<LoadedCorpus> {
     const text = await cancellable(signal, (cancel) => native().loadCorpus(JSON.stringify(request), hostCallback(host), cancel));
     return JSON.parse(text) as LoadedCorpus;
   }
@@ -394,7 +398,7 @@ export class Dunlin {
    * loadCorpus does, compute the stage ID and record the stage in state.sqlite. Stops before
    * loading when a module rejects unsupported files and skipUnsupported is not set.
    */
-  static async runSource(request: SourceStageRequest, host: LoadCorpusHost, { signal }: OperationOptions = {}): Promise<SourceStageOutcome> {
+  static async runSource(request: SourceStageRequest, host: LoadCorpusHost = {}, { signal }: OperationOptions = {}): Promise<SourceStageOutcome> {
     const text = await cancellable(signal, (cancel) => native().runSource(configJson(request), hostCallback(host), cancel));
     return JSON.parse(text) as SourceStageOutcome;
   }
@@ -540,12 +544,11 @@ export class Dunlin {
 
   /**
    * Run a command of a Wiki or PARA project (spec 28.12): `ingress`, `query`, `verify`, `archive`,
-   * `undo`, `issue`, `cite`, `rules`, `instruct`, `save-answer` or `progress`. `host.parse` reads
-   * the HTML and Office files `ingress` loads. Failures resolve to `{ status: "failed", error }`.
+   * `undo`, `issue`, `cite`, `rules`, `instruct`, `save-answer` or `progress`. Failures resolve to `{ status: "failed", error }`.
    */
-  static async wiki(request: WikiCommandRequest, host: Partial<LoadCorpusHost> = {}, { signal }: OperationOptions = {}): Promise<
+  static async wiki(request: WikiCommandRequest, { signal }: OperationOptions = {}): Promise<
     { status: 'done'; output: unknown; warnings: Record<string, unknown>[] } | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } }> {
-    const text = await cancellable(signal, (cancel) => native().wiki(configJson(request), hostCallback(host), cancel));
+    const text = await cancellable(signal, (cancel) => native().wiki(configJson(request), cancel));
     return JSON.parse(text) as { status: 'done'; output: unknown; warnings: Record<string, unknown>[] } | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } };
   }
 
@@ -567,6 +570,31 @@ export class Dunlin {
     } catch (error) {
       throw translateNativeError(error);
     }
+  }
+
+  /**
+   * Runs the `dunlin` CLI in Rust with `process.argv.slice(2)` (spec 28.13 step 6c). It prints the
+   * result and resolves to the exit code. `serving` hears when a server starts and stops, and
+   * `opened` each index a server opens. Aborting `signal` stops a running server.
+   */
+  static runCli(args: string[], options: CliRunOptions, { signal }: OperationOptions = {}): Promise<number> {
+    const { serving, opened, nativeTools, ...paths } = options;
+    const host = (...raw: unknown[]) => {
+      const [, kind, value] = (raw.length === 1 && Array.isArray(raw[0]) ? raw[0] : raw) as [number, string, string];
+      if (kind === 'serving') serving?.(value === 'true');
+      else if (kind === 'opened') opened?.(JSON.parse(value) as string);
+    };
+    return cancellable(signal, (cancel) => native().runCli(args, { ...paths, ...(nativeTools !== undefined && { nativeTools }) }, host, cancel));
+  }
+
+  /** The commands of the CLI and their usage, in order (spec 28.13 step 6c). */
+  static cliCommands(): Record<string, string> {
+    return Object.fromEntries(native().cliCommands());
+  }
+
+  /** A value as YAML, as the `yaml` package's `stringify` writes it (configuration files). */
+  static stringifyYaml(value: unknown): string {
+    return native().stringifyYaml(configJson(value));
   }
 
   /** Markdown as HTML, as markdown-it 15 renders it with `{ html: false }` (Wiki and PARA pages). */

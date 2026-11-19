@@ -574,48 +574,6 @@ struct JsHost {
 }
 
 impl crate::source_load::Host for JsHost {
-    fn parse(
-        &self,
-        file: &crate::source_load::LoadFile,
-        bytes: &[u8],
-    ) -> std::result::Result<crate::config_value::ConfigValue, String> {
-        use napi::threadsafe_function::ThreadsafeFunctionCallMode;
-        let id = NEXT_HOST_CALL.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        host_calls()
-            .lock()
-            .map_err(|_| "Could not register the parser call".to_owned())?
-            .insert(id, sender);
-        let name = std::path::Path::new(&file.file)
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let args = serde_json::json!({
-            "kind": file.kind,
-            "name": name,
-            "file": file.file,
-            "id": file.id,
-            "objectId": file.object_id,
-            "route": file.route,
-        })
-        .to_string();
-        let status = self.function.call(
-            (id, "parse".into(), args, Buffer::from(bytes.to_vec())),
-            ThreadsafeFunctionCallMode::Blocking,
-        );
-        if status != Status::Ok {
-            if let Ok(mut calls) = host_calls().lock() {
-                calls.remove(&id);
-            }
-            return Err("Could not call the JavaScript parser".into());
-        }
-        let text = receiver
-            .recv()
-            .map_err(|_| "The JavaScript parser stopped".to_owned())??;
-        serde_json::from_str(&text)
-            .map_err(|_| "The JavaScript parser returned invalid JSON".to_owned())
-    }
-
     fn progress(&self, completed: usize) {
         use napi::threadsafe_function::ThreadsafeFunctionCallMode;
         self.function.call(
@@ -1129,26 +1087,22 @@ pub fn run_transform<'env>(
     Ok(promise)
 }
 
-/// Runs a command of a Wiki or PARA project (see `wiki_commands`). `host(id, kind, args, bytes)`
-/// parses the HTML and Office files `ingress` reads. Resolves to
+/// Runs a command of a Wiki or PARA project (see `wiki_commands`). Resolves to
 /// `{ status: "done", output, warnings }` or a failed status.
 #[napi]
 pub fn wiki<'env>(
     env: &'env Env,
     request: String,
-    host: Function<'env, HostArgs, Unknown<'static>>,
     cancel: &NativeCancellation,
 ) -> Result<Object<'env>> {
-    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
     let (deferred, promise) = env.create_deferred::<String, _>()?;
     let cancel = cancel.0.clone();
     std::thread::spawn(move || {
-        let host = JsHost::new(function);
         let outcome = serde_json::from_str::<crate::wiki_project::WikiRequest>(&request)
             .map_err(|error| {
                 crate::embed::EmbedError::plain(format!("Invalid Wiki request: {error}"))
             })
-            .and_then(|request| crate::wiki_commands::run(&request, &host, &cancel));
+            .and_then(|request| crate::wiki_commands::run(&request, &cancel));
         let text = match outcome {
             Ok(outcome) => format!(
                 "{{\"status\":\"done\",\"output\":{},\"warnings\":{}}}",
@@ -1415,6 +1369,14 @@ pub fn route_files(request: String) -> Result<String> {
 #[napi]
 pub fn matches_glob(path: String, pattern: String) -> bool {
     crate::glob::matches(&path, &pattern)
+}
+
+/// JSON as YAML, as the `yaml` package's `stringify` writes it (spec 28.13 step 6b).
+#[napi]
+pub fn stringify_yaml(json: String) -> Result<String> {
+    let value: crate::config_value::ConfigValue = serde_json::from_str(&json)
+        .map_err(|_| native_error(crate::Error::Invalid("Invalid JSON")))?;
+    Ok(crate::yaml_emit::stringify(&value))
 }
 
 /// Markdown as HTML, as markdown-it renders it with `{ html: false }` (spec 28.12 step 5a).
@@ -2069,4 +2031,90 @@ fn evaluation_options<T: serde::de::DeserializeOwned>(options: &str) -> crate::R
 
 fn native_error(error: crate::Error) -> Error {
     Error::new(Status::GenericFailure, format!("{}|{error}", error.code()))
+}
+
+/// Where the CLI runs, from the launcher (spec 28.13 step 6c).
+#[napi(object)]
+pub struct CliOptions {
+    /// `process.execPath` and the launcher script, for `serve --print-config`.
+    pub exec_path: String,
+    pub cli: String,
+    /// The package root, which holds `dist/tools` and `tools/rag/parsers`.
+    pub package: String,
+    /// The `tools` folder of the platform package, when it is installed.
+    pub native_tools: Option<String>,
+    /// `os.homedir()`.
+    pub home: String,
+}
+
+struct CliHost(HostFunction);
+
+impl crate::cli_run::CliEvents for CliHost {
+    fn serving(&self, active: bool) {
+        use napi::threadsafe_function::ThreadsafeFunctionCallMode;
+        self.0.call(
+            (
+                0,
+                "serving".into(),
+                active.to_string(),
+                Buffer::from(Vec::new()),
+            ),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+    }
+
+    fn opened(&self, path: &str) {
+        use napi::threadsafe_function::ThreadsafeFunctionCallMode;
+        self.0.call(
+            (
+                0,
+                "opened".into(),
+                crate::config_value::ConfigValue::String(path.into()).to_js_json(),
+                Buffer::from(Vec::new()),
+            ),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+    }
+}
+
+/// Runs the `dunlin` CLI with `process.argv.slice(2)` (see `cli_run`). It prints the result and
+/// resolves to the exit code. `host(id, kind, args)` hears `serving` (`true` while a server runs,
+/// when SIGINT and SIGTERM should abort `cancel`) and `opened` (an index a server opened).
+#[napi]
+pub fn run_cli<'env>(
+    env: &'env Env,
+    args: Vec<String>,
+    options: CliOptions,
+    host: Function<'env, HostArgs, Unknown<'static>>,
+    cancel: &NativeCancellation,
+) -> Result<Object<'env>> {
+    let function: HostFunction = host.build_threadsafe_function::<HostArgs>().build()?;
+    let (deferred, promise) = env.create_deferred::<u32, _>()?;
+    let cancel = cancel.0.clone();
+    std::thread::spawn(move || {
+        let cwd = std::env::current_dir()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let environment = crate::cli_tools::CliEnv {
+            cwd,
+            home: options.home,
+            package: options.package,
+            native_tools: options.native_tools,
+            exec_path: options.exec_path,
+            cli: options.cli,
+        };
+        let events: Arc<dyn crate::cli_run::CliEvents> = Arc::new(CliHost(function));
+        let code = crate::cli_run::run(args, &environment, &cancel, events);
+        deferred.resolve(move |_| Ok(u32::from(code)));
+    });
+    Ok(promise)
+}
+
+/// The usage line of every CLI command, in order, as `[name, usage]`.
+#[napi]
+pub fn cli_commands() -> Vec<Vec<String>> {
+    crate::cli_args::COMMANDS
+        .iter()
+        .map(|(name, usage)| vec![(*name).to_owned(), (*usage).to_owned()])
+        .collect()
 }

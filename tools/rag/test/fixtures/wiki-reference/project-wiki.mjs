@@ -8,14 +8,14 @@ import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } fr
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-import { resolveApiKey, resolveConfigValue } from '../../../config.mjs';
-import { createGenerator } from '../../../models.mjs';
-import { listFiles } from '../../../ingest-files.mjs';
-import { loadCorpus, unsupportedFiles } from '../../../project-content.mjs';
-import { defaultRoutes } from '../../../project-parsers.mjs';
+import { resolveApiKey, resolveConfigValue } from '../cli-reference/config.mjs';
+import { createGenerator } from '../cli-reference/models.mjs';
+import { listFiles } from '../cli-reference/ingest-files.mjs';
+import { loadCorpus, unsupportedFiles } from '../cli-reference/project-content.mjs';
+import { defaultRoutes } from '../cli-reference/project-parsers.mjs';
 import { categories, idParts, readText, revision } from './files.mjs';
 import { escapeHtml, renderMarkdown, renderPublication, contentSecurityPolicy } from './html.mjs';
-import { checkTools, projectOcr } from '../../../project-tools.mjs';
+import { checkTools, projectOcr } from '../cli-reference/project-tools.mjs';
 import { sharedOriginalForDigest, prepareDocument } from './uploads.mjs';
 import { ensureWikiInspection, inspectWikiContent } from './project-wiki-inspection.mjs';
 import { ensureWikiWork, latestWork, queueWork, trackWork, workStatus } from './project-wiki-work.mjs';

@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import { randomUUID } from 'node:crypto';
 
-import { revision } from '../../authoring/files.mjs';
+import { revision } from './cli-reference/authoring/files.mjs';
 
 class EvaluationError extends Error {
   constructor(exitCode, code, message) {

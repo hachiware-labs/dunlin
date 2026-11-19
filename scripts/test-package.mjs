@@ -38,7 +38,9 @@ async function installAndSearch(name, tarballs) {
   npm(['install', ...options, ...tarballs], preparation);
   npm(['install', '--offline', ...options, ...tarballs], consumer);
   const installed = await readdir(join(consumer, 'node_modules'));
-  assert.ok(installed.includes('zod'));
+  assert.ok(installed.includes('dunlin'));
+  // The CLI runs in Rust: the package needs no JavaScript libraries at run time (spec 28.13).
+  for (const name of ['cheerio', 'docling.rs', 'markdown-it', 'yaml', 'zod']) assert.ok(!installed.includes(name), name);
 
   await writeFile(join(consumer, 'source.md'), '# 認証\nOAuthの根拠\n[Policy](dunlin://policies/policy.txt)');
   await writeFile(join(consumer, 'policy.txt'), 'Linked policy evidence');

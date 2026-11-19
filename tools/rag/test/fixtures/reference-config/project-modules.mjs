@@ -5,11 +5,11 @@ import { resolve, dirname } from 'node:path';
 
 import { Dunlin } from 'dunlin';
 
-import { resolveConfigValue } from '../../../config.mjs';
+import { resolveConfigValue } from '../cli-reference/config.mjs';
 import { checkTools } from './project-tools.mjs';
 import { checkTrialLimits, trialCheckpoint } from './project-trials.mjs';
 import { isSearchProject, serveTemplate, validateServe } from './project-serving.mjs';
-import { projectModel } from '../../../project-global.mjs';
+import { projectModel } from '../cli-reference/project-global.mjs';
 import { checkCommand } from './project-parsers.mjs';
 
 // The module registry (names, roles, argument definitions and descriptions) is in Rust (spec 26.5).

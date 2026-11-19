@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
-import { constructionStages, moduleSettings, restoreModules, validateRag } from '../project-modules.mjs';
+import { constructionStages, moduleSettings, restoreModules, validateRag } from './fixtures/cli-reference/project-modules.mjs';
 import { referenceEvaluate, referenceEvidenceMaps } from './fixtures/eval-reference.mjs';
 import { referenceOpen } from './fixtures/search-reference.mjs';
 

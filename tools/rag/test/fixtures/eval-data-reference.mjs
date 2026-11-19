@@ -5,9 +5,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 
 import { stringify } from 'yaml';
 import { z } from 'zod';
-import { resolveApiKey, resolveConfigValue } from '../../config.mjs';
-import { createGenerator } from '../../models.mjs';
-import { atomicWrite, revision, withWriteLock } from '../../authoring/files.mjs';
+import { resolveApiKey, resolveConfigValue } from './cli-reference/config.mjs';
+import { createGenerator } from './cli-reference/models.mjs';
+import { atomicWrite, revision, withWriteLock } from './cli-reference/authoring/files.mjs';
 
 class EvaluationError extends Error {
   constructor(exitCode, code, message) {

@@ -7,8 +7,8 @@ import { join } from 'node:path';
 
 import { createMcpHandler } from '@modelcontextprotocol/server';
 
-import { parseConfig, validateRag } from '../../project-modules.mjs';
-import { serveAddress } from '../../project-serving.mjs';
+import { parseConfig, validateRag } from './cli-reference/project-modules.mjs';
+import { serveAddress } from './cli-reference/project-serving.mjs';
 import { referenceAnswer, referenceAnswerModel } from './answer-reference.mjs';
 import { knowledgeServer } from './mcp-reference.mjs';
 import { referenceServeRagHttp } from './rag-http-reference.mjs';

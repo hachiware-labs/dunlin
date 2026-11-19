@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
-import { validateRag } from '../project-modules.mjs';
+import { validateRag } from './fixtures/cli-reference/project-modules.mjs';
 import { referenceAnswer, referenceAnswerModel } from './fixtures/answer-reference.mjs';
 import { referenceOpen, referenceSearchJson } from './fixtures/search-reference.mjs';
 

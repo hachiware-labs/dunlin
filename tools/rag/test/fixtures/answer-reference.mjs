@@ -3,9 +3,9 @@
 // version sends the same requests and returns the same answers. Copied from project-answer.mjs.
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { resolveApiKey, resolveConfigValue } from '../../config.mjs';
-import { createGenerator } from '../../models.mjs';
-import { runModules } from '../../project-modules.mjs';
+import { resolveApiKey, resolveConfigValue } from './cli-reference/config.mjs';
+import { createGenerator } from './cli-reference/models.mjs';
+import { runModules } from './cli-reference/project-modules.mjs';
 
 const facts = z.strictObject({ facts: z.array(z.strictObject({
   text: z.string().min(1), evidence_ids: z.array(z.number().int().min(1)).min(1),

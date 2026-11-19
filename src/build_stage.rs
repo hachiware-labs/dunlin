@@ -1100,7 +1100,6 @@ pub fn tag(request: &TagRequest, host: &dyn TagHost) -> Result<ConfigValue, Stag
 mod tests {
     use super::*;
     use crate::embed::Charge;
-    use crate::source_load::LoadFile;
 
     const SCHEMA: &str = "CREATE TABLE stage_outputs (stage TEXT NOT NULL, id TEXT NOT NULL, manifest TEXT NOT NULL, PRIMARY KEY (stage, id));
         CREATE TABLE latest_stage (stage TEXT PRIMARY KEY, id TEXT NOT NULL);
@@ -1122,11 +1121,7 @@ mod tests {
 
     struct Answers;
 
-    impl Host for Answers {
-        fn parse(&self, _file: &LoadFile, _bytes: &[u8]) -> Result<ConfigValue, String> {
-            Err("No parsers in tests".into())
-        }
-    }
+    impl Host for Answers {}
 
     impl Charge for Answers {
         fn charge(&self, _bytes: usize) -> Result<(), String> {

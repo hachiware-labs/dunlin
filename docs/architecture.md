@@ -1,13 +1,15 @@
 # Dunlin の実装構成
 
-Node.js のプロジェクト CLI が `Dunlinfile.yaml` を読み、処理順とモデル接続を決めます。索引・検索・コーパスの中核は Rust で実装し、TypeScript の API を通じて呼び出します。
+CLI のコマンドの解釈から、`Dunlinfile.yaml` の読み込みと検査、各段階の実行、表示までを Rust で実装しています。npm の入口（`tools/rag/cli.mjs`）は、Node.js API の `Dunlin.runCli` を呼んで終了コードを返すだけの起動役です。
 
 | 部分 | 担当 |
 | --- | --- |
-| `tools/rag/cli.mjs`、`project.mjs` | コマンドの解析、対象プロジェクトの特定、構築・試行・採用、HTTP・MCP の起動 |
-| `project-modules.mjs`、`project-content.mjs` | YAML の各区切りの検証、モジュール順、入力の走査、抽出とチャンク化 |
-| `project-eval.mjs`、`project-dictionary.mjs` | 評価データを選んだときの設定の書き換え、ユーザー辞書の提案と候補設定への反映。評価、引用の位置対応、レポートの比較は Rust（`src/eval_*.rs`） |
-| `project-wiki.mjs` | Wiki・PARA の設定の検証。ページの生成、引用の検証、原本・出典・ページ版の管理、HTML 化、作業の進捗、画面は Rust（`src/wiki_*.rs`、`src/markdown.rs`） |
+| `tools/rag/cli.mjs` | npm の入口。引数を Rust に渡し、サーバーの動作中だけ SIGINT と SIGTERM で止める |
+| `src/cli_*.rs` | コマンドの解釈と表示、対象プロジェクトの特定、設定の読み込みと検査（Wiki・PARA を含む）、初期化、利用者設定、ツールと OCR の準備、辞書 |
+| `src/registry.rs`、`src/config_check.rs`、`src/yaml_*.rs` | モジュールの登録表と引数の検査、`Dunlinfile.yaml` の読み書き |
+| `src/*_stage.rs`、`src/eval_*.rs`、`src/serve.rs` | 構築の段階、検索、評価とレポート、試行と採用、HTTP・MCP の提供 |
+| `src/source_load.rs`、`src/html_text.rs`、`src/office.rs` | 原本の読み込みとパース（テキスト、HTML、Office、PDF、OCR、外部コマンド） |
+| `src/wiki_*.rs`、`src/markdown.rs` | Wiki・PARA のページの生成、引用の検証、原本・出典・ページ版の管理、HTML 化、作業の進捗、画面 |
 | `js/index.ts`、`src/node.rs` | TypeScript の API と N-API 境界。Rust の索引処理や検索は非同期のワーカーから実行 |
 | `src/engine.rs`、`src/japanese.rs`、`src/corpus.rs` | Tantivy の BM25、Lindera/IPADIC のトークナイザ、版を持つコーパス |
 | `src/vector.rs`、`tools/hannoy/` | `f32` の厳密ベクトル検索と、選択時に使う任意の近似ベクトル索引 |

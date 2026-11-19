@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
 import { Dunlin } from 'dunlin';
-import { validateRag } from '../project-modules.mjs';
+import { validateRag } from './fixtures/cli-reference/project-modules.mjs';
 import { referenceDictionaryEvaluation, referenceDictionaryMisses, referenceEvaluationStatus, referenceReports } from './fixtures/report-reference.mjs';
 import { referenceOpen } from './fixtures/search-reference.mjs';
 

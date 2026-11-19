@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import { Dunlin } from 'dunlin';
 
-import { ragTemplate, wikiTemplate, writeTemplate } from '../project-modules.mjs';
+import { ragTemplate, wikiTemplate, writeTemplate } from './fixtures/cli-reference/project-modules.mjs';
 import { referenceParseConfig } from './fixtures/config-parse-reference.mjs';
 
 const samples = [

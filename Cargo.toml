@@ -15,6 +15,12 @@ node = ["dep:http-body-util", "dep:hyper", "dep:hyper-util", "dep:memmap2", "dep
 blake3 = "1"
 csv = "1.4"
 dunce = "1"
+# Office documents (.docx, .xlsx, .pptx) to Markdown, as the docling.rs npm package converted them.
+docling = { version = "=2.67.1", default-features = false }
+docling-core = { version = "=2.67.1", default-features = false }
+# HTML pages, with the parser and tree docling uses.
+ego-tree = "0.11"
+scraper = { version = "0.27", default-features = false }
 # The HTTP server of serve (spec 28.10 step 3c).
 http-body-util = { version = "0.1", optional = true }
 hyper = { version = "1", optional = true, features = ["server", "http1"] }

@@ -9,7 +9,7 @@ const protocol = 1;
 const toolError = (code, message, exitCode = 2) => Object.assign(new Error(message), { code, exitCode });
 const platform = process.platform + '-' + process.arch;
 const suffix = process.platform === 'win32' ? '.exe' : '';
-const bundled = fileURLToPath(new URL('../../dist/tools/', import.meta.url));
+const bundled = fileURLToPath(new URL('../../../../../dist/tools/', import.meta.url));
 const require = createRequire(import.meta.url);
 export const hannoy = {
   name: 'hannoy', version: '0.2.0', modules: ['hannoy.index', 'hannoy.search'],

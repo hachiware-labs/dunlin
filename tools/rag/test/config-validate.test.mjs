@@ -6,8 +6,8 @@ import { test } from 'node:test';
 
 import { stringify } from 'yaml';
 
-import { parseConfig, validateRag } from '../project-modules.mjs';
-import { toolsCatalog } from '../project-tools.mjs';
+import { parseConfig, validateRag } from './fixtures/cli-reference/project-modules.mjs';
+import { toolsCatalog } from './fixtures/cli-reference/project-tools.mjs';
 import { ragTemplate, validateRag as referenceValidate } from './fixtures/reference-config/project-modules.mjs';
 
 const embedding = { provider: 'ollama', model: 'embed' };

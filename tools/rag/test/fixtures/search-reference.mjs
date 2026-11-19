@@ -9,10 +9,10 @@ import { join } from 'node:path';
 import { Dunlin } from 'dunlin';
 import { z } from 'zod';
 
-import { resolveApiKey, resolveConfigValue } from '../../config.mjs';
-import { createGenerator, embedderFor, embeddingEndpoint } from '../../models.mjs';
-import { hannoy, openIndexTool } from '../../project-index-tool.mjs';
-import { moduleSettings, runModules } from '../../project-modules.mjs';
+import { resolveApiKey, resolveConfigValue } from './cli-reference/config.mjs';
+import { createGenerator, embedderFor, embeddingEndpoint } from './cli-reference/models.mjs';
+import { hannoy, openIndexTool } from './cli-reference/project-index-tool.mjs';
+import { moduleSettings, runModules } from './cli-reference/project-modules.mjs';
 // Trials moved to Rust (spec 28.11 step 4c). Outside a trial this passed the signal through.
 const trialSignal = (signal) => signal;
 

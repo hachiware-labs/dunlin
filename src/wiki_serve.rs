@@ -27,7 +27,6 @@ use crate::node_path;
 use crate::serve::{
     AbortOnDrop, Body, Reply, Running, ServeSettings, header, hostname, request_target,
 };
-use crate::source_load::Host;
 use crate::transform_stage::StageError;
 use crate::wiki_html::CONTENT_SECURITY_POLICY;
 use crate::wiki_project::{
@@ -46,8 +45,8 @@ pub struct WikiServeRequest {
     pub token: Option<String>,
 }
 
-/// What the screen asks of JavaScript: parsers for uploads, and where it listens.
-pub trait WikiServeHost: Host + Send + Sync {
+/// What the screen tells JavaScript: where it listens.
+pub trait WikiServeHost: Send + Sync {
     fn listening(&self, port: u16);
 }
 
@@ -1344,7 +1343,6 @@ pub fn serve(
     let header_timeout = Duration::from_secs(settings.limits.request_timeout_seconds.min(60));
     let (sender, receiver) = mpsc::channel::<Job>();
     let base = request.base.clone();
-    let worker_host = host.clone();
     // Instructions run one after another, as recorded work.
     let worker = std::thread::spawn(move || {
         for job in receiver {
@@ -1355,8 +1353,7 @@ pub fn serve(
             command.run_id = Some(job.run_id);
             command.track = true;
             command.print_progress = false;
-            let host: &dyn Host = worker_host.as_ref();
-            let _ = crate::wiki_commands::run(&command, host, &Cancellation::default());
+            let _ = crate::wiki_commands::run(&command, &Cancellation::default());
         }
     });
     let server = Arc::new(WikiServer {

@@ -16,7 +16,7 @@ import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
 import { Dunlin } from 'dunlin';
-import { chunkCorpus } from '../project-content.mjs';
+import { chunkCorpus } from './fixtures/cli-reference/project-content.mjs';
 import { atomicWrite } from './fixtures/wiki-reference/files.mjs';
 import { ensureWiki, runWiki, validateWiki } from './fixtures/wiki-reference/project-wiki.mjs';
 import { trackWork } from './fixtures/wiki-reference/project-wiki-work.mjs';

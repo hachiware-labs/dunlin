@@ -22,11 +22,25 @@ mod source;
 mod storage;
 mod sync;
 pub mod yaml_config;
+#[cfg(any(feature = "node", test))]
+mod yaml_emit;
 
 #[cfg(any(feature = "node", test))]
 mod adoption;
 #[cfg(any(feature = "node", test))]
 mod build_stage;
+#[cfg(any(feature = "node", test))]
+mod cli_args;
+#[cfg(all(feature = "node", not(test)))]
+mod cli_dictionary;
+#[cfg(all(feature = "node", not(test)))]
+mod cli_models;
+#[cfg(all(feature = "node", not(test)))]
+mod cli_project;
+#[cfg(all(feature = "node", not(test)))]
+mod cli_run;
+#[cfg(all(feature = "node", not(test)))]
+mod cli_tools;
 #[cfg(any(feature = "node", test))]
 mod command_parser;
 #[cfg(any(feature = "node", test))]
@@ -42,6 +56,8 @@ mod eval_stage;
 #[cfg(any(feature = "node", test))]
 mod generate;
 #[cfg(any(feature = "node", test))]
+mod html_text;
+#[cfg(any(feature = "node", test))]
 mod index_stage;
 #[cfg(any(feature = "node", test))]
 mod lighton;
@@ -51,6 +67,8 @@ mod mcp;
 mod node;
 #[cfg(any(feature = "node", test))]
 mod ocr;
+#[cfg(any(feature = "node", test))]
+mod office;
 #[cfg(any(feature = "node", test))]
 mod pdf_text;
 #[cfg(any(feature = "node", test))]

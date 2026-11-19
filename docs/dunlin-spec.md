@@ -2548,13 +2548,13 @@ serve:
 | `pdfjs-dist`、`@napi-rs/canvas` | PDF の文字層とページ位置の抽出、OCR の前のページの画像化 | Rust の `pdf_oxide` に置き換えた（段階2a）。pdfjs は比較の記録（28.9節）を再現するベンチマークの開発用の依存にだけ残す |
 | `tesseract.js` と言語データ | GPU を使わない OCR | 外した（段階2a）。GPU を使わない OCR は `oar-ocr`（4.1節）が受け持つ |
 | `@modelcontextprotocol/server` | MCP のサーバー | Rust の公式 SDK（`rmcp`）と Rust の HTTP サーバーに置き換えた（段階3c）。返却形式（27章）と道具の名前は変えない。旧サーバーと比べるテストの基準にだけ、開発用の依存として残す |
-| `docling.rs`（npm） | Office と PDF の変換 | 中身は Rust なので、crate を直接使えるか確かめる。使えるまでは npm の口から呼ぶ |
+| `docling.rs`（npm） | Office と PDF の変換 | 同じ版の crate（`docling`、`docling-core`）を直接使うようにした（段階6a）。npm の docling.rs は比べるテストの基準にだけ開発用の依存として残す |
 | `@ast-grep/napi` と言語の文法 | コードの宣言の位置 | 旧形式の設定の取り込みでだけ使っていたので、その経路とともに外した（段階2a）。コードの宣言の位置を使う機能を作るときは、`ast-grep-core` などの crate を直接使う |
-| `cheerio` | HTML から本文を取り出す | Rust（`scraper` など）に置き換える |
+| `cheerio` | HTML から本文を取り出す | Rust の `scraper` に置き換えた（段階6a）。cheerio は比べるテストの基準にだけ開発用の依存として残す |
 | `markdown-it` | Wiki/PARA のページを HTML にする | Rust の `pulldown-cmark` に置き換えた（段階5a）。markdown-it は、比べるテストの基準にだけ開発用の依存として残す |
-| `yaml` | `Dunlinfile.yaml` と設定の読み書き | Rust に置き換える。行番号付きのエラーを出せるライブラリを選ぶ |
-| `zod` | 引数と設定の検証 | Rust の型と `serde` に置き換える（26.5節） |
-| `sqlite-vec` | ベクトル索引の保存先の1つ | Rust から SQLite の拡張として読み込むか、標準の総当たり検索と hannoy に任せて外すかを決める |
+| `yaml` | `Dunlinfile.yaml` と設定の読み書き | 読み込み（段階1）と書き出し（段階6b）を Rust に置き換えた。yaml は比べるテストの基準にだけ開発用の依存として残す |
+| `zod` | 引数と設定の検証 | Rust の検査に置き換えた（段階1、Wiki/PARA は段階6c）。zod は比べるテストの基準にだけ開発用の依存として残す |
+| `sqlite-vec` | ベクトル索引の保存先の1つ | 使われていなかった JavaScript のベクトル検索とともに外した（段階6）。ベクトル索引は標準の総当たり検索と hannoy が受け持つ |
 
 - **外部プロセスとネットワークも Rust で呼ぶ**: `loader.command`（6.7節）、LightOnOCR のサーバー、Ollama や OpenAI 互換のモデル、Qdrant や Chroma は、プロセスの起動か HTTP なので、JavaScript のライブラリは要らない。
 - **JavaScript のモジュールも登録表は Rust に置く**: 名前、引数の定義、説明、要るものは Rust で宣言する。実装だけを JavaScript が受け持ち、Rust のエンジンが Node.js の呼び出し口を通して呼ぶ（26.10節の変換役）。検証と説明は、実装がどちらの言語でも同じ規則で動く。
@@ -2581,12 +2581,12 @@ serve:
 
 | 段階 | Rust | JavaScript |
 | --- | --- | --- |
-| `source` | 走査、パーサの振り分け（6.7節）、読み込みとハッシュ、キャッシュの判定、パース（テキスト、PDF、OCR、外部コマンド）、原本と抽出結果の保存 | HTML と Office のパース。どちらも移行が済むまで（28.9節） |
+| `source` | 走査、パーサの振り分け（6.7節）、読み込みとハッシュ、キャッシュの判定、パース（テキスト、HTML、Office、PDF、OCR、外部コマンド）、原本と抽出結果の保存 | なし（HTML と Office のパースは段階6aで移した） |
 | `transform` | 正規化とチャンク化、チャンクの保存。`chunk.semantic` の埋め込みも Rust からモデルを呼ぶ | なし |
 | `index` | キーワード索引とベクトル索引の作成。埋め込みも Rust からモデルを呼ぶ | なし |
 | `search` / `ask` / `serve` | 取得、統合、並べ替え、文脈の組み立て、回答の生成、返却形式の組み立て、HTTP と MCP のサーバー | なし |
 | `eval` | 評価データの管理、根拠の位置対応、指標の計算、レポートと比較 | なし |
-| Wiki/PARA | 取り込み、執筆と引用の検証の進行、検査、ページの HTML 化、画面の配信 | `source` と同じ |
+| Wiki/PARA | 取り込み、執筆と引用の検証の進行、検査、ページの HTML 化、画面の配信 | なし |
 
 ### 28.5 Node.js API の範囲
 
@@ -2624,7 +2624,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 | 索引に本文を持つか | Tantivy から本文の保存をやめると、本文の写しが1つ減る。抜粋の読み出しがコーパス経由になるため、検索の遅延を測ってから決める |
 | チャンクの `searchText` | NFKC の検索用の文字列は索引を作るときだけに使う。保存せず、索引を作るときに計算する案を検討する |
 | `state.sqlite` と `corpus.sqlite` | 段階2で両方とも Rust から開くようになる。1つにまとめるかは、その後に決める |
-| 入口 | 28.2節では npm で配布するため JavaScript の起動役を残した。Rust の実行ファイルを npm で配り、起動役もなくすかは段階6で決める |
+| 入口 | JavaScript の起動役を残すことにした（28.13節）。ネイティブ部分は Node.js の拡張として読み込むので、Rust の実行ファイルを別に配ると同じネイティブ部分を2つ配ることになる |
 
 ### 28.9 段階2の進め方
 
@@ -2872,3 +2872,41 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - JavaScript に残るのは、設定の検証、モデルと OCR の実行環境の解決、HTML と Office のパース、表示である。設定の検証と表示は段階6で移す。
 - 単語の区切り、照合順序、文字の種類に ICU4X のデータ（`icu_segmenter`、`icu_collator`、`icu_properties`）と `idna` を加えたので、配布物は約 5.1 MB（5.2%）大きくなった。大半は日本語・中国語と東南アジアの言語の単語の辞書である。
 - JavaScript の `loadCorpus` と `chunkCorpus`（`project-content.mjs`）は、製品のコードからは使わなくなった。比べるテストが使うので残し、段階6で外す。
+
+### 28.13 段階6の進め方
+
+段階6では、残った JavaScript のライブラリを外し、コマンドの解釈と表示を Rust に移して、npm の入口を起動役だけにする。次の小段階に分ける。各小段階の終わりで、旧実装と同じ入力とコマンドに対して、抽出した本文、書き出す設定ファイル、出力、エラー、終了コードが変わらないことを差分テストで確かめる。
+
+| 小段階 | 内容 |
+| --- | --- |
+| 6a | HTML の本文の取り出し（`cheerio`）と Office 文書の変換（npm の `docling.rs`）を Rust に移す |
+| 6b | 設定ファイルの書き出し（`yaml` の `stringify`）と、モデルの設定と環境変数の参照の解決を Rust に移す |
+| 6c | コマンドの解釈、プロジェクトの読み込みと検査（Wiki/PARA の設定の検査を含む）、各コマンドの実行、表示、初期化、利用者設定、ツールと OCR の準備を Rust に移し、入口を起動役だけにする |
+
+#### パーサ（6a）
+
+- HTML は `scraper`（html5ever）で読む。取り除く要素（`script`、`style`、`noscript`、`template`、`nav`、`footer`、`aside`、`hidden` 属性を持つ要素）、本文とする範囲（`main` か `role="main"`、なければ `article`、なければ `body`）、前後に改行を入れる要素、見出しの `#` を、cheerio を使った実装と同じにした。文書の版の識別子が変わらないよう、抽出結果のパーサ名は `cheerio` のまま記録する。
+- Office 文書（`.docx`、`.xlsx`、`.pptx`）は、docling.rs の crate（`docling` と `docling-core`、npm と同じ 2.67.1）を直接使う。npm の docling.rs は同じ Rust のコードを包んだものなので、変換結果は変わらない。npm の約 58 MB のバイナリが要らなくなる代わりに、ネイティブ部分は約 13 MB 大きくなった。
+- 10 通りの HTML、UTF-8 として読めない HTML、3 種類の Office 文書と壊れた `.docx` で、旧実装と同じ本文とエラーになることを確かめた（テストの `parser-parity`）。
+
+#### YAML とモデルの設定（6b）
+
+- 設定ファイルの書き出しは、yaml 2.9 の `stringify` を既定の設定のまま Rust に写した（`yaml_emit`）。引用符の選び方、ブロック文字列、80 桁での折り返し（UTF-16 の単位で数える）、字下げを合わせた。決まった値と、生成した 5000 通りの値で同じ YAML になることを確かめた（テストの `yaml-parity`）。読み込みは段階1の `yaml_config` を使う。
+- `${NAME}` の参照、`api_key_env`、生成と埋め込みのモデルの接続先の解決も Rust で行う。エラーの番号と文言は以前と同じである。
+- `dictionary add` は、候補の設定ファイルの `user_dictionary` の行だけを書き換える。旧実装は yaml の文書を書き直していたので、手で書いた書式（フロー形式やコメントの位置）が整えられることがあったが、Rust は他の行をそのまま残す。キーが1行の形で見つからないときだけ、ファイル全体を書き直す。
+
+#### コマンド（6c）
+
+- npm の入口（`tools/rag/cli.mjs`）は、Node.js API の `Dunlin.runCli` を呼ぶだけにした。引数を Rust に渡して終了コードを返し、サーバーが動いている間だけ SIGINT と SIGTERM でサーバーを止める。`dunlin:index-open` の通知も入口から出す。使用法の一覧は `Dunlin.cliCommands()` で読める。
+- 引数の解釈は Node.js の `util.parseArgs`（strict）と同じ規則とエラーの文言にした。出力（JSON の結果と文字の表示）、エラーの番号と終了コード、診断と警告の表示も以前と同じである。以前と同じく、メッセージを持たない警告（設定の検査の警告）は、文字の表示で `undefined` と出る。
+- Wiki/PARA の設定の検査（以前の zod のスキーマ）、プロジェクトの読み込み、候補の設定と試行の上限、`init` の雛形とコメント、利用者設定（`~/.dunlin/config.yaml`）、ツールの追加と削除（hannoy の検査と導入、oar-ocr と lightonocr の取得、GPU の判定）も Rust で行う。取得は ureq で行い、Node.js の fetch と同じく転送先に従い、プロキシの環境変数は使わない。通信に失敗したときの文言は変わる。
+- 以前は `node:sqlite` で行っていた `state.sqlite` の操作（表の作成、ビルドとタグの読み出し、状態の集計）も Rust で行う。使用中のときの待ち時間（500 ミリ秒）と `DB_BUSY` は以前と同じである。
+- 旧実装の CLI を写した基準（テストの `cli-reference`）と Rust の CLI で、同じフォルダで順に 115 のコマンドを実行し、標準出力、標準エラー、終了コードと、書き出す 10 のファイルが一致することを確かめた（テストの `cli-parity`）。初期化と利用者設定、検査と診断、構築と候補での試行、検索、タグと採用、評価データ、評価とレポート、根拠の対応表、辞書、`serve --print-config`、Wiki/PARA のコマンド、引数とプロジェクトの誤りを含む。実行 ID、時刻、所要時間、時刻を含む評価データ・レポート・対応表の ID、索引の大きさは置き換えて比べる。構築、検索、評価、試行、辞書、Wiki、`serve` の既存のテストも、Rust の CLI でそのまま通る。
+
+#### 段階6の終わり
+
+- JavaScript に残るのは、npm の入口（約 40 行）と、Node.js API の型と呼び出し口だけになった。`cheerio`、`markdown-it`、`yaml`、`zod`、npm の `docling.rs` は製品の依存から外し、比べるテストの基準にだけ開発用の依存として残した。
+- 使われていなかった JavaScript のベクトル検索（`rag.mjs`、`vectors.mjs`、`vector-stores.mjs`、`vector-servers.mjs`、`vector-sqlite.mjs`）と、その保存先の `sqlite-vec` を外した。ベクトル索引は Rust の総当たり検索と hannoy が受け持つ。
+- JavaScript の `loadCorpus` と `chunkCorpus`（`project-content.mjs`）も、他の CLI のモジュールとともに外した。比べるテストは、写した基準（`cli-reference`）を使う。
+- 28.8節の「入口」は、JavaScript の起動役を残すことにした。ネイティブ部分は Node.js の拡張として読み込むので、Rust の実行ファイルを別に配ると、Node.js API と CLI のために同じネイティブ部分を2つ配ることになるためである。
+- ネイティブ部分は、段階5の終わりから約 14 MB 大きくなった（Windows x64 で 107.5 MB から 121.5 MB）。大半は Office 文書の変換で、CLI の移行による増加は約 1 MB である。npm の docling.rs（約 58 MB）が要らなくなったので、導入する全体の大きさは小さくなった。

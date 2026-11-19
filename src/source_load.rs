@@ -68,10 +68,8 @@ pub struct LoadFile {
     pub command: Option<ConfigValue>,
 }
 
-/// Parses a file that this module does not read itself.
+/// Hears how a load progresses.
 pub trait Host: Sync {
-    /// Returns `{ content, format, locations?, parser? }`, or an error message.
-    fn parse(&self, file: &LoadFile, bytes: &[u8]) -> Result<ConfigValue, String>;
     /// Reports how many files finished. Must not block.
     fn progress(&self, _completed: usize) {}
 }
@@ -139,7 +137,7 @@ fn extension(path: &str) -> String {
     }
 }
 
-fn base_name(path: &str) -> &str {
+pub(crate) fn base_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
 }
 
@@ -375,7 +373,7 @@ pub fn load(
                             aborted: true,
                         })
                     } else {
-                        load_one(request, file, &writer, host, &commands, &slots, cancel).map_err(
+                        load_one(request, file, &writer, &commands, &slots, cancel).map_err(
                             |message| LoadError {
                                 message: if message.starts_with("Could not load ") {
                                     message
@@ -455,7 +453,6 @@ fn load_one(
     request: &LoadRequest,
     file: &LoadFile,
     writer: &Writer,
-    host: &dyn Host,
     commands: &Commands,
     slots: &Slots,
     cancel: &Cancellation,
@@ -582,8 +579,12 @@ fn load_one(
         crate::lighton::parse(request.lighton.as_ref(), &read.bytes, &|| {
             cancel.check().is_ok()
         })?
+    } else if file.kind == "html" {
+        crate::html_text::parse(&read.bytes)?
+    } else if file.kind == "office" {
+        crate::office::parse(&read.bytes, base_name(&file.file))?
     } else {
-        host.parse(file, &read.bytes)?
+        return Err(format!("No parser reads {} files", file.kind));
     };
     let content = parsed
         .get("content")
@@ -655,22 +656,7 @@ mod tests {
 
     struct Html;
 
-    impl Host for Html {
-        fn parse(&self, file: &LoadFile, bytes: &[u8]) -> Result<ConfigValue, String> {
-            if file.kind == "html" {
-                Ok(ConfigValue::Object(vec![
-                    ("content".into(), string(&String::from_utf8_lossy(bytes))),
-                    ("format".into(), string("markdown")),
-                    (
-                        "parser".into(),
-                        ConfigValue::Object(vec![("tool".into(), string("test"))]),
-                    ),
-                ]))
-            } else {
-                Err("unsupported".into())
-            }
-        }
-    }
+    impl Host for Html {}
 
     #[test]
     fn loads_caches_and_reports_failures() {

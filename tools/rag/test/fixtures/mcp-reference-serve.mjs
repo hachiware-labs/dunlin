@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import { Dunlin } from 'dunlin';
 
-import { parseConfig, validateRag } from '../../project-modules.mjs';
+import { parseConfig, validateRag } from './cli-reference/project-modules.mjs';
 import { serveStdioMcp } from './mcp-reference.mjs';
 import { referenceOpen, referenceSearchJson } from './search-reference.mjs';
 

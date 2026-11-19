@@ -1,7 +1,7 @@
 // The reports of tools/rag/project-eval.mjs before spec 28.11 step 4b moved them to Rust: report
 // show, list and compare, the evaluation status, and the misses that dictionary suggestions read.
 // Tests compare the Rust implementation with it.
-import { revision } from '../../authoring/files.mjs';
+import { revision } from './cli-reference/authoring/files.mjs';
 
 class EvaluationError extends Error {
   constructor(exitCode, code, message) {

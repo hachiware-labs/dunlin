@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { chunkCorpus } from '../project-content.mjs';
+import { chunkCorpus } from './fixtures/cli-reference/project-content.mjs';
 import { referenceChunks } from './fixtures/chunk-reference.mjs';
 
 // Pieces that stress grapheme clusters, JavaScript whitespace, line terminators and heading rules.

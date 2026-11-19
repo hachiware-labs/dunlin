@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import { Dunlin } from 'dunlin';
 
-import { describeModules } from '../project-modules.mjs';
+import { describeModules } from './fixtures/cli-reference/project-modules.mjs';
 import { describeModules as referenceDescribe, referenceArgumentInfo, referenceModules } from './fixtures/module-registry-reference.mjs';
 
 const inputs = [undefined, null, '', ' ', '  x  ', '　a　', 'x', 'error', 'skip', 'nfkc', 'none', 'lindera', 'trigram', 'bigram',

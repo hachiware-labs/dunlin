@@ -13,13 +13,10 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "cheerio": "1.2.0",
-    "dunlin": "file:../..",
+    "dunlin": "file:../.."
+  },
+  "devDependencies": {
     "yaml": "2.9.0",
     "zod": "^4.6.7"
-  },
-  "optionalDependencies": {
-    "docling.rs": "2.67.1",
-    "sqlite-vec": "^0.1.9"
   }
 }

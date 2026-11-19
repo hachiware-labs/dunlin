@@ -8,8 +8,8 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
-import { chunkCorpus } from '../project-content.mjs';
-import { describeModules } from '../project-modules.mjs';
+import { chunkCorpus } from './fixtures/cli-reference/project-content.mjs';
+import { describeModules } from './fixtures/cli-reference/project-modules.mjs';
 
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const exec = promisify(execFile);

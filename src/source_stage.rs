@@ -149,6 +149,7 @@ pub fn run(
             state: request.state.clone(),
             corpus: request.corpus.clone(),
             originals: request.originals.clone(),
+            text_originals: false,
             force: request.force,
             ocr_version: request.ocr_version.clone(),
             ocr_tool: request.ocr_tool.clone(),
@@ -356,6 +357,8 @@ mod tests {
         };
         assert!(!reused);
         assert!(warnings.is_empty());
+        // The text file's corpus revision restores its original, so no file is written.
+        assert!(!root.path().join("originals").exists());
         let id = output
             .get("id")
             .and_then(ConfigValue::as_str)

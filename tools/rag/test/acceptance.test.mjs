@@ -93,7 +93,9 @@ test('keeps completed stages and the serving index through scan and index failur
   assert.match(text.split('\n')[0], /^bld-\S+ search-\S+ unevaluated/u);
   const { storage } = await json('status');
   assert.ok(storage.build_index_logical_bytes > 0);
-  assert.ok(storage.shared_originals_logical_bytes > 0);
+  // Text files keep no original file: the corpus restores them (spec 28.14).
+  assert.equal(storage.shared_originals_logical_bytes, 0);
+  assert.ok(storage.shared_corpus_logical_bytes > 0);
   await rename(docs, docs + '-hidden');
   await failure(1, 'EXECUTION_FAILED', 'build');
   assert.equal((await json('search', '手順')).build_id, first.build_id);

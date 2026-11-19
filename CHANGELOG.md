@@ -11,6 +11,7 @@
 - リリース用の npm パッケージを組み立てる `npm run release:prepare` と、手動実行のワークフロー **Release Dunlin**、MCP Registry 用の `server.json` を追加しました。
 - Node.js API から、直接開いた索引の資料を抜粋してページを作る `kb.wiki`、同期の結果の `wiki`、MCP の道具 `knowledge.wiki_get` をなくしました。Wiki と PARA は、CLI と同じ実装を `Dunlin.wiki` と `Dunlin.wikiServe` で呼べます。
 - CLI のコマンドを Rust で実行するようにしました。出力、エラー、終了コード、書き出す設定ファイルは以前と同じです。HTML の本文の取り出しと Office 文書の変換も Rust で行い、npm の依存から `cheerio`、`yaml`、`zod`、`docling.rs` をなくしました。`dunlin dictionary add` は候補設定の `user_dictionary` の行だけを書き換え、他の行の書式とコメントをそのまま残します。
+- 構築で、テキスト、Markdown、コードの文書の原本ファイルを作らないようにしました。原本はコーパスに保存した本文から復元できます。Markdown 10,000 件の構築が 6.6 秒から 3.7 秒になりました。Wiki と PARA の取り込みは、ページの引用がリンクする原本ファイルをこれまでどおり作ります。
 - README を CLI 利用者向けにし、Node.js API、検索評価、Wiki・PARA、設定や運用のガイドを整備しました。
 
 ### 以前のプロジェクトから移行する

@@ -34,6 +34,10 @@ pub struct LoadRequest {
     pub corpus: String,
     /// The shared originals directory.
     pub originals: String,
+    /// Also save originals that are the same bytes as their extracted text (UTF-8 text files).
+    /// The build's `source` stage leaves them out: the corpus revision restores them (spec 28.14).
+    #[serde(default = "yes")]
+    pub text_originals: bool,
     #[serde(default)]
     pub force: bool,
     /// Version of the OCR tool, part of cache keys for OCR files.
@@ -78,6 +82,10 @@ pub struct Loaded {
     /// One document per file, in input order.
     pub documents: Vec<ConfigValue>,
     pub warnings: Vec<ConfigValue>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn lightonocr() -> String {
@@ -618,7 +626,9 @@ fn load_one(
         file,
         key,
         ConfigValue::Object(entries),
-        Some((hash, read.bytes, format!("{}:{}", file.id, file.object_id))),
+        // A text file's bytes are its extracted text, so its corpus revision restores it.
+        (request.text_originals || file.kind != "text")
+            .then(|| (hash, read.bytes, format!("{}:{}", file.id, file.object_id))),
     )
 }
 
@@ -682,6 +692,7 @@ mod tests {
             state: state.to_string_lossy().into_owned(),
             corpus: root.path().join("corpus").to_string_lossy().into_owned(),
             originals: root.path().join("originals").to_string_lossy().into_owned(),
+            text_originals: true,
             force: false,
             ocr_version: "v1".into(),
             ocr_tool: "lightonocr".into(),

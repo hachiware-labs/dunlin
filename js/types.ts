@@ -151,6 +151,11 @@ export interface LoadCorpusRequest {
   corpus: string;
   /** The shared originals directory. */
   originals: string;
+  /**
+   * Also save originals that are the same bytes as their text (UTF-8 text files). Default true;
+   * `runSource` leaves them out because the corpus version restores them (spec 28.14).
+   */
+  textOriginals?: boolean;
   force?: boolean;
   /** The OCR tool version, part of the cache key for OCR files. */
   ocrVersion: string;
@@ -196,6 +201,7 @@ export interface SourceStageRequest {
   state: string;
   /** The shared corpus directory. */
   corpus: string;
+  /** The shared originals directory. Text files' originals are not saved (spec 28.14). */
   originals: string;
   root: string;
   force?: boolean;

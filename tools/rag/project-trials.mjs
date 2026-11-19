@@ -19,12 +19,6 @@ export function trialLimits(active, candidate) {
 }
 
 /**
- * Evaluation data generation still calls this between model requests. It never runs inside a
- * trial, so there is nothing to check; step 4e removes it with the JavaScript generation.
- */
-export function trialCheckpoint() {}
-
-/**
  * Settles with `promise`, or rejects with the signal's reason as soon as it aborts, as an aborted
  * fetch did. A native call that is still running stops by itself shortly after.
  */

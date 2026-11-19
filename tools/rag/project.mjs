@@ -15,7 +15,7 @@ import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { generatorSettings } from './models.mjs';
 import { chunkCorpus, ocrRequest, parserHost } from './project-content.mjs';
 import { parserRoutes } from './project-parsers.mjs';
-import { ensureEvaluation, generateEvaluationData, selectDataset } from './project-eval.mjs';
+import { ensureEvaluation, selectDataset } from './project-eval.mjs';
 import { addDictionary, dictionaryText, suggestDictionary } from './project-dictionary.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './project-wiki.mjs';
 import { trackWork } from './project-wiki-work.mjs';
@@ -706,7 +706,8 @@ async function evaluateProject(database, build, searchBuild, plan, project, sett
  * active build. JavaScript reads import files, writes exports and selects the resulting dataset.
  */
 async function evalDataCommand(project, action, [positional, other], values) {
-  const request = { state: project.paths.state, action, positional, other, selected: project.config['eval-data']?.use, values };
+  const request = { state: project.paths.state, action, positional, other, selected: project.config['eval-data']?.use, values,
+    ...(action === 'generate' && { generator: generatorChoice(project, values) }) };
   const withBuild = async () => {
     const database = await openBuild(project.paths, currentBuild(project.paths));
     try {
@@ -716,7 +717,7 @@ async function evalDataCommand(project, action, [positional, other], values) {
       await database.close();
     }
   };
-  let result = ['add', 'import', 'sync'].includes(action) ? await withBuild() : await Dunlin.evalData(request);
+  let result = ['add', 'import', 'sync', 'generate'].includes(action) ? await withBuild() : await Dunlin.evalData(request);
   if (result.status === 'failed' && result.error.code === 'BUILD_NEEDED') result = await withBuild();
   if (result.status === 'failed') throw stageFailure(result.error);
   if (result.select) await selectDataset(project, result.select);
@@ -725,6 +726,23 @@ async function evalDataCommand(project, action, [positional, other], values) {
   if (!values.output) throw new ProjectError(2, 'INVALID_EVAL_DATA', 'Use --output <file>.');
   await writeFile(values.output, cases.map((item) => JSON.stringify(item)).join('\n') + '\n', { flag: 'wx' });
   return { id, cases: cases.length };
+}
+
+/**
+ * The chat model of `eval-data generate`: `--model`, or the only configured chat model, with its
+ * resolved settings. Rust reports a missing model or settings that cannot be resolved, in order.
+ */
+function generatorChoice(project, values) {
+  const chat = Object.entries(project.config.models ?? {}).filter(([, { kind, model }]) => kind === 'chat' && model);
+  const name = values.model ?? (chat.length === 1 ? chat[0][0] : undefined);
+  const model = project.config.models?.[name];
+  if (model?.kind !== 'chat' || !model.model) return {};
+  try {
+    return { name, settings: generatorSettings(model.provider, resolveConfigValue(model.model, 'model'),
+      resolveConfigValue(model.base_url, 'base_url'), resolveApiKey(model.api_key_env, 'model'), { maxInputBytes: model.max_input_bytes }) };
+  } catch {
+    return { name };
+  }
 }
 
 /** An `evidence-map` command in Rust (spec 28.11 step 4a). `export` writes the map it shows. */
@@ -1118,9 +1136,7 @@ export async function runProjectCommand(command, args, explicitProject) {
                 ensureEvaluation(db);
                 runId = `run-${randomUUID()}`;
               }
-              return type === 'generate'
-                ? await generateEvaluationData(db, project, values, () => openBuild(project.paths, currentBuild(project.paths)))
-                : await evalDataCommand(project, type, positionals.slice(1), values);
+              return await evalDataCommand(project, type, positionals.slice(1), values);
             }
             if (!project.evalSettings) throw new ProjectError(3, 'EVAL_DATA_REQUIRED', 'Add evaluation data before running eval.');
             const build = currentBuild(project.paths, true, values.build);

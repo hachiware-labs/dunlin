@@ -1,5 +1,5 @@
 //! Evaluation data (spec 9 and 28.11 step 4e): `eval-data list`, `tag`, `show`, `diff`, `use`,
-//! `export`, `split`, `review`, `sync`, `add` and `import`.
+//! `export`, `split`, `review`, `sync`, `add` and `import`, and `generate` (see `eval_generate`).
 //!
 //! Cases, their IDs, the dataset IDs and the saved JSON are the ones the JavaScript
 //! implementation produced. JavaScript reads import files, writes exported files and writes the
@@ -51,6 +51,9 @@ pub struct EvalDataRequest {
     /// The command options, as `parseArgs` gave them.
     #[serde(default)]
     pub values: ConfigValue,
+    /// The chat model of `generate`.
+    #[serde(default)]
+    pub generator: Option<crate::eval_generate::GeneratorChoice>,
 }
 
 /// What a command returns, and the dataset to select in the configuration, if any.
@@ -63,27 +66,27 @@ pub struct EvalDataOutcome {
 pub const BUILD_NEEDED: &str = "BUILD_NEEDED";
 
 /// A document of the active build, as cases are checked against it.
-struct Document {
+pub(crate) struct Document {
     source_id: String,
     object_id: String,
-    version: String,
-    content: String,
+    pub(crate) version: String,
+    pub(crate) content: String,
     original_hash: Option<String>,
     locations: Vec<SourceLocation>,
 }
 
 impl Document {
-    fn name(&self) -> String {
+    pub(crate) fn name(&self) -> String {
         format!("{}:{}", self.source_id, self.object_id)
     }
 }
 
-fn js_trim(value: &str) -> &str {
+pub(crate) fn js_trim(value: &str) -> &str {
     value.trim_matches(js_space)
 }
 
 /// `Number(text)` for option values.
-fn js_to_number(value: &str) -> f64 {
+pub(crate) fn js_to_number(value: &str) -> f64 {
     let trimmed = js_trim(value);
     if trimmed.is_empty() {
         return 0.0;
@@ -118,7 +121,7 @@ fn values_string<'a>(values: &'a ConfigValue, name: &str) -> Option<&'a str> {
 }
 
 /// Saves cases as a dataset whose ID is the digest of the cases: `{ id, cases }`.
-fn save_dataset(
+pub(crate) fn save_dataset(
     connection: &Connection,
     cases: Vec<ConfigValue>,
 ) -> Result<ConfigValue, StageError> {
@@ -185,7 +188,10 @@ fn documents(database: &KnowledgeBase, cancel: &Cancellation) -> Result<Vec<Docu
     Ok(documents)
 }
 
-fn find_document<'a>(documents: &'a [Document], name: &str) -> Result<&'a Document, StageError> {
+pub(crate) fn find_document<'a>(
+    documents: &'a [Document],
+    name: &str,
+) -> Result<&'a Document, StageError> {
     let matched: Vec<&Document> = documents
         .iter()
         .filter(|document| name == document.object_id || name == document.name())
@@ -199,7 +205,7 @@ fn find_document<'a>(documents: &'a [Document], name: &str) -> Result<&'a Docume
 }
 
 /// Checks a case against the documents and gives it its stored form (spec 9).
-fn make_case(
+pub(crate) fn make_case(
     input: &ConfigValue,
     documents: &[Document],
     prior: &[ConfigValue],
@@ -650,13 +656,16 @@ pub fn eval_data(
             )
         }
         "review" => review(database, &connection, request, cancel),
-        "sync" | "add" | "import" => {
+        "sync" | "add" | "import" | "generate" => {
             let database = database.ok_or_else(need_build)?;
             let documents = documents(database, cancel)?;
-            if request.action == "sync" {
-                return sync(&connection, positional, &documents);
+            match request.action.as_str() {
+                "sync" => sync(&connection, positional, &documents),
+                "generate" => {
+                    crate::eval_generate::generate_cases(&connection, request, &documents, cancel)
+                }
+                _ => add(&connection, request, &documents),
             }
-            add(&connection, request, &documents)
         }
         other => Err(invalid(format!("Unknown eval-data action: {other}"))),
     }

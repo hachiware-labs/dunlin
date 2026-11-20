@@ -371,6 +371,18 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   const run = (cwd, ...args) => runNode(process.execPath, [cli, ...args], { cwd, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, timeout: 10_000, encoding: 'utf8' });
   const json = async (cwd, ...args) => JSON.parse((await run(cwd, ...args, '--json')).stdout);
 
+  // A missing source folder stops init; a folder removed after init stops build with its path.
+  const unknown = await run(root, 'init', 'mcp', './nowhere-kb', '--source', './nowhere').catch((error) => error);
+  assert.equal(unknown.code, 2);
+  assert.match(unknown.stderr, /^Source folder not found: .*nowhere\. Pass an existing folder to --source\./mu);
+  await assert.rejects(stat(join(root, 'nowhere-kb', 'Dunlinfile.yaml')), { code: 'ENOENT' });
+  await mkdir(join(root, 'removed'));
+  await run(root, 'init', 'mcp', './removed-kb', '--source', './removed');
+  await rm(join(root, 'removed'), { recursive: true });
+  const removed = await run(join(root, 'removed-kb'), 'build').catch((error) => error);
+  assert.equal(removed.code, 3);
+  assert.match(removed.stderr, /^Source folder not found: .*removed\. Create it, or set the path of source\.filesystem in Dunlinfile\.yaml\./mu);
+
   await run(root, 'init', 'mcp', './knowledge', '--source', './manuals');
   const config = await readFile(join(project, 'Dunlinfile.yaml'), 'utf8');
   assert.equal(parse(config).init.type, 'mcp');
@@ -396,6 +408,14 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   assert.equal(build.documents, 1);
   assert.equal(build.skipped[0].path, 'notes.bin');
   assert.equal((await json(project, 'status')).data.build_id, build.build_id);
+  // An unknown build reference names itself instead of asking for a first build.
+  await assert.rejects(run(project, 'use', 'no-such-build', '--json'), (error) => {
+    assert.equal(error.code, 3);
+    const failure = JSON.parse(error.stdout).errors[0];
+    assert.equal(failure.code, 'BUILD_NOT_FOUND');
+    assert.match(failure.message, /^Unknown build: no-such-build\./u);
+    return true;
+  });
   const repeated = (await json(project, 'build', '--skip-unsupported')).data;
   assert.equal(repeated.build_id, build.build_id);
   assert.equal(repeated.reused, true);

@@ -253,6 +253,7 @@ fn heading_at(text: &str) -> Option<&str> {
 }
 
 /// The NFKC form of `text`, which `searchText` holds.
+#[cfg(any(feature = "node", test))]
 pub(crate) fn nfkc(text: &str) -> String {
     ComposingNormalizerBorrowed::new_nfkc()
         .normalize(text)

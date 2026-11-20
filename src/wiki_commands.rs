@@ -19,7 +19,7 @@ use crate::source_load::sha256_hex;
 use crate::source_stage::iso_now;
 use crate::transform_stage::StageError;
 use crate::wiki_project::{
-    Fact, In, Project, REVISION_SCHEMA, WikiOutcome, WikiRequest, atomic_write, coded,
+    Citation, Fact, In, Project, REVISION_SCHEMA, WikiOutcome, WikiRequest, atomic_write, coded,
     current_document, ensure, fs_error, job, json_or_undefined, line_count, model_output, pages,
     read_citation, read_file, read_text, remember, remove, restore, str_of, strict, unique_index,
     write_page, written_pages,
@@ -61,6 +61,38 @@ fn number_of(value: Option<&ConfigValue>) -> f64 {
         Some(ConfigValue::Number(value)) => *value,
         _ => f64::NAN,
     }
+}
+
+/// The facts whose citations resolve, for `ingress` (spec 16: only verified statements are saved).
+/// A citation whose quote is not found exactly once in its source is dropped, and so is a fact left
+/// without citations. Returns the kept facts and, for each dropped citation, the fact and the quote.
+pub(crate) fn verified_facts(facts: Vec<Fact>, refs: &[Ref]) -> (Vec<Fact>, Vec<(String, String)>) {
+    let mut kept = Vec::new();
+    let mut rejected = Vec::new();
+    for fact in facts {
+        let (valid, invalid): (Vec<Citation>, Vec<Citation>) =
+            fact.citations.into_iter().partition(|citation| {
+                citation
+                    .id
+                    .checked_sub(1)
+                    .and_then(|index| refs.get(index))
+                    .is_some_and(|reference| {
+                        unique_index(&reference.text, &citation.quote).is_some()
+                    })
+            });
+        rejected.extend(
+            invalid
+                .into_iter()
+                .map(|citation| (fact.text.clone(), citation.quote)),
+        );
+        if !valid.is_empty() {
+            kept.push(Fact {
+                text: fact.text,
+                citations: valid,
+            });
+        }
+    }
+    (kept, rejected)
 }
 
 /// `verifyFacts(facts, refs)`: the page text with source markers and the citation of each marker.
@@ -1083,4 +1115,54 @@ pub(crate) fn replace_documents(
         .replace_document_inputs(source_id, inputs, cancel)
         .map(|_| ())
         .map_err(StageError::native)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fact(text: &str, quotes: &[(usize, &str)]) -> Fact {
+        Fact {
+            text: text.to_owned(),
+            citations: quotes
+                .iter()
+                .map(|(id, quote)| Citation {
+                    id: *id,
+                    quote: (*quote).to_owned(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn keeps_the_facts_that_quote_their_sources() {
+        let refs = [Ref {
+            id: 1,
+            text: "| A | 2 |\n| B | 3 |\nA\nA\n".to_owned(),
+            evidence: ConfigValue::Null,
+        }];
+        let (kept, rejected) = verified_facts(
+            vec![
+                fact("A is 2.", &[(1, "| A | 2 |")]),
+                fact("B is 3.", &[(1, "| A | 2 |\n| C | 3 |")]),
+                fact("Both.", &[(1, "| B | 3 |"), (2, "x"), (0, "y")]),
+                fact("Twice.", &[(1, "A\nA")]),
+            ],
+            &refs,
+        );
+        let kept: Vec<(&str, usize)> = kept
+            .iter()
+            .map(|fact| (fact.text.as_str(), fact.citations.len()))
+            .collect();
+        assert_eq!(kept, [("A is 2.", 1), ("Both.", 1), ("Twice.", 1)]);
+        let rejected: Vec<&str> = rejected.iter().map(|(fact, _)| fact.as_str()).collect();
+        assert_eq!(rejected, ["B is 3.", "Both.", "Both."]);
+        assert!(
+            verify_facts(
+                &verified_facts(vec![fact("B", &[(1, "| C |")])], &refs).0,
+                &refs
+            )
+            .is_ok()
+        );
+    }
 }

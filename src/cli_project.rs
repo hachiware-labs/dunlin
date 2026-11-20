@@ -1175,16 +1175,47 @@ pub fn load_project(
     })
 }
 
+/// The words of a setting name that mark a secret, matched as whole words.
 const SECRET: &[&str] = &[
-    "api_key",
-    "api-key",
     "apikey",
     "password",
+    "passwd",
     "token",
     "secret",
     "authorization",
     "credential",
+    "credentials",
 ];
+
+/// Whether a setting name holds a secret: one of its words (split at `_`, `-`, `.` and lower-to-upper
+/// case changes) is in `SECRET`, or it contains `api_key`. Whole words keep names such as `tokenizer`
+/// and `max_tokens`, which an earlier substring match dropped from the saved settings.
+fn secret_key(key: &str) -> bool {
+    let mut words = vec![String::new()];
+    let mut previous_lower = false;
+    for character in key.chars() {
+        if matches!(character, '_' | '-' | '.') {
+            words.push(String::new());
+            previous_lower = false;
+            continue;
+        }
+        if character.is_uppercase() && previous_lower {
+            words.push(String::new());
+        }
+        previous_lower = character.is_lowercase() || character.is_ascii_digit();
+        words
+            .last_mut()
+            .expect("a word")
+            .extend(character.to_lowercase());
+    }
+    let lower = key.to_lowercase();
+    lower.contains("api_key")
+        || lower.contains("api-key")
+        || words.iter().any(|word| SECRET.contains(&word.as_str()))
+        || words
+            .windows(2)
+            .any(|pair| pair[0] == "api" && pair[1] == "key")
+}
 
 /// `safeConfig(value)`: settings without secrets and URLs without credentials, queries or fragments.
 pub fn safe_config(value: &ConfigValue) -> ConfigValue {
@@ -1195,14 +1226,7 @@ pub fn safe_config(value: &ConfigValue) -> ConfigValue {
                 .iter()
                 .filter(|(key, _)| {
                     let lower = key.to_lowercase();
-                    let secret = SECRET.iter().any(|word| {
-                        let word = word.to_owned();
-                        // /(?:api[_-]?key|password|token|secret|authorization|credential)/i
-                        lower.contains(word)
-                    }) || lower.contains("api_key")
-                        || lower.contains("api-key")
-                        || lower.contains("apikey");
-                    !secret || lower.ends_with("_env") || lower.ends_with("-env")
+                    !secret_key(key) || lower.ends_with("_env") || lower.ends_with("-env")
                 })
                 .map(|(key, child)| (key.clone(), safe_config(child)))
                 .collect(),
@@ -1305,6 +1329,15 @@ pub fn current_build(
             }
         }
         return Ok(Some(manifest));
+    }
+    if let (true, Some(reference)) = (required, reference) {
+        return Err(CliError::new(
+            3,
+            "BUILD_NOT_FOUND",
+            format!(
+                "Unknown build: {reference}. Pass a build tag or ID; dunlin status shows the current build."
+            ),
+        ));
     }
     if required {
         return Err(CliError::new(

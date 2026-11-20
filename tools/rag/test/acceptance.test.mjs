@@ -97,7 +97,7 @@ test('keeps completed stages and the serving index through scan and index failur
   assert.equal(storage.shared_originals_logical_bytes, 0);
   assert.ok(storage.shared_corpus_logical_bytes > 0);
   await rename(docs, docs + '-hidden');
-  await failure(1, 'EXECUTION_FAILED', 'build');
+  await failure(3, 'SOURCE_MISSING', 'build');
   assert.equal((await json('search', '手順')).build_id, first.build_id);
   await rename(docs + '-hidden', docs);
   await writeFile(join(docs, 'guide.txt'), '別の交換手順です。\n');

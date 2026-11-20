@@ -213,8 +213,11 @@ test('runs Wiki and PARA commands like the former JavaScript code', { timeout: 6
   const [actualIds, expectedIds] = [normalizer(), normalizer()];
 
   const check = (pair) => {
-    /** Runs a command on both copies and compares requests, outputs, warnings and errors. */
-    return async (command, positionals = [], values = {}) => {
+    /**
+     * Runs a command on both copies and compares requests, outputs, warnings and errors. `message`
+     * replaces the expected error message where Rust deliberately differs from the reference.
+     */
+    return async (command, positionals = [], values = {}, message = undefined) => {
       const label = JSON.stringify([command, positionals, values]);
       const args = [command, ...Object.entries(values).flatMap(([key, value]) => value === true ? ['--' + key] : ['--' + key, value]), ...positionals];
       const first = bodies.length;
@@ -233,7 +236,7 @@ test('runs Wiki and PARA commands like the former JavaScript code', { timeout: 6
         // The code and exit code the CLI gives the error.
         const argument = failure.code === 'INVALID_ARGUMENT';
         assert.equal(actual.status, 'failed', label + ': ' + failure.message);
-        assert.equal(actual.errors[0].message, failure.message, label);
+        assert.equal(actual.errors[0].message, message ?? failure.message, label);
         assert.equal(actual.errors[0].code, failure.exitCode ? failure.code : argument ? 'INVALID_ARGUMENT' : 'EXECUTION_FAILED', label);
         assert.equal(actual.exitCode, failure.exitCode ?? (argument ? 2 : 1), label);
         return actual;
@@ -247,7 +250,11 @@ test('runs Wiki and PARA commands like the former JavaScript code', { timeout: 6
   const compareState = async (pair, label) => {
     const [actual, expected] = [await snapshot(pair.base), await snapshot(pair.refBase)];
     for (const table of tables) {
-      const [left, right] = [actualIds(JSON.stringify(actual.rows[table])), expectedIds(JSON.stringify(expected.rows[table]))];
+      // The recorded error of an ingress whose quotes all fail differs on purpose (see `bad.txt`).
+      const right = expectedIds(JSON.stringify(expected.rows[table])).replaceAll(
+        'Every citation must identify a unique verbatim quote in the supplied evidence.',
+        'None of the 1 statements the model wrote quoted the sources exactly, so no page was saved. Run ingress again or use a stronger model.');
+      const left = actualIds(JSON.stringify(actual.rows[table]));
       let at = 0;
       while (at < left.length && left[at] === right[at]) at++;
       assert.equal(left.slice(Math.max(0, at - 300), at + 300), right.slice(Math.max(0, at - 300), at + 300), label + ' ' + table);
@@ -335,7 +342,9 @@ test('runs Wiki and PARA commands like the former JavaScript code', { timeout: 6
   await same('progress', [work.run_id]);
   await same('progress', ['run-missing']);
   await writeFile(join(sources, 'bad.txt'), '引用なしの資料\n');
-  await same('ingress', [join(sources, 'bad.txt')]);
+  // The reference fails on the first unverified quote. Rust saves the statements that quote their
+  // sources and fails only when none does (spec 16).
+  await same('ingress', [join(sources, 'bad.txt')], {}, 'None of the 1 statements the model wrote quoted the sources exactly, so no page was saved. Run ingress again or use a stronger model.');
   await same('ingress', [join(sources, 'bad.txt')], { 'source-only': true });
   await compareState(wiki, 'wiki after updates');
 

@@ -326,6 +326,16 @@ fn scan_sources(
         .scans
         .iter()
         .map(|folder| {
+            if !std::path::Path::new(&folder.path).exists() {
+                return Err(StageError::coded(
+                    "SOURCE_MISSING",
+                    format!(
+                        "Source folder not found: {}. Create it, or set the path of {} in Dunlinfile.yaml.",
+                        folder.path, folder.name
+                    ),
+                    3,
+                ));
+            }
             let scanned = scan(
                 &ScanRequest {
                     path: folder.path.clone(),

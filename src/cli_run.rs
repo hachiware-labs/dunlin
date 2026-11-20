@@ -208,7 +208,7 @@ fn run_command(
         Ok(Done::Data(data)) => {
             if !json {
                 for warning in &state.warnings {
-                    print_error(&js_string(warning.get("message")));
+                    print_error(&warning_line(warning));
                 }
             }
             if json {
@@ -226,6 +226,46 @@ fn run_command(
             0
         }
         Err(error) => report_error(command, &state, error, json),
+    }
+}
+
+/// One configuration diagnostic (an error or a warning) as `file:line section module arg — CODE: hint`.
+fn diagnostic_line(item: &ConfigValue) -> String {
+    let line = match item.get("line") {
+        None | Some(ConfigValue::Null) => "?".into(),
+        other => js_string(other),
+    };
+    let place: Vec<String> = ["section", "module", "arg"]
+        .iter()
+        .filter_map(|name| match item.get(name) {
+            None | Some(ConfigValue::Null) => None,
+            other => Some(js_string(other)),
+        })
+        .filter(|value| !value.is_empty())
+        .collect();
+    let suggestions: Vec<String> = items(item.get("suggestions"))
+        .iter()
+        .map(|value| js_string(Some(value)))
+        .collect();
+    format!(
+        "{}:{line} {} — {}: {}{}",
+        js_string(item.get("file")),
+        place.join(" "),
+        js_string(item.get("code")),
+        js_string(item.get("hint")),
+        if suggestions.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", suggestions.join(", "))
+        }
+    )
+}
+
+/// A warning for the terminal: its message, or the diagnostic line of a configuration warning.
+fn warning_line(warning: &ConfigValue) -> String {
+    match warning.get("message").and_then(ConfigValue::as_str) {
+        Some(message) => message.to_owned(),
+        None => format!("Warning: {}", diagnostic_line(warning)),
     }
 }
 
@@ -277,32 +317,7 @@ fn report_error(command: &str, state: &Run, error: CliError, json: bool) -> u8 {
     } else {
         print_error(&error.message);
         for item in error.diagnostics.as_deref().into_iter().flatten() {
-            let line = match item.get("line") {
-                None | Some(ConfigValue::Null) => "?".into(),
-                other => js_string(other),
-            };
-            let optional = |name: &str| match item.get(name) {
-                None | Some(ConfigValue::Null) => String::new(),
-                other => js_string(other),
-            };
-            let suggestions: Vec<String> = items(item.get("suggestions"))
-                .iter()
-                .map(|value| js_string(Some(value)))
-                .collect();
-            print_error(&format!(
-                "{}:{line} {} {} {} — {}: {}{}",
-                js_string(item.get("file")),
-                js_string(item.get("section")),
-                optional("module"),
-                optional("arg"),
-                js_string(item.get("code")),
-                js_string(item.get("hint")),
-                if suggestions.is_empty() {
-                    String::new()
-                } else {
-                    format!(" ({})", suggestions.join(", "))
-                }
-            ));
+            print_error(&diagnostic_line(item));
         }
         if let Some(data) = &error.data {
             for file in items(data.get("skipped")) {
@@ -949,7 +964,7 @@ fn dispatch(
     }
     if command == "serve" {
         for warning in &state.warnings {
-            print_error(&js_string(warning.get("message")));
+            print_error(&warning_line(warning));
         }
         serve_project(state, &project, serving.unwrap_or_default())?;
         return Ok(Done::Quiet);
@@ -1557,6 +1572,16 @@ fn initialize(
             } else {
                 source.to_owned()
             };
+            if !crate::cli_project::exists(&env.resolve(&location))? {
+                return Err(CliError::new(
+                    2,
+                    "SOURCE_MISSING",
+                    format!(
+                        "Source folder not found: {}. Pass an existing folder to --source.",
+                        env.resolve(&location)
+                    ),
+                ));
+            }
             let relative = node_path::relative(&root, &env.resolve(&location));
             let relative = if cfg!(windows) {
                 relative.replace('\\', "/")

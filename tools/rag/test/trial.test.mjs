@@ -64,4 +64,15 @@ test('limits evaluation trials and restores the configuration after a failed use
   assert.equal(used.status, 'succeeded', JSON.stringify(used.errors));
   assert.equal(used.data.evaluation_status, 'evaluated');
   assert.equal(state.prepare('SELECT count(*) AS n FROM adoption_history').get().n, adoptions + 1);
+  // The adopted file keeps `tokenizer`, which is a setting, not a secret.
+  const adopted = parse(await readFile(configPath, 'utf8'));
+  assert.equal(adopted.index.modules.find((module) => module.use === 'index.keyword').with.tokenizer, 'lindera');
+  assert.deepEqual((await run('status')).warnings.filter((warning) => warning.code === 'ARG_DEFAULT'), []);
+
+  // A configuration warning has no message; the terminal shows its place, code and hint.
+  delete adopted.index.modules.find((module) => module.use === 'index.keyword').with.tokenizer;
+  await writeFile(configPath, stringify(adopted));
+  const { stderr } = await runNode(process.execPath, [cli, '--project', 'kb', 'status'], { cwd: root, env, encoding: 'utf8', timeout: 60_000 });
+  assert.match(stderr, /^Warning: .*Dunlinfile\.yaml:\d+ index index\.keyword tokenizer — ARG_DEFAULT: Write the default value/m);
+  assert.doesNotMatch(stderr, /undefined/);
 });

@@ -105,11 +105,18 @@ function openState(paths, readOnly = false) {
   return db;
 }
 
-const secretSetting = /(?:api[_-]?key|password|token|secret|authorization|credential)/iu;
+// Whole words, as the Rust CLI matches them since `use` dropped `tokenizer` (a substring match on
+// `token`): a secret name has one of these words, split at `_`, `-`, `.` and case changes.
+const secretWords = new Set(['apikey', 'password', 'passwd', 'token', 'secret', 'authorization', 'credential', 'credentials']);
+function secretSetting(key) {
+  const words = key.replace(/([\p{Ll}\d])(\p{Lu})/gu, '$1 $2').toLowerCase().split(/[\s_.-]+/u);
+  return /api[_-]key/iu.test(key) || words.some((word) => secretWords.has(word))
+    || words.some((word, index) => word === 'api' && words[index + 1] === 'key');
+}
 function safeConfig(value) {
   if (Array.isArray(value)) return value.map(safeConfig);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => {
-    if (secretSetting.test(key) && !/[_-]env$/iu.test(key)) return [];
+    if (secretSetting(key) && !/[_-]env$/iu.test(key)) return [];
     return [[key, safeConfig(child)]];
   }));
   if (typeof value !== 'string') return value;
@@ -302,6 +309,8 @@ function currentBuild(paths, required = true, reference) {
   } finally {
     db.close();
   }
+  // An unknown reference names itself, as the Rust CLI reports it since the usability review.
+  if (required && reference !== undefined) throw new ProjectError(3, 'BUILD_NOT_FOUND', `Unknown build: ${reference}. Pass a build tag or ID; dunlin status shows the current build.`);
   if (required) throw new ProjectError(3, 'BUILD_REQUIRED', 'No searchable build. Run dunlin build first.');
   return null;
 }
@@ -1259,7 +1268,7 @@ export async function runProjectCommand(command, args, explicitProject) {
       }])));
     } else {
       console.error(error.message);
-      for (const item of error.diagnostics ?? []) console.error(`${item.file}:${item.line ?? '?'} ${item.section} ${item.module ?? ''} ${item.arg ?? ''} — ${item.code}: ${item.hint}${item.suggestions.length ? ' (' + item.suggestions.join(', ') + ')' : ''}`);
+      for (const item of error.diagnostics ?? []) console.error(`${item.file}:${item.line ?? '?'} ${[item.section, item.module, item.arg].filter(Boolean).join(' ')} — ${item.code}: ${item.hint}${item.suggestions.length ? ' (' + item.suggestions.join(', ') + ')' : ''}`);
       for (const file of error.data?.skipped ?? []) console.error(`${file.source_id}:${file.path} — ${file.reason}`);
     }
   }

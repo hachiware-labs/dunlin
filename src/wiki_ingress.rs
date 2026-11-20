@@ -17,7 +17,7 @@ use crate::source_stage::iso_now;
 use crate::transform_stage::StageError;
 use crate::wiki_commands::{
     Ref, arg, chunks, chunks_for_model, cited_text, commit_pages, ref_inputs, replace_documents,
-    verify_facts,
+    verified_facts, verify_facts,
 };
 use crate::wiki_project::{
     ANSWER_SCHEMA, In, Project, WRITTEN_SCHEMA, coded, current_document, facts, fs_error,
@@ -818,7 +818,9 @@ pub(crate) fn ingress(
     }
     let mut ids: HashSet<String> = HashSet::new();
     let mut changes = Vec::new();
-    for item in &written {
+    let mut rejected = Vec::new();
+    let proposed = written.iter().map(|item| item.facts.len()).sum::<usize>();
+    for item in written {
         let lower = item.id.to_lowercase();
         if ids.contains(&lower) {
             return Err(coded(
@@ -838,8 +840,42 @@ pub(crate) fn ingress(
             ));
         }
         ids.insert(lower);
-        let (markdown, citations) = verify_facts(&item.facts, &refs)?;
+        let (facts, dropped) = verified_facts(item.facts, &refs);
+        rejected.extend(
+            dropped
+                .into_iter()
+                .map(|(fact, quote)| (item.id.clone(), fact, quote)),
+        );
+        if facts.is_empty() {
+            continue;
+        }
+        let (markdown, citations) = verify_facts(&facts, &refs)?;
         changes.push(project.change_page(&item.id, &item.title, markdown, citations, &previous)?);
+    }
+    if changes.is_empty() && proposed > 0 {
+        return Err(coded(
+            2,
+            "INVALID_CITATION",
+            format!(
+                "None of the {proposed} statements the model wrote quoted the sources exactly, so no page was saved. Run ingress again or use a stronger model."
+            ),
+        ));
+    }
+    for (page, fact, quote) in &rejected {
+        warnings.push(object(vec![
+            ("code", text("CITATION_REJECTED")),
+            (
+                "message",
+                text(&format!(
+                    "Not saved on {page}: the quote was not found exactly once in the sources. {} (quote: {})",
+                    js_trim(fact),
+                    quote.replace('\n', "\\n")
+                )),
+            ),
+            ("page", text(page)),
+            ("fact", text(fact)),
+            ("quote", text(quote)),
+        ]));
     }
     tracker.progress("validating_citations", Some((0, changes.len())));
     let mut verified = Vec::new();

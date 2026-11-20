@@ -7,11 +7,14 @@
 | `dunlin` が見つからない | リポジトリで `npm link` を実行します。`npm prefix -g` で確認した場所を Windows では `PATH` に追加します。macOS・Linux ではその配下の `bin` を追加します。 |
 | `PROJECT_REQUIRED` | `Dunlinfile.yaml` のあるディレクトリへ移動するか、`--project <directory>` を指定します。 |
 | `BUILD_REQUIRED` | MCP・RAG の資料を作業ディレクトリの `docs/` または設定したソースに置き、`dunlin build` を実行します。 |
+| `BUILD_NOT_FOUND` | `--build` や `use` に渡したタグまたは ID のビルドがありません。`dunlin status` で現在のビルドを、`dunlin tag` で付けたタグを確認します。 |
+| `SOURCE_MISSING` | 資料のフォルダがありません。`init` では `--source` に既存のフォルダを渡します。`build` では、フォルダを作り直すか、`Dunlinfile.yaml` の `source.filesystem` の `path` を直します。 |
 | `UNSUPPORTED_FILES` | 一覧のファイルを確認します。MCP・RAG では `source.filesystem` の `with.exclude` を設定するか、`dunlin build --skip-unsupported` を使います。Wiki・PARA では `ingress` の `loader.auto` で `unsupported: skip` を選べます。 |
 | PDF から文字が取得できない | PDF に文字層があるかを確認します。スキャン資料を読む場合は `dunlin add ocr` の案内に従い、OCR を準備します。 |
 | `MODEL_REQUIRED` | `Dunlinfile.yaml` の RAG では `models.answerer.model`、Wiki・PARA では `models.writer.model` を設定します。稼働中の `serve` にモデル設定を反映するときは起動し直します。 |
 | モデルへの接続に失敗する | モデルの名前、提供元、`base_url` を確認します。Ollama は起動とモデルの取得を確認します。API キーを使う提供元では、起動している端末の `api_key_env` に対応する環境変数を確認します。 |
 | 埋め込みの要求で `build` が止まる | 使う埋め込みモデルの接続を確認します。これからキーワード検索用に初期化する場合は `init` に `--no-embedding` を指定します。 |
+| Wiki・PARA の取り込みで `INVALID_CITATION` | モデルが書いた記述の引用が、どれも資料と一字一句一致しませんでした。もう一度 `ingress` を実行するか、より大きなモデルを使います。一部の記述だけが一致しなかった場合は、残りを保存し、保存しなかった記述を `CITATION_REJECTED` の警告で示します。 |
 | `BUILD_BUSY` または `DB_BUSY` | 同じプロジェクトの更新処理が終わってから再試行します。Wiki・PARA は作業 ID を `dunlin progress` に渡すと進捗を確認できます。 |
 | `EVAL_DATA_REQUIRED` または `REPORT_REQUIRED` | `eval-data add` または `import` で調整用の評価データを入れ、`dunlin eval --tag baseline` を実行します。 |
 | `INVALID_USER_DICTIONARY` | UTF-8 の見出しなし CSV に `表層形,品詞,読み` の3列を並べます。表層形の空白と、候補設定から見た辞書の相対パスを確認します。 |

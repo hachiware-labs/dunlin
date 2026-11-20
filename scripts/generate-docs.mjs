@@ -28,7 +28,7 @@ function cliGuide() {
   if (new Set(covered).size !== covered.length || Object.keys(projectCommands).length !== covered.length
     || covered.some((name) => !Object.hasOwn(projectCommands, name))) throw new Error('Update the CLI command groups.');
   return section('# CLI リファレンス', generated,
-    'コマンドはプロジェクト内で実行します。別の場所からは `dunlin --project <directory> <command>` で対象を指定できます。`<…>` は入力する値、`[…]` は省略可能な指定です。各コマンドの使用法は `dunlin <command> --help` でも確認できます。',
+    'コマンドはプロジェクト内で実行します。別の場所からは `dunlin --project <directory> <command>` で対象を指定できます。`<…>` は入力する値、`[…]` は省略可能な指定です。各コマンドの使用法は `dunlin <command> --help` でも確認できます。`dunlin --help` はコマンドの一覧と説明を、`dunlin --version` は版を表示します。`--json` を付けないときは、結果を人が読む短い文で表示します。すべての項目が必要なときは `--json` を付けます。打ち間違えたコマンド、オプション、動作には、近い候補を示します。',
     ...commandGroups.map(([title, names]) => section('## ' + title, block('text', names.split(' ').map((name) => projectCommands[name])))),
     '## 主な引数',
     [

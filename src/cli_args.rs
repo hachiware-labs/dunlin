@@ -139,6 +139,223 @@ pub fn usage(command: &str) -> Option<&'static str> {
         .map(|(_, usage)| *usage)
 }
 
+/// The commands of `dunlin --help` in groups, each with what it does.
+pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
+    (
+        "Start",
+        &[
+            ("init", "Create a project: mcp, rag, wiki or para"),
+            (
+                "config",
+                "Set the models and OCR tool that new projects use",
+            ),
+            ("add", "Install an optional tool such as OCR or hannoy"),
+            ("remove", "Remove an installed tool from the project"),
+        ],
+    ),
+    (
+        "Build and search (mcp, rag)",
+        &[
+            ("build", "Read the documents and build the search index"),
+            ("source", "Run only the scan and extraction stage"),
+            ("transform", "Run only the normalization and chunking stage"),
+            ("index", "Run only the indexing stage"),
+            (
+                "search",
+                "Search the documents and print the passages found",
+            ),
+            ("ask", "Answer a question from the documents, with sources"),
+            ("serve", "Serve the project over MCP or HTTP"),
+            (
+                "status",
+                "Show the serving build, its evaluation and storage",
+            ),
+            ("use", "Serve another build"),
+            ("tag", "Name a build"),
+        ],
+    ),
+    (
+        "Evaluate (mcp, rag)",
+        &[
+            (
+                "eval-data",
+                "Manage the questions and quotes used to evaluate",
+            ),
+            (
+                "evidence-map",
+                "Locate the quotes of the evaluation data in a build",
+            ),
+            ("eval", "Evaluate a build with the evaluation data"),
+            ("report", "Show and compare evaluation reports"),
+            ("dictionary", "Suggest and add user dictionary words"),
+        ],
+    ),
+    (
+        "Wiki and PARA",
+        &[
+            ("ingress", "Read sources and write wiki pages from them"),
+            ("query", "Answer a question from the wiki pages"),
+            ("verify", "Check pages against their sources"),
+            (
+                "issue",
+                "Open, resolve or dismiss an issue that verify found",
+            ),
+            ("rules", "Print the writing rules of the wiki"),
+            ("progress", "Show the progress of a running job"),
+            ("cite", "Show the source of a citation on a page"),
+            ("instruct", "Ask for a change to a page, or add a rule"),
+            ("save-answer", "Save a query answer as a page"),
+            ("archive", "Archive or restore a page"),
+            ("undo", "Undo the changes of a job"),
+        ],
+    ),
+    (
+        "Configuration",
+        &[
+            ("validate", "Check Dunlinfile.yaml"),
+            (
+                "defaults",
+                "Compare Dunlinfile.yaml with the current defaults",
+            ),
+            ("modules", "List the modules and their arguments"),
+        ],
+    ),
+];
+
+/// What a command does, as `dunlin --help` lists it.
+pub fn description(command: &str) -> Option<&'static str> {
+    GROUPS
+        .iter()
+        .flat_map(|(_, commands)| commands.iter())
+        .find(|(name, _)| *name == command)
+        .map(|(_, description)| *description)
+}
+
+/// The usage of a command broken at its options so that each line stays short.
+pub fn wrapped_usage(command: &str) -> Option<String> {
+    let usage = usage(command)?;
+    let mut parts: Vec<String> = Vec::new();
+    let mut depth = 0;
+    let mut current = String::new();
+    for c in usage.chars() {
+        match c {
+            '[' | '<' => depth += 1,
+            ']' | '>' => depth -= 1,
+            _ => {}
+        }
+        if c == ' ' && depth == 0 && current.chars().count() > 0 {
+            parts.push(std::mem::take(&mut current));
+        } else {
+            current.push(c);
+        }
+    }
+    parts.push(current);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for part in parts {
+        if part == "|" {
+            lines.push(std::mem::take(&mut line));
+            line.push_str("| ");
+            continue;
+        }
+        if !line.is_empty()
+            && !line.ends_with("| ")
+            && line.chars().count() + part.chars().count() > 76
+        {
+            lines.push(std::mem::take(&mut line));
+            line.push_str("    ");
+        }
+        if !line.is_empty() && !line.ends_with(' ') {
+            line.push(' ');
+        }
+        line.push_str(&part);
+    }
+    lines.push(line);
+    Some(
+        lines
+            .iter()
+            .map(|line| format!("  {}", line.trim_start_matches("| ").trim_end()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+/// The help of one command: what it does and its usage.
+pub fn command_help(command: &str) -> Option<String> {
+    Some(format!(
+        "dunlin {command} — {}\n\nUsage:\n{}",
+        description(command).unwrap_or_default(),
+        wrapped_usage(command)?
+    ))
+}
+
+/// The overall help of `dunlin --help`.
+pub fn help_text() -> String {
+    let mut out = format!(
+        "Dunlin {} — search your documents, or keep a wiki written from them.\n\nUsage: dunlin [--project <directory>] <command> [options]\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    for (group, commands) in GROUPS {
+        out.push('\n');
+        out.push_str(group);
+        out.push('\n');
+        for (name, description) in commands {
+            out.push_str(&format!("  {name:<14}{description}\n"));
+        }
+    }
+    out.push_str(
+        "\nOptions for every command\n  --project <directory>  The project folder (default: the nearest Dunlinfile.yaml)\n  --json                 Print one JSON object with schema_version 1\n  --help                 Show the options of a command\n  --version              Print the version\n\nRun dunlin <command> --help for the options of a command.",
+    );
+    out
+}
+
+/// Edit distance with adjacent transpositions (optimal string alignment).
+fn distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut rows = vec![vec![0; b.len() + 1]; a.len() + 1];
+    for (i, row) in rows.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for (j, cell) in rows[0].iter_mut().enumerate() {
+        *cell = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            let mut best = (rows[i - 1][j] + 1)
+                .min(rows[i][j - 1] + 1)
+                .min(rows[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                best = best.min(rows[i - 2][j - 2] + 1);
+            }
+            rows[i][j] = best;
+        }
+    }
+    rows[a.len()][b.len()]
+}
+
+/// The closest of `candidates` to a mistyped `input`, if one is close enough to be meant.
+pub fn closest<'a>(input: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    let input = input.to_lowercase();
+    let limit = match input.chars().count() {
+        0..=3 => 1,
+        4..=7 => 2,
+        _ => 3,
+    };
+    candidates
+        .into_iter()
+        .map(|candidate| (distance(&input, candidate), candidate))
+        .filter(|(score, _)| *score <= limit)
+        .min_by_key(|(score, _)| *score)
+        .map(|(_, candidate)| candidate)
+}
+
+/// The closest command to a mistyped one.
+pub fn closest_command(input: &str) -> Option<&'static str> {
+    closest(input, COMMANDS.iter().map(|(name, _)| *name))
+}
+
 const STAGES: [&str; 3] = ["source", "transform", "index"];
 
 #[derive(Clone, Copy, PartialEq)]
@@ -322,9 +539,12 @@ impl Parsed {
     }
 }
 
-fn unknown(option: &str) -> String {
+fn unknown(command: &str, option: &str, declared: &[(&'static str, Kind)]) -> String {
+    let name = option.trim_start_matches('-');
+    let hint = closest(name, declared.iter().map(|(key, _)| *key))
+        .map_or(String::new(), |key| format!(" Did you mean --{key}?"));
     format!(
-        "Unknown option '{option}'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"{option}\""
+        "Unknown option {option} for dunlin {command}.{hint} Run dunlin {command} --help for its options; to pass a value that starts with '-', put it after --."
     )
 }
 
@@ -367,7 +587,7 @@ pub fn parse(command: &str, args: &[String]) -> Result<Parsed, String> {
                 None => (long, None),
             };
             let Some(kind) = find(name) else {
-                return Err(unknown(&format!("--{name}")));
+                return Err(unknown(command, &format!("--{name}"), &declared));
             };
             match (kind, inline) {
                 (Kind::Boolean, Some(_)) => {
@@ -394,7 +614,7 @@ pub fn parse(command: &str, args: &[String]) -> Result<Parsed, String> {
             // Short options: only -h.
             for short in arg[1..].chars() {
                 if short != 'h' {
-                    return Err(unknown(&format!("-{short}")));
+                    return Err(unknown(command, &format!("-{short}"), &declared));
                 }
                 store(&mut values, "help", Kind::Boolean, ConfigValue::Bool(true));
             }
@@ -443,13 +663,37 @@ mod tests {
             parse("status", &args(&["-x"]))
                 .err()
                 .unwrap()
-                .starts_with("Unknown option '-x'")
+                .starts_with("Unknown option -x for dunlin status.")
         );
         assert_eq!(
             parse("status", &args(&["--", "--json"]))
                 .unwrap()
                 .positionals,
             ["--json"]
+        );
+        assert!(
+            parse("search", &args(&["q", "--limt", "3"]))
+                .err()
+                .unwrap()
+                .contains("Did you mean --limit?")
+        );
+    }
+
+    #[test]
+    fn suggests_the_command_that_was_meant() {
+        assert_eq!(closest_command("serach"), Some("search"));
+        assert_eq!(closest_command("stauts"), Some("status"));
+        assert_eq!(closest_command("bulid"), Some("build"));
+        assert_eq!(closest_command("xyzzy"), None);
+        assert_eq!(closest("mpc", ["mcp", "rag", "wiki", "para"]), Some("mcp"));
+        assert!(help_text().contains("eval-data"));
+        for (name, _) in COMMANDS {
+            assert!(description(name).is_some(), "{name}");
+        }
+        let help = command_help("search").unwrap();
+        assert!(
+            help.lines().all(|line| line.chars().count() <= 100),
+            "{help}"
         );
     }
 }

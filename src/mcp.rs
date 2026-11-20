@@ -39,18 +39,39 @@ fn source_ids() -> String {
 }
 
 fn search_schema(project: bool) -> String {
-    let project_options = if project {
-        format!(
-            r#","budgetChars":{{"type":"integer","minimum":1,"maximum":1000000}},"budget_chars":{{"type":"integer","minimum":1,"maximum":1000000}},"source_ids":{}"#,
-            source_ids()
-        )
-    } else {
-        String::new()
-    };
+    if project {
+        // `sourceIds` and `budgetChars` are still accepted for earlier clients (`project_aliases`).
+        return format!(
+            r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"query":{{"type":"string","description":"Words or a question to search for."}},"limit":{{"type":"integer","minimum":1,"maximum":100,"description":"The most results to return."}},"source_ids":{{"minItems":1,"maxItems":100,"type":"array","items":{SOURCE_ID},"description":"Search only these sources: the source IDs of the project."}},"budget_chars":{{"type":"integer","minimum":1,"maximum":1000000,"description":"The most characters of source context to return."}}}},"required":["query"]}}"#
+        );
+    }
     format!(
-        r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"query":{{"type":"string"}},"limit":{{"type":"integer","minimum":1,"maximum":100}},"sourceIds":{}{project_options}}},"required":["query"]}}"#,
+        r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"query":{{"type":"string"}},"limit":{{"type":"integer","minimum":1,"maximum":100}},"sourceIds":{}}},"required":["query"]}}"#,
         source_ids()
     )
+}
+
+/// The earlier names of the project search options, with their current names.
+const ALIASES: [(&str, &str); 2] = [("sourceIds", "source_ids"), ("budgetChars", "budget_chars")];
+
+/// The arguments of a project search with the earlier camelCase names renamed, or the message for
+/// an option given in both forms.
+fn project_aliases(
+    input: Option<&serde_json::Map<String, Value>>,
+) -> Result<Option<serde_json::Map<String, Value>>, String> {
+    let Some(input) = input else {
+        return Ok(None);
+    };
+    let mut renamed = input.clone();
+    for (old, new) in ALIASES {
+        if let Some(value) = renamed.remove(old) {
+            if renamed.contains_key(new) {
+                return Err("Specify each search option once.".into());
+            }
+            renamed.insert(new.to_owned(), value);
+        }
+    }
+    Ok(Some(renamed))
 }
 
 const SAFE: &str = "9007199254740991";
@@ -452,6 +473,32 @@ impl McpServer {
         tools
     }
 
+    /// The arguments of a call checked against the tool's schema, with the earlier names of the
+    /// project search options renamed first.
+    fn checked(
+        &self,
+        name: &str,
+        schema: &str,
+        input: Option<&serde_json::Map<String, Value>>,
+    ) -> Result<Value, String> {
+        if self.host.is_some() && name == "knowledge.search" {
+            return arguments(name, schema, project_aliases(input)?.as_ref()).map_err(|message| {
+                // Name each option as the caller wrote it.
+                let mut message = message;
+                for (old, new) in ALIASES {
+                    if input.is_some_and(|input| input.contains_key(old)) {
+                        for end in [':', '.'] {
+                            message =
+                                message.replace(&format!("{new}{end}"), &format!("{old}{end}"));
+                        }
+                    }
+                }
+                message
+            });
+        }
+        arguments(name, schema, input)
+    }
+
     /// Runs a checked tool call. Blocking: the caller runs it off the async runtime.
     fn run(&self, name: &str, arguments: &Value, cancel: &Cancellation) -> Result<String, String> {
         let native = |error: crate::Error| error.to_string();
@@ -598,7 +645,7 @@ impl McpServer {
         let Some((_, schema)) = self.tools().into_iter().find(|(tool, _)| tool.name == name) else {
             return Err(format!("Tool {name} not found"));
         };
-        let checked = match arguments(name, &schema, input) {
+        let checked = match self.checked(name, &schema, input) {
             Ok(checked) => checked,
             Err(message) => return Ok(error_json(&message)),
         };
@@ -645,7 +692,7 @@ impl ServerHandler for McpServer {
                 None,
             ));
         };
-        let arguments = match arguments(&name, &schema, request.arguments.as_ref()) {
+        let arguments = match self.checked(&name, &schema, request.arguments.as_ref()) {
             Ok(arguments) => arguments,
             Err(message) => return Ok(failure(message).into()),
         };

@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { currentSearchSchemaText } from './fixtures/search-schema.mjs';
 import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
@@ -150,11 +152,21 @@ test('serves HTTP like the former JavaScript server', { timeout: 180_000 }, asyn
     mcpDelete: { method: 'DELETE', path: '/mcp', headers: auth },
     mcpPut: { method: 'PUT', path: '/mcp', headers: auth },
   };
+  // Replies that say more than the former server did: the JSON error and the configured model. The
+  // search tool's schema is compared after currentSearchSchema.
+  const changed = {
+    searchInvalidJson: (body) => assert.match(JSON.parse(body).error.message, /^Provide valid JSON: EOF while parsing/u),
+    answerModel: (body) => assert.equal(JSON.parse(body).error.message, 'This project answers with local. Leave out model, or set it to local.'),
+  };
   for (const [name, request] of Object.entries(cases)) {
     const [a, b] = await Promise.all([send(actual, request), send(expected, request)]);
     assert.equal(a.status, b.status, name);
     for (const header of compared) assert.equal(a.headers[header], b.headers[header], name + ' ' + header);
     if (a.status === 413) assert.equal(a.headers.connection, b.headers.connection, name);
-    assert.equal(stable(a.body), stable(b.body), name);
+    if (changed[name]) changed[name](a.body);
+    else assert.equal(stable(a.body), stable(currentSearchSchemaText(b.body)), name);
   }
+  const latin1 = await send(actual, { headers: json, body: Buffer.from('{"query":"é"}', 'latin1') });
+  assert.equal(latin1.status, 400);
+  assert.match(JSON.parse(latin1.body).error.message, /^Send the request body as UTF-8 JSON\./u);
 });

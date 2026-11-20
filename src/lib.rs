@@ -39,6 +39,8 @@ mod cli_models;
 mod cli_project;
 #[cfg(all(feature = "node", not(test)))]
 mod cli_run;
+#[cfg(any(feature = "node", test))]
+mod cli_text;
 #[cfg(all(feature = "node", not(test)))]
 mod cli_tools;
 #[cfg(any(feature = "node", test))]

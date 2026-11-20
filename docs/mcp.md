@@ -14,7 +14,7 @@ dunlin search "手順" --json
 dunlin serve --print-config
 ```
 
-最後のコマンドが出力する `command` と `args` を MCP クライアントに登録します。クライアントが `dunlin serve` を起動し、`knowledge.search` と `knowledge.read` が使えます。標準のキーワード検索は、モデルや評価データの設定なしで使えます。
+最後のコマンドは、MCP クライアントの設定（`.mcp.json` や `claude_desktop_config.json` など）の `mcpServers` にそのまま貼れる項目を表示します。`--json` を付けると、`command` と `args` だけを返します。クライアントが `dunlin serve` を起動し、`knowledge.search` と `knowledge.read` が使えます。標準のキーワード検索は、モデルや評価データの設定なしで使えます。
 
 資料を更新したら `dunlin build` を再実行します。実行中の MCP は次の要求から完成した索引を使います。未対応のファイルは `source.filesystem` の `with.exclude` に除外パターンを指定するか、`dunlin build --skip-unsupported` で飛ばせます。
 
@@ -104,7 +104,7 @@ dunlin init rag ./rag
 
 ## 日本語検索とユーザー辞書
 
-標準のキーワード索引は同梱の Lindera と IPADIC で分かち書きします。分かち書きした語を BM25 で順位付けし、問い合わせと同じ語列が続く箇所に加点します。モデルを登録せずに `dunlin search "ポンプの点検はいつ実施しますか"` を使えます。[Lindera のライセンス](../licenses/lindera-LICENSE.txt) · [IPADIC の通知](../licenses/ipadic-NOTICE.txt)
+標準のキーワード索引は同梱の Lindera と IPADIC で分かち書きします。分かち書きした語を BM25 で順位付けし、問い合わせと同じ語列が続く箇所に加点します。「する」「いる」「ある」や「こと」のような軽い語は、問い合わせのほかの語と並ぶ箇所の加点にだけ使います。そのため「存在しない語句」のように、軽い語だけが一致する文書は返しません。問い合わせが軽い語だけのときは、それらの語で検索します。モデルを登録せずに `dunlin search "ポンプの点検はいつ実施しますか"` を使えます。[Lindera のライセンス](../licenses/lindera-LICENSE.txt) · [IPADIC の通知](../licenses/ipadic-NOTICE.txt)
 
 専門用語を登録する場合は、たとえば `dictionaries/ja.csv` に UTF-8 で次の1行を書きます。見出し行は省き、`表層形,品詞,読み` の順に並べます。表層形は、文書と問い合わせの前処理後の表記に合わせます。標準の Unicode 正規化は NFKC です。
 

@@ -188,7 +188,7 @@ test('shares one RAG search payload, grounded answers and live index across CLI,
   model: 'local-test', stream: false })), cliSearch);
   assert.deepEqual(model.calls.map(({ question }) => question), [query, query]);
   assert.deepEqual(model.calls[0], model.calls[1]);
-  assert.match((await kb.run('ask', query)).stdout, /docs:guide\.txt/u);
+  assert.match((await kb.run('ask', query)).stdout, /交換周期は6か月です。 \[1\]\n\nSources\n\[1\] guide\.txt:1-2\n/u);
   const decline = await ok(post(base, '/v1/responses', { input: 'xyzzy' }));
   assert.match(decline.output[0].content[0].text, /根拠を確認できませんでした/u);
   assert.deepEqual(decline.output[0].content[0].annotations, []);

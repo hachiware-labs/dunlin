@@ -90,7 +90,7 @@ test('keeps completed stages and the serving index through scan and index failur
   await writeFile(join(docs, 'guide.txt'), '交換手順を確認する。\n');
   const first = await json('build');
   const text = (await run('--project', 'kb', 'status')).stdout;
-  assert.match(text.split('\n')[0], /^bld-\S+ search-\S+ unevaluated/u);
+  assert.match(text, /^Build +bld-\S+\nSearch +search-\S+\nEvaluation +unevaluated\n/u);
   const { storage } = await json('status');
   assert.ok(storage.build_index_logical_bytes > 0);
   // Text files keep no original file: the corpus restores them (spec 28.14).

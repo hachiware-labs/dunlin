@@ -506,22 +506,30 @@ impl KeywordSnapshot<'_> {
     ) -> Result<usize> {
         cancel.check()?;
         let japanese_terms;
+        let mut light;
         let groups;
         let query = if let KeywordTokenizer::Japanese(tokenizer) = &self.index.tokenizer {
             validate_query_input(input)?;
-            japanese_terms = tokenizer.terms(input)?;
+            (japanese_terms, light) = tokenizer.query_terms(input)?;
+            // Light words such as 「する」 only rank documents that match another word.
+            if japanese_terms
+                .iter()
+                .all(|term| term == GAP || light.contains(term))
+            {
+                light.clear();
+            }
             let mut seen = HashSet::new();
             groups = japanese_terms
                 .iter()
                 .map(String::as_str)
-                .filter(|term| *term != GAP && seen.insert(*term))
+                .filter(|term| *term != GAP && !light.contains(*term) && seen.insert(*term))
                 .map(|term| (term, false))
                 .collect::<Vec<_>>();
             if groups.is_empty() {
                 return Ok(0);
             }
             validate_query_size(&groups)?;
-            self.japanese_query(&groups, &japanese_terms)
+            self.japanese_query(&groups, &japanese_terms, &light)
         } else {
             groups = query_groups(input)?;
             self.any_term(&groups)
@@ -615,11 +623,20 @@ impl KeywordSnapshot<'_> {
         )
     }
 
-    fn japanese_query(&self, groups: &[(&str, bool)], terms: &[String]) -> BooleanQuery {
+    fn japanese_query(
+        &self,
+        groups: &[(&str, bool)],
+        terms: &[String],
+        light: &HashSet<String>,
+    ) -> BooleanQuery {
         let mut clauses: Vec<Box<dyn Query>> = vec![Box::new(self.any_term(groups))];
         let mut seen = HashSet::new();
         for pair in terms.windows(2) {
-            if pair.iter().any(|term| term == GAP) || !seen.insert((&pair[0], &pair[1])) {
+            // A phrase of light words alone would match documents that share no other word.
+            if pair.iter().any(|term| term == GAP)
+                || pair.iter().all(|term| light.contains(term))
+                || !seen.insert((&pair[0], &pair[1]))
+            {
                 continue;
             }
             for (field, boost) in [(self.index.title_terms, 1.0), (self.index.body_terms, 0.5)] {

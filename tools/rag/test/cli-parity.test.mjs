@@ -172,6 +172,45 @@ const steps = [
   ['status'],
 ];
 
+/**
+ * The steps whose output the Rust CLI now writes for people instead of printing JSON or a bare
+ * usage line, with the stream that changed. `message` is a `--json` result whose error message
+ * changed while its code stayed. Everything else of these steps is still compared.
+ */
+const rewritten = new Map([
+  [['--help'], 'stdout'],
+  [['init', 'wiki', 'w2', '--source', 'x'], 'stderr'],
+  [['--project', 'kb', 'validate'], 'stdout'],
+  [['--project', 'kb', 'modules', 'describe', 'retrieval.keyword'], 'stdout'],
+  [['--project', 'r2', 'modules', 'list'], 'stdout'],
+  [['--project', 'kb', 'add', '--list'], 'stdout'],
+  [['--project', 'r2', 'defaults'], 'stdout'],
+  [['--project', 'kb', 'build', '--skip-unsupported'], 'stdout'],
+  [['--project', 'kb', 'source', '--dry-run'], 'stdout'],
+  [['--project', 'kb', 'search', 'ポンプ'], 'stdout'],
+  [['--project', 'kb', 'search', 'gasket', '--budget-chars', '40', '--source-id', 'docs'], 'stdout'],
+  [['--project', 'kb', 'search'], 'stderr'],
+  [['--project', 'kb', 'search', 'q', '--bogus'], 'stderr'],
+  [['--project', 'kb', 'tag', 'v1'], 'stdout'],
+  [['--project', 'kb', 'tag', 'bad tag'], 'stderr'],
+  [['--project', 'kb', 'eval-data', 'add', '--question', 'Valve gasket?', '--doc', 'b.txt', '--quote', 'Replace the gasket every year.'], 'stdout'],
+  [['--project', 'kb', 'evidence-map', 'list'], 'stdout'],
+  [['--project', 'kb', 'eval-data', 'bogus'], 'stderr'],
+  [['--project', 'kb', 'eval', '--split', 'nope'], 'stderr'],
+  [['--project', 'kb', 'report', 'list'], 'stdout'],
+  [['--project', 'kb', 'report', 'compare', 'first', 'first'], 'stdout'],
+  [['--project', 'kb', 'status'], 'stdout'],
+  [['--project', 'kb', 'dictionary', 'add', 'x.csv'], 'stderr'],
+  [['--project', 'kb', 'build', '--tag', 'bad tag'], 'stderr'],
+  [['--project', 'kb', 'use', 'cand'], 'stdout'],
+  [['--project', 'm', 'status'], 'stdout'],
+  [['--project', 'w', 'rules'], 'stdout'],
+  [['--project', 'w', 'ingress', '--dry-run', 'kb/docs'], 'stdout'],
+  [['--project', 'w', 'query', 'ポンプ'], 'stdout'],
+  [['--project', 'p', 'validate'], 'stdout'],
+  [['bogus', '--json'], 'message'],
+].map(([args, stream]) => [JSON.stringify(args), stream]));
+
 const candidates = {
   'kb/bad.yaml': 'init:\n  version: 1\n  type: rag\nsource: [\n',
   'kb/typeless.yaml': 'init:\n  version: 1\n',
@@ -225,8 +264,36 @@ test('runs the CLI like the former JavaScript CLI', { timeout: 600_000 }, async 
     const reference = await scenario(clis.reference, root);
     const rust = await scenario(clis.rust, root);
     for (const [index, expected] of reference.results.entries()) {
-      assert.deepEqual(rust.results[index], expected, JSON.stringify(expected.args));
+      const actual = rust.results[index];
+      const key = JSON.stringify(expected.args);
+      const stream = rewritten.get(key);
+      if (stream === undefined) {
+        assert.deepEqual(actual, expected, key);
+        continue;
+      }
+      // The text is the Rust CLI's own; the exit code and the other stream still match.
+      assert.equal(actual.code, expected.code, key);
+      for (const other of ['stdout', 'stderr'].filter((name) => name !== stream && stream !== 'message')) {
+        assert.equal(actual[other], expected[other], key + ' ' + other);
+      }
+      if (stream === 'message') {
+        const strip = (text) => JSON.stringify({ ...JSON.parse(text), errors: JSON.parse(text).errors.map(({ message, ...rest }) => rest) });
+        assert.equal(strip(actual.stdout), strip(expected.stdout), key);
+        assert.equal(actual.stderr, expected.stderr, key);
+      } else {
+        assert.notEqual(actual[stream], '', key);
+        assert.ok(!actual[stream].trimStart().startsWith('{\n'), key + ' prints text, not JSON');
+      }
     }
+    const text = (args) => rust.results[steps.findIndex((step) => JSON.stringify(step) === JSON.stringify(args))];
+    assert.match(text(['--help']).stdout, /^Dunlin \d+\.\d+\.\d+ — /u);
+    assert.match(text(['--project', 'kb', 'status']).stdout, /^Build +bld-\S+\nSearch +search-\S+\nEvaluation +evaluated: evidence_recall/u);
+    assert.match(text(['--project', 'kb', 'build', '--skip-unsupported']).stdout, /^(Built|Reused build) bld-\S+ from 3 of 4 files in \d+ ms\./u);
+    assert.match(text(['--project', 'kb', 'search', 'ポンプ']).stdout, /^a\.md — ポンプ\n[\s\S]*\n\n1 result; \d+ of 4000 characters\.\n$/u);
+    assert.match(text(['--project', 'kb', 'search', 'q', '--bogus']).stderr, /^Unknown option --bogus for dunlin search\./u);
+    assert.match(text(['--project', 'kb', 'eval-data', 'bogus']).stderr, /^Unknown action for dunlin eval-data: bogus\. Use add, /u);
+    assert.match(text(['--project', 'kb', 'tag', 'v1']).stdout, /^Tagged bld-\S+ as v1\.\n$/u);
+    assert.equal(text(['--project', 'w', 'rules']).stdout, '# 運用の決まり\n');
     for (const file of files) assert.equal(rust.saved[file], reference.saved[file], file);
     console.log(`compared ${steps.length} commands and ${files.length} files`);
   } finally {

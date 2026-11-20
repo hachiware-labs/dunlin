@@ -555,7 +555,9 @@ fn answer_one(
         let mut lines: Vec<String> = Vec::new();
         let mut offset = 0;
         for (statement, ids) in statements {
-            let line = statement.trim_matches(crate::registry::js_space).to_owned();
+            let line = crate::wiki_commands::without_markers(&statement)
+                .trim_matches(crate::registry::js_space)
+                .to_owned();
             if line.is_empty() || ids.iter().any(|&id| id > sources.len() as f64) {
                 return Err(invalid(
                     "INVALID_CITATION",

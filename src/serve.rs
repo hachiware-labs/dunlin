@@ -943,11 +943,22 @@ impl Server {
         if !json {
             return Reply::error(415, "CONTENT_TYPE", "Use application/json.");
         }
-        let Some(body) = std::str::from_utf8(&bytes)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(text).ok())
-        else {
-            return Reply::error(400, "INVALID_JSON", "Provide valid JSON.");
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            return Reply::error(
+                400,
+                "INVALID_JSON",
+                "Send the request body as UTF-8 JSON. The body is not UTF-8; on Windows, save the JSON to a UTF-8 file and send it with curl --data-binary @file.",
+            );
+        };
+        let body = match serde_json::from_str::<Value>(text) {
+            Ok(body) => body,
+            Err(error) => {
+                return Reply::error(
+                    400,
+                    "INVALID_JSON",
+                    &format!("Provide valid JSON: {error}."),
+                );
+            }
         };
         let invalid = || {
             Reply::error(
@@ -990,7 +1001,10 @@ impl Server {
             return Reply::error(
                 400,
                 "MODEL_MISMATCH",
-                "Use the model configured for this project.",
+                &format!(
+                    "This project answers with {}. Leave out model, or set it to {}.",
+                    model.model, model.model
+                ),
             );
         }
         let query = match question(&input) {

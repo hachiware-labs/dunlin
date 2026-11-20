@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use crate::Cancellation;
-use crate::cli_args::{COMMANDS, Parsed};
+use crate::cli_args::Parsed;
 use crate::cli_models::{
     embedding_settings, generator_settings, model_setting, resolve_api_key, resolve_value,
 };
@@ -68,14 +68,6 @@ fn envelope(
     .to_js_json()
 }
 
-fn usage_text() -> String {
-    let lines: Vec<String> = COMMANDS
-        .iter()
-        .map(|(_, line)| format!("  {line}"))
-        .collect();
-    format!("Usage:\n{}", lines.join("\n"))
-}
-
 /// Runs the CLI with `process.argv.slice(2)` and returns the exit code (`cli.mjs`).
 pub fn run(
     mut args: Vec<String>,
@@ -120,18 +112,34 @@ pub fn run(
         }
     }
     let Some(command) = args.first().cloned() else {
-        print(&usage_text());
+        print(&crate::cli_args::help_text());
         return 0;
     };
     if command == "--help" || command == "-h" {
-        print(&usage_text());
+        print(&crate::cli_args::help_text());
         return 0;
     }
+    if ["--version", "-v", "-V", "version"].contains(&command.as_str()) {
+        print(&format!("dunlin {}", env!("CARGO_PKG_VERSION")));
+        return 0;
+    }
+    if command == "help" {
+        return match args.get(1) {
+            None => {
+                print(&crate::cli_args::help_text());
+                0
+            }
+            Some(name) => match crate::cli_args::command_help(name) {
+                Some(help) => {
+                    print(&help);
+                    0
+                }
+                None => fail(Some(name), &unknown_command(name)),
+            },
+        };
+    }
     if crate::cli_args::usage(&command).is_none() {
-        return fail(
-            Some(&command),
-            &format!("Unknown command: {command}. See dunlin --help."),
-        );
+        return fail(Some(&command), &unknown_command(&command));
     }
     run_command(
         &command,
@@ -141,6 +149,13 @@ pub fn run(
         cancel,
         events,
     )
+}
+
+fn unknown_command(command: &str) -> String {
+    let hint = crate::cli_args::closest_command(command).map_or(String::new(), |name| {
+        format!(" Did you mean dunlin {name}?")
+    });
+    format!("Unknown command: {command}.{hint} Run dunlin --help for the commands.")
 }
 
 fn new_run_id() -> String {
@@ -159,6 +174,9 @@ struct Run<'a> {
     env: &'a CliEnv,
     cancel: &'a Cancellation,
     events: Arc<dyn CliEvents>,
+    /// What the text output needs besides the result: the search that `ask` answered from, or
+    /// `{ project }` for `serve --print-config`.
+    context: Option<ConfigValue>,
 }
 
 /// What a command printed besides its result: the serve commands print nothing more.
@@ -187,6 +205,7 @@ fn run_command(
         env,
         cancel,
         events,
+        context: None,
     };
     let mut kind = String::new();
     let outcome = (|| -> Result<Done, CliError> {
@@ -197,7 +216,7 @@ fn run_command(
         })?;
         json = parsed.flag("json");
         if parsed.flag("help") {
-            print(crate::cli_args::usage(command).unwrap_or_default());
+            print(&crate::cli_args::command_help(command).unwrap_or_default());
             return Ok(Done::Quiet);
         }
         kind = parsed.positionals.first().cloned().unwrap_or_default();
@@ -221,7 +240,12 @@ fn run_command(
                     Vec::new(),
                 ));
             } else {
-                print(&text_output(command, &kind, &data));
+                print(&text_output(command, &kind, &data, state.context.as_ref()));
+                if command == "serve" {
+                    print_error(
+                        "Add this entry to the mcpServers of your MCP client's settings, such as .mcp.json or claude_desktop_config.json.",
+                    );
+                }
             }
             0
         }
@@ -333,7 +357,15 @@ fn report_error(command: &str, state: &Run, error: CliError, json: bool) -> u8 {
     exit
 }
 
-fn text_output(command: &str, kind: &str, data: &ConfigValue) -> String {
+fn text_output(
+    command: &str,
+    kind: &str,
+    data: &ConfigValue,
+    context: Option<&ConfigValue>,
+) -> String {
+    if let Some(text) = crate::cli_text::text_output(command, kind, data, context) {
+        return text;
+    }
     let field = |name: &str| js_string(data.get(name));
     match command {
         "init" => {
@@ -367,20 +399,6 @@ fn text_output(command: &str, kind: &str, data: &ConfigValue) -> String {
             ));
             lines.join("\n")
         }
-        "search" => {
-            let context = data.get("context").and_then(|context| context.get("text"));
-            format!(
-                "{} {}\n{}",
-                field("build_id"),
-                field("search_config_id"),
-                if truthy(context) {
-                    js_string(context)
-                } else {
-                    "No matches.".into()
-                }
-            )
-        }
-        "ask" => answer_text(data),
         "dictionary" => {
             if kind == "suggest" {
                 crate::cli_dictionary::dictionary_text(data)
@@ -388,91 +406,8 @@ fn text_output(command: &str, kind: &str, data: &ConfigValue) -> String {
                 field("user_dictionary")
             }
         }
-        "status" if truthy(data.get("build_id")) => {
-            let report = data
-                .get("evaluation_report")
-                .filter(|report| truthy(Some(report)));
-            format!(
-                "{} {} {}{}\n{}",
-                field("build_id"),
-                field("search_config_id"),
-                field("evaluation_status"),
-                report.map_or(String::new(), |report| format!(
-                    " {}",
-                    report
-                        .get("scores")
-                        .map_or("undefined".into(), ConfigValue::to_js_json)
-                )),
-                pretty_json(data)
-            )
-        }
-        "build" if truthy(data.get("build_id")) => {
-            let skipped = items(data.get("skipped"));
-            let mut lines = vec![format!(
-                "{} {}\nDocuments: {}/{}; skipped: {}; index {} ({} ms).\nServing changed: {}\nNext: dunlin search \"手順\"",
-                field("build_id"),
-                field("config_id"),
-                field("documents"),
-                field("files"),
-                skipped.len(),
-                if truthy(data.get("reused")) {
-                    "reused"
-                } else {
-                    "built"
-                },
-                field("elapsed_ms"),
-                field("serving_changed")
-            )];
-            for file in skipped {
-                lines.push(format!(
-                    "{}:{} — {}",
-                    js_string(file.get("source_id")),
-                    js_string(file.get("path")),
-                    js_string(file.get("reason"))
-                ));
-            }
-            if let Some(ConfigValue::Object(stages)) = data.get("stages") {
-                for (stage, result) in stages {
-                    lines.push(format!(
-                        "{stage}: {} ({})",
-                        if truthy(result.get("reused")) {
-                            "reused"
-                        } else {
-                            "executed"
-                        },
-                        js_string(result.get("id"))
-                    ));
-                }
-            }
-            lines.join("\n")
-        }
-        _ => pretty_json(data),
+        _ => crate::cli_text::readable(data),
     }
-}
-
-fn answer_text(response: &ConfigValue) -> String {
-    let content = items(response.get("output"))
-        .first()
-        .and_then(|output| items(output.get("content")).first())
-        .cloned()
-        .unwrap_or_default();
-    let mut sources: Vec<String> = Vec::new();
-    for annotation in items(content.get("annotations")) {
-        let id = js_string(annotation.get("file_id"));
-        if !sources.contains(&id) {
-            sources.push(id);
-        }
-    }
-    let mut out = js_string(content.get("text"));
-    if !sources.is_empty() {
-        out += "\n\nSources\n";
-        out += &sources
-            .iter()
-            .map(|id| format!("- {id}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-    }
-    out
 }
 
 fn is_tag_name(value: &str) -> bool {
@@ -492,7 +427,18 @@ fn blank(value: &str) -> bool {
 }
 
 fn action_count(command: &str, action: Option<&str>) -> Option<i64> {
-    let table: &[(&str, i64)] = match command {
+    let table = action_table(command)?;
+    Some(
+        table
+            .iter()
+            .find(|(name, _)| Some(*name) == action)
+            .map_or(-1, |(_, count)| *count),
+    )
+}
+
+/// The actions of a command that takes one, each with its number of positional arguments.
+fn action_table(command: &str) -> Option<&'static [(&'static str, i64)]> {
+    Some(match command {
         "config" => &[("list", 1), ("set", 2), ("unset", 2)],
         "eval-data" => &[
             ("add", 1),
@@ -518,14 +464,35 @@ fn action_count(command: &str, action: Option<&str>) -> Option<i64> {
             ("import", 2),
             ("confirm", 2),
         ],
+        "modules" => &[("list", 1), ("describe", 2)],
         _ => return None,
-    };
-    Some(
-        table
+    })
+}
+
+/// The error for a first positional argument that names no action or project type of `command`.
+fn unknown_action(command: &str, given: &str) -> Option<CliError> {
+    let known: Vec<&str> = if command == "init" {
+        crate::cli_project::PROJECT_TYPES.to_vec()
+    } else {
+        action_table(command)?
             .iter()
-            .find(|(name, _)| Some(*name) == action)
-            .map_or(-1, |(_, count)| *count),
-    )
+            .map(|(name, _)| *name)
+            .collect()
+    };
+    if known.contains(&given) {
+        return None;
+    }
+    let what = if command == "init" {
+        "project type"
+    } else {
+        "action"
+    };
+    let hint = crate::cli_args::closest(given, known.iter().copied())
+        .map_or(String::new(), |name| format!(" Did you mean {name}?"));
+    Some(invalid(format!(
+        "Unknown {what} for dunlin {command}: {given}.{hint} Use {}.",
+        known.join(", ")
+    )))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -540,11 +507,19 @@ fn dispatch(
     let positionals = &parsed.positionals;
     let value = |name: &str| parsed.string(name);
     let flag = |name: &str| parsed.flag(name);
-    let usage = || invalid(crate::cli_args::usage(command).unwrap_or_default());
+    let usage = || {
+        invalid(format!(
+            "Check the arguments of dunlin {command}.\nUsage:\n{}",
+            crate::cli_args::wrapped_usage(command).unwrap_or_default()
+        ))
+    };
     if command == "serve" && flag("json") && !flag("print-config") {
         return Err(invalid("Use --json with serve --print-config."));
     }
     let first = positionals.first().map(String::as_str);
+    if let Some(error) = first.and_then(|given| unknown_action(command, given)) {
+        return Err(error);
+    }
     let count = match action_count(command, first) {
         Some(count) => count,
         None => match command {
@@ -612,7 +587,7 @@ fn dispatch(
             || (parsed.value("source").is_some() && !is_search_project(kind))
             || value("purpose").is_some_and(|purpose| is_search_project(kind) || blank(purpose))
         {
-            return Err(invalid(crate::cli_args::usage("init").unwrap_or_default()));
+            return Err(usage());
         }
     }
     let mut search_options = SearchOptions {
@@ -924,6 +899,7 @@ fn dispatch(
         return status_command(state, &project).map(Done::Data);
     }
     if command == "serve" && flag("print-config") {
+        state.context = Some(object(vec![("project", text(&project.root))]));
         let serving = serving.unwrap_or_default();
         if string_field(&serving, "transport") == Some("http") {
             let endpoints = items(serving.get("endpoints"));
@@ -998,6 +974,7 @@ fn dispatch(
         &search_options,
     )?;
     if command == "ask" {
+        state.context = Some(result.clone());
         let request = object(vec![
             ("plan", module_settings(stage(&project.plan, "ask"))),
             ("search", result),

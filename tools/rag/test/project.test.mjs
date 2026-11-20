@@ -427,7 +427,12 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   assert.equal(result.results[0].evidence.source.objectId, 'guide.md');
   assert.match(result.context.text, /作業手順を確認/u);
 
-  const launch = JSON.parse((await run(root, '--project', project, 'serve', '--print-config')).stdout);
+  // Without --json, print-config prints an mcpServers entry to paste into a client's settings.
+  const printed = await run(root, '--project', project, 'serve', '--print-config');
+  const servers = JSON.parse(printed.stdout).mcpServers;
+  assert.deepEqual(Object.keys(servers), ['dunlin-knowledge']);
+  assert.match(printed.stderr, /mcpServers/u);
+  const launch = servers['dunlin-knowledge'];
   await client.connect(new StdioClientTransport({ ...launch, cwd: root, stderr: 'ignore' }));
   const { structuredContent, isError } = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順' } });
   assert.ok(!isError);

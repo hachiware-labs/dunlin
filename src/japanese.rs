@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -42,7 +43,19 @@ impl JapaneseTokenizer {
     }
 
     pub(crate) fn terms(&self, text: &str) -> Result<Vec<String>> {
+        Ok(self.collect(text)?.0)
+    }
+
+    /// The terms of a query and its light words: words such as 「する」 or 「こと」 that match almost
+    /// every document and say little alone. A term that also occurs as a full word is not light.
+    pub(crate) fn query_terms(&self, text: &str) -> Result<(Vec<String>, HashSet<String>)> {
+        self.collect(text)
+    }
+
+    fn collect(&self, text: &str) -> Result<(Vec<String>, HashSet<String>)> {
         let mut terms = Vec::new();
+        let mut light = HashSet::new();
+        let mut full = HashSet::new();
         let mut end = 0;
         for mut token in self
             .0
@@ -54,12 +67,20 @@ impl JapaneseTokenizer {
             }
             end = token.byte_end;
             match search_token(&mut token) {
-                SearchToken::Term(term) => terms.push(term),
+                SearchToken::Term(term) => {
+                    full.insert(term.clone());
+                    terms.push(term);
+                }
+                SearchToken::Light(term) => {
+                    light.insert(term.clone());
+                    terms.push(term);
+                }
                 SearchToken::Skip => (),
                 SearchToken::Gap => add_gap(&mut terms),
             }
         }
-        Ok(terms)
+        light.retain(|term| !full.contains(term));
+        Ok((terms, light))
     }
 
     #[cfg(all(feature = "node", not(test)))]
@@ -72,7 +93,7 @@ impl JapaneseTokenizer {
                     .into_iter()
                     .map(|mut token| {
                         let term = match search_token(&mut token) {
-                            SearchToken::Term(term) => Some(term),
+                            SearchToken::Term(term) | SearchToken::Light(term) => Some(term),
                             _ => None,
                         };
                         let reading = token
@@ -103,28 +124,50 @@ pub(crate) struct AnalyzedToken {
 
 enum SearchToken {
     Term(String),
+    /// A word that carries little meaning alone: indexed, but left out of queries with other words.
+    Light(String),
     Skip,
     Gap,
 }
 
+/// Verbs that mostly carry grammar, as in 「存在しない」 or 「行っている」.
+const LIGHT_VERBS: [&str; 7] = ["する", "いる", "ある", "なる", "できる", "おる", "いう"];
+
 fn search_token(token: &mut Token) -> SearchToken {
     // Keep unknown terms and user-defined forms, and normalize known inflections.
+    let mut light = false;
     let base = {
         let mut details = token.details_iter();
-        match details.next() {
+        let part = details.next();
+        match part {
             Some("助詞" | "助動詞") => return SearchToken::Skip,
             Some("記号") => return SearchToken::Gap,
             _ => (),
         }
-        details
-            .nth(5)
+        if matches!(details.next(), Some("非自立")) {
+            light = true;
+        }
+        let base = details
+            .nth(4)
             .filter(|word| {
                 *word != "*" && !word.is_empty() && !word.chars().any(char::is_whitespace)
             })
-            .map(str::to_lowercase)
+            .map(str::to_lowercase);
+        if part == Some("動詞")
+            && base
+                .as_deref()
+                .is_some_and(|base| LIGHT_VERBS.contains(&base))
+        {
+            light = true;
+        }
+        base
     };
     if let Some(base) = base {
-        SearchToken::Term(base)
+        if light {
+            SearchToken::Light(base)
+        } else {
+            SearchToken::Term(base)
+        }
     } else if token
         .surface
         .chars()
@@ -185,5 +228,25 @@ pub(crate) fn merge_user_records(existing: Option<&Path>, selected: &Path) -> Re
 fn add_gap(terms: &mut Vec<String>) {
     if terms.last().is_some_and(|term| term != GAP) {
         terms.push(GAP.into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marks_light_words_in_queries() {
+        let tokenizer = JapaneseTokenizer::open(None).unwrap();
+        let (terms, light) = tokenizer.query_terms("存在しない語句ゼブラ").unwrap();
+        assert!(terms.iter().any(|term| term == "する"), "{terms:?}");
+        assert!(
+            light.contains("する") && !light.contains("ゼブラ"),
+            "{light:?}"
+        );
+        let (_, light) = tokenizer.query_terms("第12節").unwrap();
+        assert!(light.is_empty(), "{light:?}");
+        let indexed = tokenizer.terms("点検している").unwrap();
+        assert!(indexed.iter().any(|term| term == "する"), "{indexed:?}");
     }
 }

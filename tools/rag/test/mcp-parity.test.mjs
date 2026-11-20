@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { currentSearchSchema } from './fixtures/search-schema.mjs';
 import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
@@ -69,7 +71,7 @@ async function compare(t, actual, expected) {
     expected.send({ id, method, params });
     const [a, b] = await Promise.all([actual.answer(id), expected.answer(id)]);
     assert.deepEqual(a.error, b.error, JSON.stringify({ method, params }));
-    assert.deepEqual(timeless(a.result), timeless(b.result), JSON.stringify({ method, params }));
+    assert.deepEqual(timeless(a.result), timeless(currentSearchSchema(b.result)), JSON.stringify({ method, params }));
     return a.result;
   };
   for (const version of ['2025-11-25']) {

@@ -18,6 +18,8 @@
 | `BUILD_BUSY` または `DB_BUSY` | 同じプロジェクトの更新処理が終わってから再試行します。Wiki・PARA は作業 ID を `dunlin progress` に渡すと進捗を確認できます。 |
 | `EVAL_DATA_REQUIRED` または `REPORT_REQUIRED` | `eval-data add` または `import` で調整用の評価データを入れ、`dunlin eval --tag baseline` を実行します。 |
 | `INVALID_USER_DICTIONARY` | UTF-8 の見出しなし CSV に `表層形,品詞,読み` の3列を並べます。表層形の空白と、候補設定から見た辞書の相対パスを確認します。 |
+| HTTP の `INVALID_JSON` | 本文を UTF-8 の JSON で送ります。Windows の `curl` で日本語を直接書くと UTF-8 にならないことがあります。JSON を UTF-8 のファイルに保存し、`curl --data-binary @request.json` で送ります。 |
+| HTTP の `MODEL_MISMATCH` | `/v1/responses` の `model` を省くか、メッセージに示されたプロジェクトのモデル名にします。 |
 | `AUTH_TOKEN_REQUIRED` または HTTP 401 | `serve.access.auth.token_env` に指定した環境変数を設定し、クライアントの認証情報を合わせます。 |
 | HTTP 403 | 接続先のホスト名とブラウザの Origin を `allowed_hosts`、`allowed_origins` と照合します。 |
 | ポートが使用中 | 既存の `serve` を止めるか、`dunlin serve --port 4320` のように空きポートを指定します。 |

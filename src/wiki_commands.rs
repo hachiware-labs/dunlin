@@ -95,6 +95,17 @@ pub(crate) fn verified_facts(facts: Vec<Fact>, refs: &[Ref]) -> (Vec<Fact>, Vec<
     (kept, rejected)
 }
 
+/// A statement without the source markers such as `[1]` that a model wrote into it: the page adds
+/// its own markers, numbered by citation.
+pub(crate) fn without_markers(text: &str) -> String {
+    static MARKERS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let markers = MARKERS.get_or_init(|| {
+        regex::Regex::new(r"[ \t\u{3000}]*(?:\[\d{1,3}\]|［[0-9０-９]{1,3}］)")
+            .expect("valid pattern")
+    });
+    markers.replace_all(text, "").into_owned()
+}
+
 /// `verifyFacts(facts, refs)`: the page text with source markers and the citation of each marker.
 pub(crate) fn verify_facts(
     facts: &[Fact],
@@ -156,7 +167,11 @@ pub(crate) fn verify_facts(
             citations.push(ConfigValue::Object(entries));
             marks.push(format!("[{}]", citations.len()));
         }
-        paragraphs.push(format!("{} {}", js_trim(&fact.text), marks.join(" ")));
+        paragraphs.push(format!(
+            "{} {}",
+            js_trim(&without_markers(&fact.text)),
+            marks.join(" ")
+        ));
     }
     Ok((paragraphs.join("\n\n"), citations))
 }
@@ -517,7 +532,7 @@ fn save_answer(
         }
         markdown.push(format!(
             "{} {}",
-            crate::eval_stage::js_string(fact.get("text")),
+            without_markers(&crate::eval_stage::js_string(fact.get("text"))),
             marks.join(" ")
         ));
     }
@@ -1132,6 +1147,16 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn removes_the_markers_a_model_wrote() {
+        assert_eq!(without_markers("緊急停止 [1]"), "緊急停止");
+        assert_eq!(
+            without_markers("交換は2年 [1][2]ごと［３］。"),
+            "交換は2年ごと。"
+        );
+        assert_eq!(without_markers("配列 a[i] は残す"), "配列 a[i] は残す");
     }
 
     #[test]

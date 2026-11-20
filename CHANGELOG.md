@@ -10,11 +10,17 @@
 - `eval-data generate` が評価ケースのない文書から順に読み、`--count` で指定した件数まで候補を作るようにしました。引用を検証できない候補だけを除き、理由ごとの件数を表示します。`eval-data review` は `--case` を繰り返して複数件を確認できます。
 - リリース用の npm パッケージを組み立てる `npm run release:prepare` と、手動実行のワークフロー **Release Dunlin**、MCP Registry 用の `server.json` を追加しました。
 - Node.js API から、直接開いた索引の資料を抜粋してページを作る `kb.wiki`、同期の結果の `wiki`、MCP の道具 `knowledge.wiki_get` をなくしました。Wiki と PARA は、CLI と同じ実装を `Dunlin.wiki` と `Dunlin.wikiServe` で呼べます。
-- CLI のコマンドを Rust で実行するようにしました。出力、エラー、終了コード、書き出す設定ファイルは以前と同じです。HTML の本文の取り出しと Office 文書の変換も Rust で行い、npm の依存から `cheerio`、`yaml`、`zod`、`docling.rs` をなくしました。`dunlin dictionary add` は候補設定の `user_dictionary` の行だけを書き換え、他の行の書式とコメントをそのまま残します。
+- CLI のコマンドを Rust で実行するようにしました。`--json` の出力、エラーの番号、終了コード、書き出す設定ファイルは以前と同じです。HTML の本文の取り出しと Office 文書の変換も Rust で行い、npm の依存から `cheerio`、`yaml`、`zod`、`docling.rs` をなくしました。`dunlin dictionary add` は候補設定の `user_dictionary` の行だけを書き換え、他の行の書式とコメントをそのまま残します。
 - 構築で、テキスト、Markdown、コードの文書の原本ファイルを作らないようにしました。原本はコーパスに保存した本文から復元できます。Markdown 10,000 件の構築が 6.6 秒から 3.7 秒になりました。Wiki と PARA の取り込みは、ページの引用がリンクする原本ファイルをこれまでどおり作ります。チャンクの検索用の文字列（NFKC）も保存せず、読むときに作り直すようにしました。チャンクの保存領域は約1割になり、ビルドの ID は変わりません。
 - Wiki と PARA の `ingress` は、引用が資料と一字一句一致しない記述だけを保存せず、残りの記述でページを作るようにしました。保存しなかった記述は `CITATION_REJECTED` の警告で示します。すべての記述が一致しない場合だけ失敗します。
 - `dunlin use` が `Dunlinfile.yaml` から `index.keyword` の `tokenizer` を消していた問題を直しました。設定を保存するときに、`token` を含む名前をすべて秘密として外していたためです。メッセージのない設定の警告は、`undefined` ではなく場所と対処を表示します。
 - `init --source` に存在しないフォルダを渡すと、`SOURCE_MISSING` で止まるようにしました。`build` も、資料のフォルダがないときは `ENOENT` の代わりにフォルダと直し方を示します。`use` や `--build` に存在しないビルドを渡したときは、`BUILD_NOT_FOUND` を返します。
+- `--json` を付けないときの表示を、JSON から人が読む短い文に変えました。`status`、`build`、`search`、`eval`、`report`、`validate`、`modules`、`eval-data`、`evidence-map`、`tag`、`use` などが対象です。`ask` は回答に出典の番号を付け、出典ごとにファイル、行、見出しを示します。
+- `dunlin --help` にコマンドの説明を加え、`dunlin --version` と `dunlin help <command>` を追加しました。打ち間違えたコマンド、オプション、動作、プロジェクトの種類には、`Did you mean ...?` で近い候補を示します。
+- `serve --print-config` が、MCP クライアントの設定に貼れる `mcpServers` の項目を表示するようにしました。`--json` の結果は `command` と `args` のままです。MCP の `knowledge.search` は、プロジェクトの検索で `source_ids` と `budget_chars` だけを説明付きで示します。以前の `sourceIds` と `budgetChars` も受け付けます。
+- 日本語のキーワード検索で、「する」「いる」「こと」などの軽い語だけが一致する文書を返さないようにしました。「存在しない語句ゼブラ」が「し」だけで一致していました。
+- HTTP で本文が UTF-8 でないときは、UTF-8 で送る方法を示すようにしました。JSON の誤りは位置を、`MODEL_MISMATCH` はプロジェクトのモデル名を示します。
+- モデルが記述に `[1]` などの番号を書いても、Wiki のページや `ask` の回答で番号が重ならないようにしました。
 - README を CLI 利用者向けにし、Node.js API、検索評価、Wiki・PARA、設定や運用のガイドを整備しました。
 
 ### 以前のプロジェクトから移行する

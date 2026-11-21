@@ -3,7 +3,7 @@ use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
 use tantivy::directory::error::LockError;
-use tantivy::directory::{Directory, Lock, MmapDirectory};
+use tantivy::directory::{Directory, Lock};
 
 use crate::storage::{read_json, write_json};
 use crate::{Cancellation, Error, Result};
@@ -75,7 +75,7 @@ impl PlanEvaluation {
 }
 
 pub(crate) struct PlanStore {
-    directory: MmapDirectory,
+    directory: crate::storage::RetryDirectory,
     active: RwLock<RetrievalPlan>,
 }
 
@@ -83,7 +83,7 @@ impl PlanStore {
     pub fn open(path: &Path) -> Result<Self> {
         std::fs::create_dir_all(path)
             .map_err(|_| Error::Io("Could not create the plan directory"))?;
-        let directory = MmapDirectory::open(path).map_err(|_| Error::Plan)?;
+        let directory = crate::storage::RetryDirectory::open(path).map_err(|_| Error::Plan)?;
         let active =
             match read_json::<String>(&directory, Path::new(ACTIVE)).map_err(|_| Error::Plan)? {
                 Some(id) => load_plan(&directory, &id).map_err(|_| Error::Plan)?,
@@ -145,7 +145,7 @@ impl PlanStore {
     }
 }
 
-fn load_plan(directory: &MmapDirectory, id: &str) -> Result<RetrievalPlan> {
+fn load_plan(directory: &crate::storage::RetryDirectory, id: &str) -> Result<RetrievalPlan> {
     if let Some(method) = RetrievalMethod::ALL
         .into_iter()
         .find(|method| method.plan_id() == id)

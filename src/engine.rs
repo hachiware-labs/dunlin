@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tantivy::collector::{Count, TopDocs};
-use tantivy::directory::{Directory, Lock, MmapDirectory};
+use tantivy::directory::{Directory, Lock};
 use tantivy::query::{
     BooleanQuery, BoostQuery, ConstScoreQuery, EnableScoring, Occur, PhraseQuery, Query,
     RangeQuery, RegexQuery, TermQuery, TermSetQuery,
@@ -100,7 +100,7 @@ impl KeywordIndex {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             _ => return Err(Error::Index),
         }
-        let directory = MmapDirectory::open(path).map_err(|_| Error::Index)?;
+        let directory = crate::storage::RetryDirectory::open(path).map_err(|_| Error::Index)?;
         if !Index::exists(&directory).map_err(|_| Error::Index)? {
             return Ok(None);
         }
@@ -150,7 +150,7 @@ impl KeywordIndex {
         let body_terms = schema.add_text_field("body_terms", terms);
         let evidence = schema.add_text_field("evidence", STORED);
         let content = schema.add_text_field("content", STORED);
-        let directory = MmapDirectory::open(path).map_err(|_| Error::Index)?;
+        let directory = crate::storage::RetryDirectory::open(path).map_err(|_| Error::Index)?;
         let _initialize = if Index::exists(&directory).map_err(|_| Error::Index)? {
             None
         } else {
@@ -167,9 +167,12 @@ impl KeywordIndex {
         index
             .tokenizers()
             .register("dunlin-words", WhitespaceTokenizer::default());
+        // No watcher on `meta.json`: this handle reloads after its own commits, a CLI build writes
+        // a new folder that `serve` opens, and another handle sees changes when it opens again.
+        // On Windows the watcher's reads made commits fail while it held the file open.
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .reload_policy(ReloadPolicy::Manual)
             .try_into()?;
         Ok(Self {
             corpus: Corpus::open(corpus_path, backend, cancel)?,
@@ -370,11 +373,6 @@ impl KeywordIndex {
             index: self,
             searcher: self.reader.searcher(),
         }
-    }
-
-    pub fn current_snapshot(&self) -> Result<KeywordSnapshot<'_>> {
-        self.reader.reload()?;
-        Ok(self.snapshot())
     }
 
     pub fn read(&self, evidence: &Evidence) -> Result<ReadOutcome> {

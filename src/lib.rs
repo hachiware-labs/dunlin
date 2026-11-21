@@ -408,7 +408,7 @@ impl KnowledgeBase {
     /// Exports stored documents and their line evidence from one index revision.
     pub fn snapshot_documents(&self, cancel: &Cancellation) -> Result<DocumentSnapshot> {
         cancel.check()?;
-        let snapshot = self.index.current_snapshot()?;
+        let snapshot = self.index.snapshot();
         let documents = snapshot.documents(cancel)?;
         cancel.check()?;
         Ok(DocumentSnapshot {
@@ -419,7 +419,7 @@ impl KnowledgeBase {
 
     pub fn get_index_revision(&self, cancel: &Cancellation) -> Result<String> {
         cancel.check()?;
-        Ok(self.index.current_snapshot()?.revision())
+        Ok(self.index.snapshot().revision())
     }
 
     /// Looks up a stored document by its stable source and object IDs.
@@ -432,7 +432,7 @@ impl KnowledgeBase {
         source::validate_id(&document.source_id)?;
         let result = self
             .index
-            .current_snapshot()?
+            .snapshot()
             .object(&document.source_id, &document.object_id)?;
         cancel.check()?;
         Ok(result)

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
-use tantivy::directory::{Directory, MmapDirectory};
+use tantivy::directory::Directory;
 
 use crate::{
     Cancellation, DocumentFormat, DocumentRef, Error, Evidence, LineRange, Result,
@@ -73,7 +73,7 @@ pub struct CorpusDocument {
 }
 
 pub(crate) struct Corpus {
-    json: MmapDirectory,
+    json: crate::storage::RetryDirectory,
     /// JSON revisions existed when the corpus opened. Without them, saves skip a file check.
     legacy_json: bool,
     sqlite_path: PathBuf,
@@ -149,7 +149,7 @@ impl Corpus {
     pub fn open(path: &Path, backend: CorpusBackend, cancel: &Cancellation) -> Result<Self> {
         std::fs::create_dir_all(path)
             .map_err(|_| Error::Io("Could not create the corpus directory"))?;
-        let json = MmapDirectory::open(path)
+        let json = crate::storage::RetryDirectory::open(path)
             .map_err(|_| Error::Io("Could not open the corpus directory"))?;
         let sqlite_path = path.join(SQLITE_FILE);
         let sqlite = match backend {

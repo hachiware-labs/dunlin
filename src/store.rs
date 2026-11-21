@@ -470,13 +470,13 @@ impl Store {
         serde_json::from_str(&meta).map_err(|_| corrupt("notes of an object"))
     }
 
-    /// What `process` made of an object, if the object remembers.
-    pub fn result(&self, input: &ObjectId, process: &ProcessId) -> StoreResult<Option<ItemId>> {
+    /// What `process` made of an object or an item, if it remembers. `input` is its ID.
+    pub fn result(&self, input: &str, process: &ProcessId) -> StoreResult<Option<ItemId>> {
         let found: Option<Option<String>> = self
             .objects
             .query_row(
                 "SELECT json_extract(results, ?) FROM objects WHERE id = ?",
-                params![path(process.as_str())?, input.as_str()],
+                params![path(process.as_str())?, input],
                 |row| row.get(0),
             )
             .optional()?;
@@ -568,6 +568,27 @@ impl Store {
             })
         })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
+    }
+
+    /// Points a name at a snapshot, as `dunlin tag` and a release do. It is recorded as a run of
+    /// `stage`, so the history of the name shows it.
+    pub fn tag(&self, stage: &str, name: &str, snapshot: SnapshotId) -> StoreResult<()> {
+        self.snapshot(snapshot)?;
+        transact(&self.records, || {
+            self.records.execute(
+                "INSERT INTO runs (id, stage, key, inputs, state, started_at, completed_at,
+                    snapshot, tag) VALUES (?, ?, '', '[]', 'complete', ?, ?, ?, ?)",
+                params![
+                    format!("run-{}", uuid::Uuid::new_v4()),
+                    stage,
+                    now_ms() as i64,
+                    now_ms() as i64,
+                    snapshot.0,
+                    name
+                ],
+            )?;
+            self.move_tag(name, snapshot)
+        })
     }
 
     /// Takes `tag` from the snapshot that has it and gives it to `snapshot`. Inside a
@@ -720,7 +741,7 @@ impl Draft<'_> {
     }
 
     /// What `process` made of an object, if the object remembers.
-    pub fn result(&self, input: &ObjectId, process: &ProcessId) -> StoreResult<Option<ItemId>> {
+    pub fn result(&self, input: &str, process: &ProcessId) -> StoreResult<Option<ItemId>> {
         self.store.result(input, process)
     }
 
@@ -729,7 +750,7 @@ impl Draft<'_> {
     pub fn put(
         &mut self,
         name: ItemName,
-        input: &ObjectId,
+        input: &str,
         process: &ProcessId,
         parts: &[Part],
     ) -> StoreResult<ItemId> {
@@ -737,7 +758,7 @@ impl Draft<'_> {
         self.write(item.as_str(), canonical(&item_value(parts)).as_bytes())?;
         let remembered = self.store.objects.execute(
             "UPDATE objects SET results = json_set(results, ?, ?) WHERE id = ?",
-            params![path(process.as_str())?, item.as_str(), input.as_str()],
+            params![path(process.as_str())?, item.as_str(), input],
         )?;
         if remembered == 0 {
             return Err(StoreError::new(format!(

@@ -223,7 +223,7 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
             let object = ObjectId::parse(id)
                 .ok_or_else(|| StoreError::new("The file list holds an ID that is not valid."))?;
             // Only the parser that takes this file is asked what it made of the content.
-            if let Some(item) = draft.result(&object, &applied)? {
+            if let Some(item) = draft.result(object.as_str(), &applied)? {
                 draft.list(name(document), item.to_string());
                 continue;
             }
@@ -248,7 +248,7 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
                 derived_from: None,
                 attrs: json!({}),
             };
-            draft.put(name(document), &object, &applied, &[part])?;
+            draft.put(name(document), object.as_str(), &applied, &[part])?;
         }
         draft.set_stats(json!({
             "read": read,

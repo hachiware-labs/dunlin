@@ -11,12 +11,14 @@ mod excerpt;
 mod explore;
 pub mod extract;
 pub mod glob;
+pub mod index;
 mod japanese;
 mod legacy_delete;
 #[cfg(any(feature = "node", test))]
 mod markdown;
 mod model;
 mod node_path;
+pub mod pipeline;
 mod plans;
 pub mod records;
 pub mod registry;
@@ -24,6 +26,7 @@ mod source;
 mod storage;
 pub mod store;
 mod sync;
+pub mod transform;
 pub mod yaml_config;
 #[cfg(any(feature = "node", test))]
 mod yaml_emit;

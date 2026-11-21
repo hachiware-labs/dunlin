@@ -36,7 +36,7 @@ const RECORDS: &str = "
         inputs TEXT NOT NULL, state TEXT NOT NULL, started_at INTEGER NOT NULL,
         completed_at INTEGER, snapshot INTEGER, outcome TEXT, degraded INTEGER NOT NULL DEFAULT 0,
         tag TEXT, added INTEGER, updated INTEGER, deleted INTEGER, unchanged INTEGER,
-        config TEXT, info TEXT, stats TEXT);
+        config TEXT, info TEXT, stats TEXT, cause TEXT);
     CREATE INDEX IF NOT EXISTS runs_key ON runs (key);
     CREATE INDEX IF NOT EXISTS runs_tag ON runs (tag);";
 
@@ -174,6 +174,11 @@ pub struct RunRecord {
     /// How the result was made: its type, what its inputs held and the modules with their
     /// arguments. It is the key of the run in a form that can be read.
     pub info: Option<InfoId>,
+    /// The run that started this one, such as an optimization. Only the run that was started
+    /// says so.
+    pub cause: Option<String>,
+    /// Lists and other details that are not part of the result.
+    pub stats: Value,
     pub started_at: u64,
     pub completed_at: Option<u64>,
 }
@@ -315,6 +320,7 @@ impl Store {
             keyed: info.is_some(),
             info,
             config: None,
+            cause: None,
             items: Vec::new(),
             degraded: false,
             pending: 0,
@@ -332,12 +338,28 @@ impl Store {
             .records
             .query_row(
                 "SELECT snapshot FROM runs WHERE key = ? AND state = 'complete' AND degraded = 0
+                    AND snapshot IS NOT NULL
                  ORDER BY rowid DESC LIMIT 1",
                 [key.as_str()],
                 |row| row.get::<_, i64>(0),
             )
             .optional()?
             .map(SnapshotId))
+    }
+
+    /// The snapshot a run of `process` on `inputs` would be given without running, if there is
+    /// one. It is how a plan says what will run.
+    pub fn lookup(
+        &self,
+        kind: &str,
+        inputs: &[SnapshotId],
+        process: &Process,
+    ) -> StoreResult<Option<SnapshotId>> {
+        let digests = inputs
+            .iter()
+            .map(|input| self.snapshot(*input).map(|snapshot| snapshot.digest()))
+            .collect::<StoreResult<Vec<_>>>()?;
+        self.find(&snapshot_key(kind, &digests, process))
     }
 
     /// The snapshot that has a tag now.
@@ -533,7 +555,7 @@ impl Store {
     pub fn runs(&self) -> StoreResult<Vec<RunRecord>> {
         let mut statement = self.records.prepare(
             "SELECT id, stage, state, outcome, degraded, inputs, snapshot, tag, added, updated,
-                deleted, unchanged, started_at, completed_at, config, info FROM runs
+                deleted, unchanged, started_at, completed_at, config, info, cause, stats FROM runs
              ORDER BY rowid",
         )?;
         let rows = statement.query_map([], |row| {
@@ -563,6 +585,11 @@ impl Store {
                 info: row
                     .get::<_, Option<String>>(15)?
                     .and_then(|id| InfoId::parse(&id)),
+                cause: row.get(16)?,
+                stats: row
+                    .get::<_, Option<String>>(17)?
+                    .and_then(|stats| serde_json::from_str(&stats).ok())
+                    .unwrap_or(Value::Null),
                 started_at: row.get::<_, i64>(12)? as u64,
                 completed_at: row.get::<_, Option<i64>>(13)?.map(|at| at as u64),
             })
@@ -651,6 +678,7 @@ pub struct Draft<'a> {
     keyed: bool,
     info: Option<InfoId>,
     config: Option<ObjectId>,
+    cause: Option<String>,
     items: Vec<(ItemName, String)>,
     degraded: bool,
     /// Objects written since the last save.
@@ -695,6 +723,11 @@ impl Draft<'_> {
     pub fn set_config(&mut self, file: &[u8]) -> StoreResult<()> {
         self.config = Some(self.save(file)?);
         Ok(())
+    }
+
+    /// Names the run that started this one.
+    pub fn set_cause(&mut self, run: &str) {
+        self.cause = Some(run.to_owned());
     }
 
     /// Lists and other details for the run record. They are not part of the snapshot.
@@ -782,8 +815,8 @@ impl Draft<'_> {
         }
     }
 
-    /// Saves the written objects.
-    fn flush(&mut self) -> StoreResult<()> {
+    /// Saves the written objects. A run that starts other runs does this before it starts one.
+    pub fn flush(&mut self) -> StoreResult<()> {
         self.pending = 0;
         if !self.writing {
             return Ok(());
@@ -800,8 +833,8 @@ impl Draft<'_> {
     /// transaction of `records`.
     fn complete(
         &self,
-        snapshot: SnapshotId,
-        outcome: Outcome,
+        snapshot: Option<SnapshotId>,
+        outcome: Option<Outcome>,
         tag: Option<&str>,
     ) -> StoreResult<()> {
         let counts = self.counts.map(|counts| {
@@ -816,11 +849,11 @@ impl Draft<'_> {
         self.store.records.execute(
             "UPDATE runs SET state = 'complete', completed_at = ?, snapshot = ?, outcome = ?,
                 degraded = ?, tag = ?, added = ?, updated = ?, deleted = ?, unchanged = ?,
-                config = ?, stats = ? WHERE id = ?",
+                config = ?, stats = ?, cause = ? WHERE id = ?",
             params![
                 now_ms() as i64,
-                snapshot.0,
-                outcome.as_str(),
+                snapshot.map(|snapshot| snapshot.0),
+                outcome.map(Outcome::as_str),
                 self.degraded,
                 tag,
                 count(0),
@@ -829,13 +862,23 @@ impl Draft<'_> {
                 count(3),
                 self.config.as_ref().map(ObjectId::as_str),
                 canonical(&self.stats),
+                self.cause,
                 self.run
             ],
         )?;
-        match tag {
-            Some(tag) => self.store.move_tag(tag, snapshot),
-            None => Ok(()),
+        match (tag, snapshot) {
+            (Some(tag), Some(snapshot)) => self.store.move_tag(tag, snapshot),
+            _ => Ok(()),
         }
+    }
+
+    /// Ends a run that makes no snapshot, such as an optimization: what it did is in its
+    /// configuration, its details and the runs that name it as their cause.
+    pub fn finish(mut self) -> StoreResult<String> {
+        self.flush()?;
+        transact(&self.store.records, || self.complete(None, None, None))?;
+        self.done = true;
+        Ok(self.run.clone())
     }
 
     /// Ends the run with a snapshot that `existing` found, and points `tag` at it.
@@ -846,7 +889,7 @@ impl Draft<'_> {
     ) -> StoreResult<Committed> {
         self.flush()?;
         transact(&self.store.records, || {
-            self.complete(snapshot, Outcome::Reused, tag)
+            self.complete(Some(snapshot), Some(Outcome::Reused), tag)
         })?;
         self.done = true;
         Ok(Committed {
@@ -908,7 +951,7 @@ impl Draft<'_> {
                     )
                 }
             };
-            self.complete(result.0, result.1, tag)?;
+            self.complete(Some(result.0), Some(result.1), tag)?;
             Ok(result)
         })?;
         self.done = true;

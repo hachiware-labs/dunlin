@@ -4,6 +4,8 @@
 //! The item of a document keeps its text and gains a `chunks` part that is derived from it. An
 //! item remembers what a chunking made of it, so a document that did not change is not read.
 //!
+//! The chunking is `chunk.length` or `chunk.structure`.
+//!
 //! Not here yet: normalization as a module of its own, page boundaries and `chunk.semantic`.
 
 use serde_json::json;
@@ -16,13 +18,60 @@ use crate::store::{Committed, Counts, SnapshotId, Store, StoreError, StoreResult
 pub struct TransformRequest<'a> {
     /// The `extracted` snapshot to chunk.
     pub input: SnapshotId,
-    /// Maximum characters per chunk.
-    pub size: usize,
-    /// Characters repeated from the end of the previous chunk.
-    pub overlap: usize,
+    pub chunking: Chunking,
     pub tag: Option<&'a str>,
     /// The configuration file as it is now. It is kept with the run.
     pub config: Option<&'a [u8]>,
+    /// The run that started this one, such as an optimization.
+    pub cause: Option<&'a str>,
+}
+
+/// The module that splits the text, with its arguments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Chunking {
+    /// `chunk.length`: windows of at most `size` characters, each starting with `overlap`
+    /// characters of the one before.
+    Length { size: usize, overlap: usize },
+    /// `chunk.structure`: at most `max_chars` characters, split where a section starts.
+    Structure { max_chars: usize },
+}
+
+impl Chunking {
+    /// What the chunking is to the store: a change of module is a change of this, as a change
+    /// of an argument is.
+    pub fn process(self) -> Process {
+        let (name, args) = match self {
+            Self::Length { size, overlap } => (
+                "chunk.length",
+                json!({ "unit": "characters", "size": size, "overlap": overlap, "nfkc": true }),
+            ),
+            Self::Structure { max_chars } => (
+                "chunk.structure",
+                json!({ "unit": "characters", "max_chars": max_chars, "nfkc": true }),
+            ),
+        };
+        Process {
+            modules: vec![ModuleIdentity {
+                name: name.into(),
+                compatibility: 1,
+                args,
+            }],
+        }
+    }
+
+    fn size(self) -> usize {
+        match self {
+            Self::Length { size, .. } => size,
+            Self::Structure { max_chars } => max_chars,
+        }
+    }
+
+    fn overlap(self) -> usize {
+        match self {
+            Self::Length { overlap, .. } => overlap,
+            Self::Structure { .. } => 0,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -32,16 +81,6 @@ pub struct TransformOutcome {
     pub chunked: usize,
     /// Compared with the snapshot the tag pointed at before.
     pub counts: Counts,
-}
-
-fn chunking(size: usize, overlap: usize) -> Process {
-    Process {
-        modules: vec![ModuleIdentity {
-            name: "chunk.length".into(),
-            compatibility: 1,
-            args: json!({ "unit": "characters", "size": size, "overlap": overlap, "nfkc": true }),
-        }],
-    }
 }
 
 fn counts(before: &[(ItemName, String)], after: &[(ItemName, String)]) -> Counts {
@@ -57,7 +96,7 @@ fn counts(before: &[(ItemName, String)], after: &[(ItemName, String)]) -> Counts
 /// Chunks the documents of an `extracted` snapshot.
 pub fn transform(store: &Store, request: &TransformRequest<'_>) -> StoreResult<TransformOutcome> {
     let input = store.snapshot(request.input)?;
-    let process = chunking(request.size, request.overlap);
+    let process = request.chunking.process();
     let applied = process.id();
     let before = match request.tag {
         Some(tag) => store.resolve(tag)?,
@@ -72,6 +111,9 @@ pub fn transform(store: &Store, request: &TransformRequest<'_>) -> StoreResult<T
     let mut draft = store.begin("transform", "chunks", &[request.input], &process)?;
     if let Some(config) = request.config {
         draft.set_config(config)?;
+    }
+    if let Some(cause) = request.cause {
+        draft.set_cause(cause);
     }
     if let Some(existing) = draft.existing()? {
         let counts = counts(&before, &store.snapshot(existing)?.items);
@@ -110,9 +152,9 @@ pub fn transform(store: &Store, request: &TransformRequest<'_>) -> StoreResult<T
                     markdown: text.media_type == "text/markdown",
                     boundaries: Vec::new(),
                 }],
-                size: request.size,
-                overlap: request.overlap,
-                structure: false,
+                size: request.chunking.size(),
+                overlap: request.chunking.overlap(),
+                structure: matches!(request.chunking, Chunking::Structure { .. }),
                 nfkc: true,
             },
             &Cancellation::default(),

@@ -1,0 +1,8 @@
+[
+  { "id": "pump-check", "question": "ポンプの点検", "source": "docs", "document": "manuals/pump.md", "quote": "ポンプの点検は毎月最初の営業日に行う。", "split": "dev" },
+  { "id": "pump-seal", "question": "シールの交換", "source": "docs", "document": "manuals/pump.md", "quote": "型番 P-200 のシールは、2年ごとに交換する。", "split": "dev" },
+  { "id": "filter", "question": "フィルターの交換", "source": "docs", "document": "manuals/フィルター.md", "quote": "フィルターは6か月ごとに交換する。", "split": "dev" },
+  { "id": "valve-drain", "question": "排水バルブ", "source": "docs", "document": "manuals/valve.md", "quote": "排水バルブは、作業の後に必ず開けて、配管の水を抜く。", "split": "dev" },
+  { "id": "faq-update", "question": "文書を更新したら", "source": "docs", "document": "faq.txt", "quote": "変わった文書だけを読み直します。", "split": "dev" },
+  { "id": "final-valve", "question": "給水バルブ", "source": "docs", "document": "manuals/valve.md", "quote": "給水バルブは、ハンドルを時計回りに止まるまで回して閉める。", "split": "test" }
+]

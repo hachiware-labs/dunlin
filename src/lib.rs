@@ -1,5 +1,6 @@
 //! Local, single-tenant knowledge indexing and evidence retrieval.
 
+pub mod assess;
 pub mod chunk;
 pub mod config_check;
 pub mod config_value;
@@ -18,10 +19,12 @@ mod legacy_delete;
 mod markdown;
 mod model;
 mod node_path;
+pub mod optimize;
 pub mod pipeline;
 mod plans;
 pub mod records;
 pub mod registry;
+pub mod settings;
 mod source;
 mod storage;
 pub mod store;

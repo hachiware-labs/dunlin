@@ -27,6 +27,8 @@ pub struct IndexRequest<'a> {
     pub tag: Option<&'a str>,
     /// The configuration file as it is now. It is kept with the run.
     pub config: Option<&'a [u8]>,
+    /// The run that started this one, such as an optimization.
+    pub cause: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -47,7 +49,8 @@ pub struct Found {
     pub text: String,
 }
 
-fn indexing() -> Process {
+/// What building the keyword index is to the store.
+pub fn indexing() -> Process {
     Process {
         modules: vec![ModuleIdentity {
             name: "index.keyword".into(),
@@ -170,6 +173,9 @@ pub fn index(store: &Store, request: &IndexRequest<'_>) -> StoreResult<IndexOutc
     let mut draft = store.begin("index", "index", &[request.input], &process)?;
     if let Some(config) = request.config {
         draft.set_config(config)?;
+    }
+    if let Some(cause) = request.cause {
+        draft.set_cause(cause);
     }
     if let Some(existing) = draft.existing()? {
         // Found by the key. The directory may be gone all the same: then only it is made again.

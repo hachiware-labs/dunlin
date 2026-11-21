@@ -1,0 +1,15 @@
+optimize:
+  base: Dunlinfile.yaml
+  vary:
+    - name: size
+      options:
+        small:
+          transform:
+            - chunk.length: { size: 80, overlap: 0 }
+    - name: overlap
+      options:
+        some:
+          transform:
+            - chunk.length: { size: 200, overlap: 40 }
+  eval:
+    data: default

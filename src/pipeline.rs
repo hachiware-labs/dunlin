@@ -9,7 +9,7 @@ use std::path::Path;
 use crate::extract::{ExtractOutcome, ExtractRequest, extract};
 use crate::index::{IndexOutcome, IndexRequest, index};
 use crate::store::{Store, StoreResult};
-use crate::transform::{TransformOutcome, TransformRequest, transform};
+use crate::transform::{Chunking, TransformOutcome, TransformRequest, transform};
 
 pub struct BuildRequest<'a> {
     /// The ID of the source the folder is.
@@ -55,10 +55,13 @@ pub fn build(store: &Store, request: &BuildRequest<'_>) -> StoreResult<BuildOutc
         store,
         &TransformRequest {
             input: extract.extracted.snapshot,
-            size: request.size,
-            overlap: request.overlap,
+            chunking: Chunking::Length {
+                size: request.size,
+                overlap: request.overlap,
+            },
             tag: Some(request.transform_tag),
             config: request.config,
+            cause: None,
         },
     )?;
     let index = index(
@@ -68,6 +71,7 @@ pub fn build(store: &Store, request: &BuildRequest<'_>) -> StoreResult<BuildOutc
             directory: request.indexes,
             tag: Some(request.index_tag),
             config: request.config,
+            cause: None,
         },
     )?;
     if let Some(release) = request.release {

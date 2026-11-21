@@ -17,8 +17,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
 use crate::records::{
-    ItemId, ItemName, ListDigest, ObjectId, Part, Process, ProcessId, SnapshotKey, canonical,
-    item_id, item_value, list_digest, list_from_value, list_value, object_id, snapshot_key,
+    InfoId, ItemId, ItemName, ListDigest, ObjectId, Part, Process, ProcessId, SnapshotKey,
+    canonical, info_id, item_id, item_value, list_digest, list_from_value, list_value, object_id,
+    snapshot_key,
 };
 
 const OBJECTS: &str = "
@@ -34,7 +35,8 @@ const RECORDS: &str = "
     CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, stage TEXT NOT NULL, key TEXT NOT NULL,
         inputs TEXT NOT NULL, state TEXT NOT NULL, started_at INTEGER NOT NULL,
         completed_at INTEGER, snapshot INTEGER, outcome TEXT, degraded INTEGER NOT NULL DEFAULT 0,
-        tag TEXT, added INTEGER, updated INTEGER, deleted INTEGER, unchanged INTEGER, stats TEXT);
+        tag TEXT, added INTEGER, updated INTEGER, deleted INTEGER, unchanged INTEGER,
+        config TEXT, info TEXT, stats TEXT);
     CREATE INDEX IF NOT EXISTS runs_key ON runs (key);
     CREATE INDEX IF NOT EXISTS runs_tag ON runs (tag);";
 
@@ -102,7 +104,8 @@ pub struct Snapshot {
     /// The names that point at this snapshot now.
     pub tags: Vec<String>,
     pub created_at: u64,
-    /// Notes added later. Only what can be worked out again belongs here.
+    /// Notes added later. Nothing here is part of an identifier, and only what can be worked
+    /// out again belongs here.
     pub meta: Value,
 }
 
@@ -166,6 +169,11 @@ pub struct RunRecord {
     /// The name this run pointed at its result.
     pub tag: Option<String>,
     pub counts: Option<Counts>,
+    /// The configuration file as it was when the run started, as an object.
+    pub config: Option<ObjectId>,
+    /// How the result was made: its type, what its inputs held and the modules with their
+    /// arguments. It is the key of the run in a form that can be read.
+    pub info: Option<InfoId>,
     pub started_at: u64,
     pub completed_at: Option<u64>,
 }
@@ -251,14 +259,30 @@ impl Store {
             .map(|input| self.snapshot(*input).map(|snapshot| snapshot.digest()))
             .collect::<StoreResult<Vec<_>>>()?;
         let key = snapshot_key(kind, &digests, process);
-        self.start(stage, kind, inputs, key, true)
+        // What the key is the hash of, kept so that the run can say how its result was made.
+        let info = json!({
+            "type": kind,
+            "inputs": digests.iter().map(ListDigest::as_str).collect::<Vec<_>>(),
+            "modules": process.to_value(),
+        });
+        let id = info_id(&info);
+        self.objects.execute(
+            "INSERT OR IGNORE INTO objects (id, data, size, created_at) VALUES (?, ?, ?, ?)",
+            params![
+                id.as_str(),
+                canonical(&info).as_bytes(),
+                canonical(&info).len() as i64,
+                now_ms() as i64
+            ],
+        )?;
+        self.start(stage, kind, inputs, key, Some(id))
     }
 
     /// Starts a run whose input is outside the store, such as a folder. It runs every time: its
     /// result is not looked up by a key.
     pub fn begin_scan(&self, stage: &str, kind: &str) -> StoreResult<Draft<'_>> {
         let key = snapshot_key(kind, &[], &Process::default());
-        self.start(stage, kind, &[], key, false)
+        self.start(stage, kind, &[], key, None)
     }
 
     fn start(
@@ -267,13 +291,20 @@ impl Store {
         kind: &str,
         inputs: &[SnapshotId],
         key: SnapshotKey,
-        keyed: bool,
+        info: Option<InfoId>,
     ) -> StoreResult<Draft<'_>> {
         let run = format!("run-{}", uuid::Uuid::new_v4());
         self.records.execute(
-            "INSERT INTO runs (id, stage, key, inputs, state, started_at)
-             VALUES (?, ?, ?, ?, 'building', ?)",
-            params![run, stage, key.as_str(), ids_json(inputs), now_ms() as i64],
+            "INSERT INTO runs (id, stage, key, inputs, info, state, started_at)
+             VALUES (?, ?, ?, ?, ?, 'building', ?)",
+            params![
+                run,
+                stage,
+                key.as_str(),
+                ids_json(inputs),
+                info.as_ref().map(InfoId::as_str),
+                now_ms() as i64
+            ],
         )?;
         Ok(Draft {
             store: self,
@@ -281,7 +312,9 @@ impl Store {
             kind: kind.to_owned(),
             inputs: inputs.to_vec(),
             key,
-            keyed,
+            keyed: info.is_some(),
+            info,
+            config: None,
             items: Vec::new(),
             degraded: false,
             pending: 0,
@@ -407,6 +440,36 @@ impl Store {
         }
     }
 
+    /// An information object: the description of something made from a whole snapshot.
+    pub fn info(&self, id: &InfoId) -> StoreResult<Value> {
+        serde_json::from_slice(&self.data(id.as_str())?).map_err(|_| corrupt("information object"))
+    }
+
+    /// Writes a note on an object, an item or an information object, by its ID. A note is not
+    /// part of what the object is: its ID stays, and so does every snapshot that lists it.
+    pub fn note_object(&self, id: &str, name: &str, value: &Value) -> StoreResult<()> {
+        let noted = self.objects.execute(
+            "UPDATE objects SET meta = json_set(meta, ?, json(?)) WHERE id = ?",
+            params![path(name)?, value.to_string(), id],
+        )?;
+        if noted == 0 {
+            return Err(StoreError::new(format!("There is no object {id}.")));
+        }
+        Ok(())
+    }
+
+    /// The notes on an object, as a JSON object.
+    pub fn object_notes(&self, id: &str) -> StoreResult<Value> {
+        let meta: Option<String> = self
+            .objects
+            .query_row("SELECT meta FROM objects WHERE id = ?", [id], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        let meta = meta.ok_or_else(|| StoreError::new(format!("There is no object {id}.")))?;
+        serde_json::from_str(&meta).map_err(|_| corrupt("notes of an object"))
+    }
+
     /// What `process` made of an object, if the object remembers.
     pub fn result(&self, input: &ObjectId, process: &ProcessId) -> StoreResult<Option<ItemId>> {
         let found: Option<Option<String>> = self
@@ -470,7 +533,8 @@ impl Store {
     pub fn runs(&self) -> StoreResult<Vec<RunRecord>> {
         let mut statement = self.records.prepare(
             "SELECT id, stage, state, outcome, degraded, inputs, snapshot, tag, added, updated,
-                deleted, unchanged, started_at, completed_at FROM runs ORDER BY rowid",
+                deleted, unchanged, started_at, completed_at, config, info FROM runs
+             ORDER BY rowid",
         )?;
         let rows = statement.query_map([], |row| {
             let count = |index: usize| row.get::<_, Option<i64>>(index);
@@ -493,6 +557,12 @@ impl Store {
                 snapshot: row.get::<_, Option<i64>>(6)?.map(SnapshotId),
                 tag: row.get(7)?,
                 counts,
+                config: row
+                    .get::<_, Option<String>>(14)?
+                    .and_then(|id| ObjectId::parse(&id)),
+                info: row
+                    .get::<_, Option<String>>(15)?
+                    .and_then(|id| InfoId::parse(&id)),
                 started_at: row.get::<_, i64>(12)? as u64,
                 completed_at: row.get::<_, Option<i64>>(13)?.map(|at| at as u64),
             })
@@ -556,7 +626,10 @@ pub struct Draft<'a> {
     kind: String,
     inputs: Vec<SnapshotId>,
     key: SnapshotKey,
+    /// The result is looked up and found by the key.
     keyed: bool,
+    info: Option<InfoId>,
+    config: Option<ObjectId>,
     items: Vec<(ItemName, String)>,
     degraded: bool,
     /// Objects written since the last save.
@@ -591,6 +664,18 @@ impl Draft<'_> {
         self.counts = Some(counts);
     }
 
+    /// How the result is made, as an information object. A run with a key has one.
+    pub fn info(&self) -> Option<&InfoId> {
+        self.info.as_ref()
+    }
+
+    /// Keeps the configuration file as it is now with the run. The same file is one object,
+    /// however many runs keep it.
+    pub fn set_config(&mut self, file: &[u8]) -> StoreResult<()> {
+        self.config = Some(self.save(file)?);
+        Ok(())
+    }
+
     /// Lists and other details for the run record. They are not part of the snapshot.
     pub fn set_stats(&mut self, stats: Value) {
         self.stats = stats;
@@ -618,6 +703,14 @@ impl Draft<'_> {
         if self.pending >= BATCH {
             self.flush()?;
         }
+        Ok(id)
+    }
+
+    /// Saves an information object. List it under a name of its own, such as the kind of index:
+    /// a snapshot's list may hold such objects as well as documents.
+    pub fn save_info(&mut self, value: &Value) -> StoreResult<InfoId> {
+        let id = info_id(value);
+        self.write(id.as_str(), canonical(value).as_bytes())?;
         Ok(id)
     }
 
@@ -702,7 +795,7 @@ impl Draft<'_> {
         self.store.records.execute(
             "UPDATE runs SET state = 'complete', completed_at = ?, snapshot = ?, outcome = ?,
                 degraded = ?, tag = ?, added = ?, updated = ?, deleted = ?, unchanged = ?,
-                stats = ? WHERE id = ?",
+                config = ?, stats = ? WHERE id = ?",
             params![
                 now_ms() as i64,
                 snapshot.0,
@@ -713,6 +806,7 @@ impl Draft<'_> {
                 count(1),
                 count(2),
                 count(3),
+                self.config.as_ref().map(ObjectId::as_str),
                 canonical(&self.stats),
                 self.run
             ],

@@ -127,6 +127,12 @@ identifier!(
     "itm"
 );
 identifier!(
+    /// A description of something made from a whole snapshot, such as an index: what it was made
+    /// from and with which settings.
+    InfoId,
+    "inf"
+);
+identifier!(
     /// The modules that apply to an item.
     ProcessId,
     "prc"
@@ -318,6 +324,11 @@ pub fn item_id(parts: &[Part]) -> ItemId {
     ItemId::from_hex(&derive("Dunlin data management item", &item_value(parts)))
 }
 
+/// The ID of an information object: its JSON, whatever the order of its keys.
+pub fn info_id(value: &Value) -> InfoId {
+    InfoId::from_hex(&derive("Dunlin data management info", value))
+}
+
 /// What identifies one module of a process.
 ///
 /// `args` holds only what changes the result, with defaults filled in. The caller has replaced a
@@ -339,7 +350,9 @@ pub struct Process {
 }
 
 impl Process {
-    fn to_value(&self) -> Value {
+    /// The modules as records hold them: name, compatibility version and arguments, in the
+    /// order they run. An information object uses this to say which modules made a thing.
+    pub fn to_value(&self) -> Value {
         Value::Array(
             self.modules
                 .iter()
@@ -580,6 +593,12 @@ mod tests {
         let mut reversed = chunking(800);
         reversed.modules.reverse();
         assert_ne!(reversed.id(), chunking(800).id());
+        // An information object is named by its JSON, not by how the JSON was written.
+        let keyword = json!({ "index": "keyword", "settings": { "tokenizer": "lindera" } });
+        let reordered = json!({ "settings": { "tokenizer": "lindera" }, "index": "keyword" });
+        assert_eq!(info_id(&reordered), info_id(&keyword));
+        let bigram = json!({ "index": "keyword", "settings": { "tokenizer": "bigram" } });
+        assert_ne!(info_id(&bigram), info_id(&keyword));
         // Equal values of different kinds do not share an identifier.
         let value = json!([]);
         assert_ne!(

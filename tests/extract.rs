@@ -73,6 +73,7 @@ impl Project {
                 source: "docs",
                 root,
                 tag: Some("docs"),
+                config: Some(CONFIG.as_bytes()),
             },
         )
         .unwrap()
@@ -109,6 +110,13 @@ impl Project {
         (String::from_utf8(bytes).unwrap(), parts[0].location.clone())
     }
 }
+
+/// The configuration file of the project, as a build would pass it.
+const CONFIG: &str = "extract:
+  - source.filesystem: { path: ./docs }
+  - loader.text: {}
+  - tag: docs
+";
 
 const ORIGINAL: [&str; 4] = [
     "faq.txt",
@@ -259,6 +267,31 @@ fn adds_the_documents_copied_into_the_folder() {
         })
     );
     assert_eq!(runs[2].tag, None);
+
+    // A run keeps the configuration file as it was, and how its result was made.
+    for run in &runs {
+        let config = run.config.as_ref().expect("the configuration file");
+        assert_eq!(project.store.bytes(config).unwrap(), CONFIG.as_bytes());
+    }
+    // The file list comes from a scan, not from a process.
+    assert_eq!(runs[2].info, None);
+    let info = runs[3]
+        .info
+        .as_ref()
+        .expect("how the documents were extracted");
+    let files = project.store.snapshot(second.files.snapshot).unwrap();
+    assert_eq!(
+        project.store.info(info).unwrap(),
+        serde_json::json!({
+            "type": "extracted",
+            "inputs": [files.digest().as_str()],
+            "modules": [{ "name": "loader.text", "compatibility": 1, "args": {} }],
+        })
+    );
+    // The same process on another file list is another description; the last run found the
+    // second one's result by its key, so it is described the same way.
+    assert_ne!(runs[1].info, runs[3].info);
+    assert_eq!(runs[5].info, runs[3].info);
 }
 
 #[test]

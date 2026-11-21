@@ -20,6 +20,8 @@ pub struct ExtractRequest<'a> {
     pub root: &'a Path,
     /// The name that follows the result, as the section's `tag` gives it.
     pub tag: Option<&'a str>,
+    /// The configuration file as it is now. It is kept with the runs.
+    pub config: Option<&'a [u8]>,
 }
 
 /// What a run of `extract` did. Documents are named by their path below the root, with `/`.
@@ -109,6 +111,9 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
     // The file list is made on every run. A scan that fails leaves a failed run and no list, so
     // no deletion is concluded from it.
     let mut draft = store.begin_scan("extract", "files")?;
+    if let Some(config) = request.config {
+        draft.set_config(config)?;
+    }
     let mut hashed = 0;
     let mut files: Vec<(String, String)> = Vec::new();
     let mut notes = serde_json::Map::new();
@@ -195,6 +200,9 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
         &process,
     )?;
     draft.set_counts(counts);
+    if let Some(config) = request.config {
+        draft.set_config(config)?;
+    }
     let mut read = 0;
     let mut skipped = Vec::new();
     let mut substituted = Vec::new();

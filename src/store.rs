@@ -362,23 +362,47 @@ impl Store {
         self.find(&snapshot_key(kind, &digests, process))
     }
 
-    /// The snapshot that has a tag now.
-    fn tagged(&self, tag: &str) -> StoreResult<Option<SnapshotId>> {
+    /// The `kind` snapshot that has a tag now. Each kind has its own names: the documents, the
+    /// chunks and the index of a build can all be called the same.
+    fn tagged(&self, kind: &str, tag: &str) -> StoreResult<Option<SnapshotId>> {
         Ok(self
             .records
             .query_row(
                 "SELECT snapshots.id FROM snapshots, json_each(snapshots.tags)
-                 WHERE json_each.value = ? LIMIT 1",
-                [tag],
+                 WHERE snapshots.type = ? AND json_each.value = ? LIMIT 1",
+                [kind, tag],
                 |row| row.get::<_, i64>(0),
             )
             .optional()?
             .map(SnapshotId))
     }
 
-    /// The snapshot a tag points at, or the snapshot with this serial number.
-    pub fn resolve(&self, tag_or_id: &str) -> StoreResult<Option<SnapshotId>> {
-        if let Some(id) = self.tagged(tag_or_id)? {
+    /// Every snapshot of a kind, in the order they were made.
+    pub fn of_kind(&self, kind: &str) -> StoreResult<Vec<SnapshotId>> {
+        let mut statement = self
+            .records
+            .prepare("SELECT id FROM snapshots WHERE type = ? ORDER BY id")?;
+        let rows = statement.query_map([kind], |row| row.get::<_, i64>(0))?;
+        rows.map(|row| Ok(SnapshotId(row?))).collect()
+    }
+
+    /// Every name there is now: the kind of snapshot, the name and the snapshot, in the order
+    /// the snapshots were made.
+    pub fn names(&self) -> StoreResult<Vec<(String, String, SnapshotId)>> {
+        let mut statement = self.records.prepare(
+            "SELECT snapshots.type, json_each.value, snapshots.id
+             FROM snapshots, json_each(snapshots.tags) ORDER BY snapshots.id, json_each.key",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, SnapshotId(row.get(2)?)))
+        })?;
+        rows.map(|row| row.map_err(StoreError::from)).collect()
+    }
+
+    /// The `kind` snapshot a tag points at, or the snapshot with this serial number, of
+    /// whatever kind it is.
+    pub fn resolve(&self, kind: &str, tag_or_id: &str) -> StoreResult<Option<SnapshotId>> {
+        if let Some(id) = self.tagged(kind, tag_or_id)? {
             return Ok(Some(id));
         }
         let Ok(id) = tag_or_id.parse::<i64>() else {
@@ -518,12 +542,43 @@ impl Store {
         ))
     }
 
-    /// The snapshots a tag has pointed at, oldest first.
-    pub fn history(&self, tag: &str) -> StoreResult<Vec<SnapshotId>> {
+    /// The `kind` snapshots a tag has pointed at, oldest first.
+    pub fn history(&self, kind: &str, tag: &str) -> StoreResult<Vec<SnapshotId>> {
+        self.pointed(
+            "SELECT runs.snapshot FROM runs JOIN snapshots ON snapshots.id = runs.snapshot
+             WHERE snapshots.type = ? AND runs.tag = ? AND runs.state = 'complete'
+                AND runs.stage != 'release'
+             ORDER BY runs.rowid",
+            [kind, tag],
+        )
+    }
+
+    /// The indexes that have been served under a name, oldest first. The last one is served
+    /// now. A served name is apart from the tags: it is what a release points, and nothing
+    /// else moves it.
+    pub fn releases(&self, name: &str) -> StoreResult<Vec<SnapshotId>> {
+        self.pointed(
+            "SELECT snapshot FROM runs WHERE stage = ? AND tag = ? AND state = 'complete'
+             ORDER BY rowid",
+            ["release", name],
+        )
+    }
+
+    /// Every name that is served, with the index it serves now, by name.
+    pub fn served(&self) -> StoreResult<Vec<(String, SnapshotId)>> {
         let mut statement = self.records.prepare(
-            "SELECT snapshot FROM runs WHERE tag = ? AND state = 'complete' ORDER BY rowid",
+            "SELECT tag, snapshot FROM runs WHERE rowid IN (
+                SELECT MAX(rowid) FROM runs WHERE stage = 'release' AND state = 'complete'
+                GROUP BY tag)
+             ORDER BY tag",
         )?;
-        let rows = statement.query_map([tag], |row| row.get::<_, i64>(0))?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, SnapshotId(row.get(1)?))))?;
+        rows.map(|row| row.map_err(StoreError::from)).collect()
+    }
+
+    fn pointed(&self, query: &str, values: [&str; 2]) -> StoreResult<Vec<SnapshotId>> {
+        let mut statement = self.records.prepare(query)?;
+        let rows = statement.query_map(values, |row| row.get::<_, i64>(0))?;
         let mut history: Vec<SnapshotId> = Vec::new();
         for id in rows {
             let id = SnapshotId(id?);
@@ -534,14 +589,16 @@ impl Store {
         Ok(history)
     }
 
-    /// The inputs of the latest complete run that pointed `tag` at its result.
-    pub fn last_inputs(&self, tag: &str) -> StoreResult<Vec<SnapshotId>> {
+    /// The inputs of the latest complete run that pointed `tag` at a `kind` snapshot.
+    pub fn last_inputs(&self, kind: &str, tag: &str) -> StoreResult<Vec<SnapshotId>> {
         let inputs: Option<String> = self
             .records
             .query_row(
-                "SELECT inputs FROM runs WHERE tag = ? AND state = 'complete'
-                 ORDER BY rowid DESC LIMIT 1",
-                [tag],
+                "SELECT runs.inputs FROM runs JOIN snapshots ON snapshots.id = runs.snapshot
+                 WHERE snapshots.type = ? AND runs.tag = ? AND runs.state = 'complete'
+                    AND runs.stage NOT IN ('release', 'tag')
+                 ORDER BY runs.rowid DESC LIMIT 1",
+                [kind, tag],
                 |row| row.get(0),
             )
             .optional()?;
@@ -597,31 +654,54 @@ impl Store {
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
-    /// Points a name at a snapshot, as `dunlin tag` and a release do. It is recorded as a run of
-    /// `stage`, so the history of the name shows it.
-    pub fn tag(&self, stage: &str, name: &str, snapshot: SnapshotId) -> StoreResult<()> {
-        self.snapshot(snapshot)?;
+    /// Points a name at a snapshot, among the names of the snapshot's kind. It is recorded as a
+    /// run, so the history of the name shows it. Nothing is recorded when the name is there
+    /// already.
+    pub fn tag(&self, name: &str, snapshot: SnapshotId) -> StoreResult<()> {
+        if self.snapshot(snapshot)?.tags.iter().any(|tag| tag == name) {
+            return Ok(());
+        }
         transact(&self.records, || {
-            self.records.execute(
-                "INSERT INTO runs (id, stage, key, inputs, state, started_at, completed_at,
-                    snapshot, tag) VALUES (?, ?, '', '[]', 'complete', ?, ?, ?, ?)",
-                params![
-                    format!("run-{}", uuid::Uuid::new_v4()),
-                    stage,
-                    now_ms() as i64,
-                    now_ms() as i64,
-                    snapshot.0,
-                    name
-                ],
-            )?;
+            self.point("tag", name, snapshot)?;
             self.move_tag(name, snapshot)
         })
     }
 
-    /// Takes `tag` from the snapshot that has it and gives it to `snapshot`. Inside a
-    /// transaction of `records`. These two rows are the only existing ones a run changes.
+    /// Serves an index under a name. Nothing is recorded when it is served under it already.
+    pub fn release(&self, name: &str, snapshot: SnapshotId) -> StoreResult<()> {
+        if self.snapshot(snapshot)?.kind != "index" {
+            return Err(StoreError::new(format!(
+                "Snapshot {snapshot} is not an index, so it cannot be served."
+            )));
+        }
+        if self.releases(name)?.last() == Some(&snapshot) {
+            return Ok(());
+        }
+        transact(&self.records, || self.point("release", name, snapshot))
+    }
+
+    /// Records a run of `stage` that pointed `name` at `snapshot`.
+    fn point(&self, stage: &str, name: &str, snapshot: SnapshotId) -> StoreResult<()> {
+        self.records.execute(
+            "INSERT INTO runs (id, stage, key, inputs, state, started_at, completed_at,
+                snapshot, tag) VALUES (?, ?, '', '[]', 'complete', ?, ?, ?, ?)",
+            params![
+                format!("run-{}", uuid::Uuid::new_v4()),
+                stage,
+                now_ms() as i64,
+                now_ms() as i64,
+                snapshot.0,
+                name
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Takes `tag` from the snapshot of the same kind that has it and gives it to `snapshot`.
+    /// Inside a transaction of `records`. These two rows are the only existing ones a run
+    /// changes.
     fn move_tag(&self, tag: &str, snapshot: SnapshotId) -> StoreResult<()> {
-        let holder = self.tagged(tag)?;
+        let holder = self.tagged(&self.snapshot(snapshot)?.kind, tag)?;
         if holder == Some(snapshot) {
             return Ok(());
         }
@@ -923,7 +1003,7 @@ impl Draft<'_> {
         let items = canonical(&list_value(&self.items));
         let (snapshot, outcome) = transact(&store.records, || {
             let tagged = match tag {
-                Some(tag) => store.tagged(tag)?,
+                Some(tag) => store.tagged(&self.kind, tag)?,
                 None => None,
             };
             let mut same = None;

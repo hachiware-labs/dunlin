@@ -6,7 +6,7 @@
 
 use crate::config_value::ConfigValue;
 
-pub const COMMANDS: [(&str, &str); 34] = [
+pub const COMMANDS: [(&str, &str); 37] = [
     (
         "init",
         "dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]",
@@ -17,7 +17,7 @@ pub const COMMANDS: [(&str, &str); 34] = [
     ),
     (
         "build",
-        "dunlin build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]",
+        "dunlin build [<config>] [--release] [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]",
     ),
     (
         "source",
@@ -33,7 +33,7 @@ pub const COMMANDS: [(&str, &str); 34] = [
     ),
     (
         "search",
-        "dunlin search <query> [--project <directory>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]",
+        "dunlin search <query> [--project <directory>] [--index <name>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]",
     ),
     (
         "ask",
@@ -71,11 +71,11 @@ pub const COMMANDS: [(&str, &str); 34] = [
     ),
     (
         "eval-data",
-        "dunlin eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]",
+        "dunlin eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--tag <name>] [--project <directory>] [--json]",
     ),
     (
         "eval",
-        "dunlin eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]",
+        "dunlin eval [<config>] [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]",
     ),
     (
         "report",
@@ -131,8 +131,20 @@ pub const COMMANDS: [(&str, &str); 34] = [
         "dunlin undo <work-id> [--project <directory>] [--json]",
     ),
     (
-        "store",
-        "dunlin store run <config> [--release] | dunlin store eval-data <file> [--tag <name>] | dunlin store optimize <instruction> [--name <name>] | dunlin store results [<name>] [--project <directory>] [--json]",
+        "list",
+        "dunlin list [documents|chunks|indexes|eval-data|results] [--project <directory>] [--json]",
+    ),
+    (
+        "release",
+        "dunlin release <index> [--name <served-name>] [--project <directory>] [--json]",
+    ),
+    (
+        "optimize",
+        "dunlin optimize <instruction> [--name <name>] [--project <directory>] [--json]",
+    ),
+    (
+        "results",
+        "dunlin results [<name>] [--project <directory>] [--json]",
     ),
 ];
 
@@ -144,7 +156,7 @@ pub fn usage(command: &str) -> Option<&'static str> {
 }
 
 /// The commands of `dunlin --help` in groups, each with what it does.
-pub const GROUPS: [(&str, &[(&str, &str)]); 6] = [
+pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
     (
         "Start",
         &[
@@ -176,6 +188,11 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 6] = [
             ),
             ("use", "Serve another build"),
             ("tag", "Name a build"),
+            (
+                "list",
+                "List the named versions of documents, indexes and results",
+            ),
+            ("release", "Serve an index that is there, or go back to one"),
         ],
     ),
     (
@@ -192,6 +209,14 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 6] = [
             ("eval", "Evaluate a build with the evaluation data"),
             ("report", "Show and compare evaluation reports"),
             ("dictionary", "Suggest and add user dictionary words"),
+            (
+                "optimize",
+                "Try the settings of an instruction and compare them",
+            ),
+            (
+                "results",
+                "Show evaluation results, or the trials of an optimization",
+            ),
         ],
     ),
     (
@@ -223,13 +248,6 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 6] = [
             ),
             ("modules", "List the modules and their arguments"),
         ],
-    ),
-    (
-        "Versioned store (in development)",
-        &[(
-            "store",
-            "Run a configuration file or an optimization on the versioned store",
-        )],
     ),
 ];
 
@@ -291,13 +309,50 @@ pub fn wrapped_usage(command: &str) -> Option<String> {
     )
 }
 
+/// What the help of a command adds for a configuration file written as lists of modules.
+/// That form is not in `dunlin init`, so the help is where it can be learned.
+fn staged_help(command: &str) -> Option<&'static str> {
+    Some(match command {
+        "build" => {
+            "A configuration file can list the modules of each stage in order. Such a file is taken\nas the argument, or read from Dunlinfile.yaml, and only --release applies:\n\n  extract:\n    - source.filesystem: { path: ./docs }\n    - loader.text: {}\n    - tag: docs\n  transform:\n    - chunk.length: { unit: characters, size: 400, overlap: 40 }\n  index:\n    - index.keyword: { tokenizer: lindera }\n  search:\n    - retrieval.keyword: { top_k: 10 }\n  eval:\n    - eval.evidence: { data: default, split: dev }\n  serve:\n    tag: release\n\nA section can end with `- tag: <name>` to name what it makes, or hold only\n`- from: <name>` to start from what is there. Modules of this form:\n  source.filesystem  path, id, apply (a list of add, update, delete)\n  loader.text\n  text.normalize     unicode: nfkc\n  chunk.length       size, overlap, context\n  chunk.structure    max_chars, context\n  index.keyword      tokenizer: lindera\n  retrieval.keyword  top_k\n  eval.evidence      data, split (dev or test)\n`context` is { headings, document, prepend }, each true or false.\nSee also: dunlin eval, eval-data, list, search, release, optimize, results."
+        }
+        "eval" => {
+            "With a configuration file written as lists of modules (see dunlin build --help), eval\ntakes the file as its argument, builds what is missing and measures as its eval section\nsays:\n\n  eval:\n    - eval.evidence: { data: default, split: dev }\n    - tag: <a name for the result>      # optional\n\n`data` is the name of evaluation data saved with dunlin eval-data import. The result is\nread with dunlin results."
+        }
+        "eval-data" => {
+            "With a configuration file written as lists of modules (see dunlin build --help):\n\n  dunlin eval-data import <file> [--tag <name>]\n\nsaves a JSON file of cases under a name (default: default):\n\n  [{ \"id\": \"pump-check\", \"question\": \"...\", \"source\": \"docs\",\n     \"document\": \"manuals/pump.md\", \"quote\": \"text copied from the document\",\n     \"split\": \"dev\" }]\n\n`source` is the id of source.filesystem (default: the name of its folder), `document` the\npath below that folder with /, and `split` dev or test."
+        }
+        "search" => {
+            "With a configuration file written as lists of modules, --index takes the name of an\nindex, its version number, or a name an index is served under (default: default, the\nlatest), and only --limit applies besides."
+        }
+        "optimize" => {
+            "The instruction names a base configuration and what to vary. Every combination of one\noption for each axis is a trial, and the base is trial 000:\n\n  optimize:\n    base: Dunlinfile.yaml\n    vary:\n      - name: chunking\n        options:\n          as-is: {}                       # the base as it is\n          length:\n            transform:\n              - chunk.length: { unit: characters, size: [200, 800], overlap: 40 }\n      - name: search\n        options:\n          top10: {}\n          top5:\n            search:\n              - retrieval.keyword: { top_k: 5 }\n    eval: { data: default, split: dev, metric: recall }\n    limit: { candidates: 20 }\n\nAn option replaces the sections it names: transform, index or search. A list as the\nvalue of an argument is one trial for each value. The base is built first with dunlin\nbuild. The trials are named <name>/<number>; see them with dunlin results <name>."
+        }
+        "results" => {
+            "Without a name: every evaluation result, the best first. With the name or version of a\nresult: its cases, the missed ones first. With the name of an optimization: its trials."
+        }
+        "validate" => {
+            "A configuration file written as lists of modules (see dunlin build --help) is checked\nthe same way a build checks it, and nothing is built."
+        }
+        "status" => {
+            "With a configuration file written as lists of modules, status shows what dunlin list\nshows: the named versions and what is served."
+        }
+        _ => return None,
+    })
+}
+
 /// The help of one command: what it does and its usage.
 pub fn command_help(command: &str) -> Option<String> {
-    Some(format!(
+    let mut help = format!(
         "dunlin {command} — {}\n\nUsage:\n{}",
         description(command).unwrap_or_default(),
         wrapped_usage(command)?
-    ))
+    );
+    if let Some(staged) = staged_help(command) {
+        help.push_str("\n\n");
+        help.push_str(staged);
+    }
+    Some(help)
 }
 
 /// The overall help of `dunlin --help`.
@@ -469,9 +524,16 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
         }
         options.push(("case", Strings));
     }
-    if command == "store" {
+    if command == "build" {
         options.push(("release", Boolean));
+    }
+    if command == "search" {
+        options.push(("index", String));
+    }
+    if command == "eval-data" {
         options.push(("tag", String));
+    }
+    if command == "release" || command == "optimize" {
         options.push(("name", String));
     }
     if command == "serve" {

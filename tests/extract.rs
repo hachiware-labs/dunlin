@@ -176,8 +176,14 @@ fn adds_the_documents_copied_into_the_folder() {
         guide.map(|(_, id)| id.as_str()),
         Some(object_id(original.as_bytes()).as_str())
     );
-    assert_eq!(project.store.resolve("docs").unwrap(), Some(version_1));
-    assert_eq!(project.store.history("docs").unwrap(), [version_1]);
+    assert_eq!(
+        project.store.resolve("extracted", "docs").unwrap(),
+        Some(version_1)
+    );
+    assert_eq!(
+        project.store.history("extracted", "docs").unwrap(),
+        [version_1]
+    );
 
     // Documents are copied into the folder and it is extracted again: they are added.
     copy_into(
@@ -215,9 +221,12 @@ fn adds_the_documents_copied_into_the_folder() {
     assert_eq!(diff.unchanged, 4);
 
     // The tag moved to the new version, and the first version stays as it was.
-    assert_eq!(project.store.resolve("docs").unwrap(), Some(version_2));
     assert_eq!(
-        project.store.history("docs").unwrap(),
+        project.store.resolve("extracted", "docs").unwrap(),
+        Some(version_2)
+    );
+    assert_eq!(
+        project.store.history("extracted", "docs").unwrap(),
         [version_1, version_2]
     );
     let earlier = project.store.snapshot(version_1).unwrap();
@@ -238,7 +247,7 @@ fn adds_the_documents_copied_into_the_folder() {
     assert_eq!(third.extracted.snapshot, version_2);
     assert!(third.added.is_empty() && third.updated.is_empty() && third.deleted.is_empty());
     assert_eq!((third.unchanged, third.hashed, third.read), (6, 0, 0));
-    assert_eq!(project.store.history("docs").unwrap().len(), 2);
+    assert_eq!(project.store.history("extracted", "docs").unwrap().len(), 2);
 
     // Every run is recorded with its times and counts, also the ones that made nothing.
     let runs = project.store.runs().unwrap();
@@ -362,7 +371,7 @@ fn follows_updates_and_deletions_but_not_dates_or_places() {
     assert_eq!(third.extracted.outcome, Outcome::Reused);
     assert_eq!(third.extracted.snapshot, version_2);
     assert_eq!(
-        project.store.history("docs").unwrap(),
+        project.store.history("extracted", "docs").unwrap(),
         [version_1, version_2]
     );
 
@@ -384,9 +393,12 @@ fn follows_updates_and_deletions_but_not_dates_or_places() {
     assert_eq!(fourth.extracted.outcome, Outcome::Reused);
     assert_eq!(fourth.extracted.snapshot, version_1);
     assert_eq!(project.entries(version_1), before);
-    assert_eq!(project.store.resolve("docs").unwrap(), Some(version_1));
     assert_eq!(
-        project.store.history("docs").unwrap(),
+        project.store.resolve("extracted", "docs").unwrap(),
+        Some(version_1)
+    );
+    assert_eq!(
+        project.store.history("extracted", "docs").unwrap(),
         [version_1, version_2, version_1]
     );
 }
@@ -573,6 +585,6 @@ fn takes_in_only_the_changes_it_is_told_to() {
 
 impl Project {
     fn history_len(&self) -> usize {
-        self.store.history("docs").unwrap().len()
+        self.store.history("extracted", "docs").unwrap().len()
     }
 }

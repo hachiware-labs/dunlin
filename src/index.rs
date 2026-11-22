@@ -165,6 +165,11 @@ fn build(store: &Store, input: SnapshotId, location: &Path) -> StoreResult<usize
 
 /// Builds the next generation of the index an information object describes, and notes where it
 /// is on the object.
+/// The longest path below the directory of an index: the journal of its database.
+const LONGEST_INSIDE: usize = "/.dunlin-corpus-v1/corpus.sqlite-journal".len();
+/// The longest path that is known to work on Windows, with some room left.
+const LONGEST_PATH: usize = 256;
+
 fn materialize(
     store: &Store,
     info: &InfoId,
@@ -177,7 +182,26 @@ fn materialize(
         + 1;
     let name = format!("keyword-{}-g{generation}", &info.as_str()[4..20]);
     let location = directory.join(&name);
-    let documents = build(store, input, &location)?;
+    // The database inside the index is opened by SQLite, which on Windows takes no path of
+    // 260 characters or more. Said here, because what SQLite says does not name the cause.
+    let longest = location.to_string_lossy().chars().count() + LONGEST_INSIDE;
+    if cfg!(windows) && longest > LONGEST_PATH {
+        return Err(StoreError::new(format!(
+            "The index would be made at {}, and a file inside it would have a path of {longest} characters. Windows takes at most {LONGEST_PATH}. Move the project to a folder with a shorter path.",
+            location.display()
+        )));
+    }
+    // A directory of this name is what an attempt that failed left: no index is noted there.
+    if location.exists() {
+        std::fs::remove_dir_all(&location)?;
+    }
+    let documents = match build(store, input, &location) {
+        Ok(documents) => documents,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&location);
+            return Err(error);
+        }
+    };
     store.note_object(
         info.as_str(),
         "built",
@@ -251,7 +275,7 @@ pub fn search(
     limit: usize,
 ) -> StoreResult<Vec<Found>> {
     let id = store
-        .resolve(tag_or_id)?
+        .resolve("index", tag_or_id)?
         .ok_or_else(|| StoreError::new(format!("There is no index named {tag_or_id}.")))?;
     let snapshot = store.snapshot(id)?;
     let info = snapshot

@@ -135,8 +135,8 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
     // The file list of the run that last moved the tag, and the documents the tag holds now.
     let (before, current) = match request.tag {
         Some(tag) => (
-            store.last_inputs(tag)?.first().copied(),
-            store.resolve(tag)?,
+            store.last_inputs("extracted", tag)?.first().copied(),
+            store.resolve("extracted", tag)?,
         ),
         None => (None, None),
     };

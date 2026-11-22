@@ -85,7 +85,7 @@ pub fn build(store: &Store, request: &BuildRequest<'_>) -> StoreResult<BuildOutc
         },
     )?;
     if let Some(release) = request.release {
-        store.tag("release", release, index.index.snapshot)?;
+        store.release(release, index.index.snapshot)?;
     }
     Ok(BuildOutcome {
         extract,
@@ -102,8 +102,15 @@ pub struct RunRequest<'a> {
     pub indexes: &'a Path,
     /// The configuration file, in the syntax of the new store.
     pub config: &'a str,
+    /// Evaluate the index as the `eval` section says, as `dunlin eval` and a trial do. A build
+    /// leaves the section alone.
+    pub evaluate: bool,
     /// Move the name `serve` gives to the index. A trial leaves it where it is.
     pub release: bool,
+    /// Point `default` of each kind at what this run makes, as a run by hand does: the latest
+    /// documents, chunks, index and result are then found under that name. A trial leaves
+    /// `default` where it is and names only what its configuration names.
+    pub latest: bool,
     /// The run that started this one, such as an optimization.
     pub cause: Option<&'a str>,
     /// Hears each stage when it starts, and again with how it ended.
@@ -114,7 +121,12 @@ pub struct RunRequest<'a> {
 #[derive(Debug)]
 pub struct RunOutcome {
     pub extracted: Option<SnapshotId>,
+    /// What the scan of the folder found, when the run scanned it: the documents that were
+    /// added, updated and deleted, and the changes `apply` left out.
+    pub scan: Option<ExtractOutcome>,
     pub chunks: Option<SnapshotId>,
+    /// The documents that were chunked in this run, when the run made chunks.
+    pub chunked: Option<usize>,
     pub index: SnapshotId,
     /// The report of the evaluation, when the configuration names evaluation data.
     pub report: Option<SnapshotId>,
@@ -122,15 +134,18 @@ pub struct RunOutcome {
     /// The stages that did work: they neither found their result by its key nor started from a
     /// name.
     pub ran: Vec<String>,
-    /// The tags the configuration gave to what it made.
+    /// The tags the configuration gave to what it made. `default` is not among them.
     pub tags: Vec<String>,
     /// The name that is served, when this run moved it.
     pub released: Option<String>,
 }
 
+/// The name of what a run by hand made last, for each kind of snapshot.
+pub const LATEST: &str = "default";
+
 /// The snapshot a section starts from.
 fn named(store: &Store, section: &str, name: &str, kind: &str) -> StoreResult<SnapshotId> {
-    let id = store.resolve(name)?.ok_or_else(|| {
+    let id = store.resolve(kind, name)?.ok_or_else(|| {
         StoreError::new(format!(
             "{section} starts from {name}, and nothing has that name."
         ))
@@ -152,14 +167,43 @@ pub fn run(store: &Store, request: &RunRequest<'_>) -> StoreResult<RunOutcome> {
     let cause = request.cause;
     let mut ran = Vec::new();
     let mut tags = Vec::new();
-    let mut done = |stage: &str, outcome: Outcome, tag: Option<&String>| {
-        (request.progress)(stage, Some(outcome));
-        if outcome != Outcome::Reused {
-            ran.push(stage.to_owned());
+    // The name a stage gives its result: the one of its section, or `default` in a run by hand.
+    let given = |tag: &Option<String>| match tag {
+        Some(tag) => Some(tag.clone()),
+        None => request.latest.then(|| LATEST.to_owned()),
+    };
+    let mut done =
+        |stage: &str, made: &crate::store::Committed, tag: Option<&String>| -> StoreResult<()> {
+            (request.progress)(stage, Some(made.outcome));
+            if made.outcome != Outcome::Reused {
+                ran.push(stage.to_owned());
+            }
+            tags.extend(tag.cloned());
+            if request.latest {
+                store.tag(LATEST, made.snapshot)?;
+            }
+            Ok(())
+        };
+
+    // What the evaluation needs is looked up before anything is built.
+    let judged_with = match plan.eval.as_ref().filter(|_| request.evaluate) {
+        None => None,
+        Some(judging) => {
+            let data = store.resolve("eval-data", &judging.data)?.ok_or_else(|| {
+                StoreError::new(format!("There is no evaluation data {}.", judging.data))
+            })?;
+            if store.snapshot(data)?.kind != "eval-data" {
+                return Err(StoreError::new(format!(
+                    "{} is not evaluation data.",
+                    judging.data
+                )));
+            }
+            Some((judging, data))
         }
-        tags.extend(tag.cloned());
     };
 
+    let mut scan = None;
+    let mut chunked = None;
     let extracted = match &plan.extract {
         None => None,
         Some(Stage::From(name)) => Some(named(store, "extract", name, "extracted")?),
@@ -170,14 +214,16 @@ pub fn run(store: &Store, request: &RunRequest<'_>) -> StoreResult<RunOutcome> {
                 &ExtractRequest {
                     source: &what.source,
                     root: &request.project.join(&what.path),
-                    tag: tag.as_deref(),
+                    tag: given(tag).as_deref(),
                     config,
                     apply: what.apply,
                     cause,
                 },
             )?;
-            done("extract", made.extracted.outcome, tag.as_ref());
-            Some(made.extracted.snapshot)
+            done("extract", &made.extracted, tag.as_ref())?;
+            let snapshot = made.extracted.snapshot;
+            scan = Some(made);
+            Some(snapshot)
         }
     };
     let chunks = match (&plan.transform, extracted) {
@@ -191,12 +237,13 @@ pub fn run(store: &Store, request: &RunRequest<'_>) -> StoreResult<RunOutcome> {
                     input,
                     chunking: what.chunking,
                     context: what.context,
-                    tag: tag.as_deref(),
+                    tag: given(tag).as_deref(),
                     config,
                     cause,
                 },
             )?;
-            done("transform", made.chunks.outcome, tag.as_ref());
+            done("transform", &made.chunks, tag.as_ref())?;
+            chunked = Some(made.chunked);
             Some(made.chunks.snapshot)
         }
         (Some(Stage::Make { .. }), None) => {
@@ -212,12 +259,12 @@ pub fn run(store: &Store, request: &RunRequest<'_>) -> StoreResult<RunOutcome> {
                 &IndexRequest {
                     input,
                     directory: request.indexes,
-                    tag: tag.as_deref(),
+                    tag: given(tag).as_deref(),
                     config,
                     cause,
                 },
             )?;
-            done("index", made.index.outcome, tag.as_ref());
+            done("index", &made.index, tag.as_ref())?;
             made.index.snapshot
         }
         (Stage::Make { .. }, None) => {
@@ -227,16 +274,7 @@ pub fn run(store: &Store, request: &RunRequest<'_>) -> StoreResult<RunOutcome> {
 
     let mut report = None;
     let mut result = None;
-    if let Some(judging) = &plan.eval {
-        let data = store.resolve(&judging.data)?.ok_or_else(|| {
-            StoreError::new(format!("There is no evaluation data {}.", judging.data))
-        })?;
-        if store.snapshot(data)?.kind != "eval-data" {
-            return Err(StoreError::new(format!(
-                "{} is not evaluation data.",
-                judging.data
-            )));
-        }
+    if let Some((judging, data)) = judged_with {
         (request.progress)("eval", None);
         let judged = evaluate(
             store,
@@ -247,26 +285,28 @@ pub fn run(store: &Store, request: &RunRequest<'_>) -> StoreResult<RunOutcome> {
                 top_k: plan.top_k,
                 split: &judging.split,
                 directory: request.indexes,
-                tag: None,
+                tag: given(&judging.tag).as_deref(),
                 config,
                 cause,
             },
         )?;
-        done("eval", judged.report.outcome, None);
+        done("eval", &judged.report, judging.tag.as_ref())?;
         report = Some(judged.report.snapshot);
         result = Some(judged.result);
     }
 
     let released = match &plan.release {
         Some(name) if request.release => {
-            store.tag("release", name, indexed)?;
+            store.release(name, indexed)?;
             Some(name.clone())
         }
         _ => None,
     };
     Ok(RunOutcome {
         extracted,
+        scan,
         chunks,
+        chunked,
         index: indexed,
         report,
         result,

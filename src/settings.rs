@@ -90,6 +90,8 @@ pub struct Judging {
     pub data: String,
     /// The cases to use: `dev` or `test`.
     pub split: String,
+    /// The name the result is given.
+    pub tag: Option<String>,
 }
 
 /// What a configuration asks the stages to do.
@@ -304,6 +306,16 @@ fn changes_taken(value: &Value) -> Result<Apply, String> {
 }
 
 /// A name of a source or of an optimization: letters, digits, `_`, `.` and `-`.
+/// Whether a configuration file is written for the versioned store: a section that builds is
+/// a list of modules there. The commands that both stores have go by this.
+pub fn staged(text: &str) -> bool {
+    Settings::parse(text).is_ok_and(|settings| {
+        ["extract", "transform", "index"]
+            .iter()
+            .any(|name| settings.get(name).is_some_and(Value::is_array))
+    })
+}
+
 pub(crate) fn plain_name(name: &str) -> bool {
     !name.is_empty()
         && !name.starts_with('.')
@@ -536,8 +548,11 @@ impl Settings {
         }
 
         let eval = self.section("eval")?;
-        if eval.tag.is_some() || eval.from.is_some() {
-            return Err("eval has no tag and no from in the configuration.".into());
+        if eval.from.is_some() {
+            return Err("eval makes its result, so it has no from.".into());
+        }
+        if eval.tag.is_some() && eval.steps.is_empty() {
+            return Err("eval has a tag and no eval.evidence.".into());
         }
         let mut judging = None;
         for step in &eval.steps {
@@ -556,6 +571,7 @@ impl Settings {
             let made = Judging {
                 data: data.to_owned(),
                 split: split.to_owned(),
+                tag: eval.tag.clone(),
             };
             if judging.replace(made).is_some() {
                 return Err("eval has more than one eval.evidence.".into());
@@ -656,7 +672,8 @@ mod tests {
             plan.eval,
             Some(Judging {
                 data: "default".into(),
-                split: "dev".into()
+                split: "dev".into(),
+                tag: None,
             })
         );
         assert_eq!(plan.release.as_deref(), Some("release"));

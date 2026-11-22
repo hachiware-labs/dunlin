@@ -125,8 +125,18 @@ impl Project {
         documents
     }
 
-    fn resolve(&self, tag: &str) -> SnapshotId {
-        self.store.resolve(tag).unwrap().unwrap()
+    fn resolve(&self, kind: &str, tag: &str) -> SnapshotId {
+        self.store.resolve(kind, tag).unwrap().unwrap()
+    }
+
+    /// The index that is served now, as a search takes it.
+    fn served(&self) -> String {
+        self.store
+            .releases("release")
+            .unwrap()
+            .last()
+            .unwrap()
+            .to_string()
     }
 }
 
@@ -143,8 +153,11 @@ fn makes_a_rag_then_the_next_one_after_documents_are_added() {
     assert_eq!(first.index.index.outcome, Outcome::Created);
     assert!(first.index.built);
     let rag_1 = first.index.index.snapshot;
-    assert_eq!(project.resolve("main"), rag_1);
-    assert_eq!(project.resolve("release"), rag_1);
+    assert_eq!(project.resolve("index", "main"), rag_1);
+    assert_eq!(
+        project.served().parse::<i64>().map(SnapshotId).unwrap(),
+        rag_1
+    );
 
     // Each stage made its snapshot from the one before it.
     let parents = |id| project.store.snapshot(id).unwrap().parents;
@@ -159,7 +172,7 @@ fn makes_a_rag_then_the_next_one_after_documents_are_added() {
     );
 
     // It answers from the documents it has, with the place and the text of what it found.
-    let found = project.search("release", "ポンプの点検");
+    let found = project.search(&project.served(), "ポンプの点検");
     assert_eq!(found[0].document, "manuals/pump.md");
     assert_eq!(found[0].source, "docs");
     assert!(
@@ -170,15 +183,15 @@ fn makes_a_rag_then_the_next_one_after_documents_are_added() {
     assert!(found[0].lines.0 >= 1 && found[0].lines.1 >= found[0].lines.0);
     // The best match comes first; "交換" is in the pump manual too.
     assert_eq!(
-        project.found("release", "フィルター 交換")[0],
+        project.found(&project.served(), "フィルター 交換")[0],
         "manuals/フィルター.md"
     );
     // What is only in the documents that come later is not found yet.
-    assert!(project.found("release", "排水").is_empty());
+    assert!(project.found(&project.served(), "排水").is_empty());
     // "更新" is in other documents too, so something is found, but not the notes.
     assert!(
         !project
-            .found("release", "更新履歴")
+            .found(&project.served(), "更新履歴")
             .contains(&"release-notes.md".to_owned())
     );
 
@@ -211,14 +224,23 @@ fn makes_a_rag_then_the_next_one_after_documents_are_added() {
     let rag_2 = second.index.index.snapshot;
     assert_ne!(rag_2, rag_1);
     assert_ne!(second.index.location, first.index.location);
-    assert_eq!(project.resolve("release"), rag_2);
-    assert_eq!(project.store.history("release").unwrap(), [rag_1, rag_2]);
+    assert_eq!(
+        project.served().parse::<i64>().map(SnapshotId).unwrap(),
+        rag_2
+    );
+    assert_eq!(project.store.releases("release").unwrap(), [rag_1, rag_2]);
 
     // The next RAG answers from the added documents too.
-    assert_eq!(project.found("release", "排水"), ["manuals/valve.md"]);
-    assert_eq!(project.found("release", "更新履歴")[0], "release-notes.md");
     assert_eq!(
-        project.search("release", "ポンプの点検")[0].document,
+        project.found(&project.served(), "排水"),
+        ["manuals/valve.md"]
+    );
+    assert_eq!(
+        project.found(&project.served(), "更新履歴")[0],
+        "release-notes.md"
+    );
+    assert_eq!(
+        project.search(&project.served(), "ポンプの点検")[0].document,
         "manuals/pump.md"
     );
 
@@ -240,7 +262,7 @@ fn makes_a_rag_then_the_next_one_after_documents_are_added() {
     assert!(!third.index.built);
     assert_eq!(third.index.index.snapshot, rag_2);
     assert_eq!(third.index.location, second.index.location);
-    assert_eq!(project.store.history("release").unwrap().len(), 2);
+    assert_eq!(project.store.releases("release").unwrap().len(), 2);
 }
 
 #[test]
@@ -276,15 +298,18 @@ fn runs_only_what_follows_a_changed_section() {
         parents(trial.transform.chunks.snapshot),
         parents(main.transform.chunks.snapshot)
     );
-    assert_eq!(project.resolve("release"), served);
-    assert_eq!(project.resolve("main"), served);
-    assert_eq!(project.resolve("trial-80"), tried);
     assert_eq!(
-        project.resolve("chunks-200"),
+        project.served().parse::<i64>().map(SnapshotId).unwrap(),
+        served
+    );
+    assert_eq!(project.resolve("index", "main"), served);
+    assert_eq!(project.resolve("index", "trial-80"), tried);
+    assert_eq!(
+        project.resolve("chunks", "chunks-200"),
         main.transform.chunks.snapshot
     );
     assert_eq!(
-        project.resolve("chunks-80"),
+        project.resolve("chunks", "chunks-80"),
         trial.transform.chunks.snapshot
     );
 

@@ -79,8 +79,11 @@ fn lists_what_an_index_is() {
         store.snapshot(trial.snapshot).unwrap().digest(),
         snapshot.digest()
     );
-    assert_eq!(store.resolve("main").unwrap(), Some(main.snapshot));
-    assert_eq!(store.resolve("trial-bigram").unwrap(), Some(trial.snapshot));
+    assert_eq!(store.resolve("index", "main").unwrap(), Some(main.snapshot));
+    assert_eq!(
+        store.resolve("index", "trial-bigram").unwrap(),
+        Some(trial.snapshot)
+    );
 
     // Where the index was built is a note on the information object. It changes neither the
     // object's ID nor the snapshot, and it can be written again when the index is rebuilt.

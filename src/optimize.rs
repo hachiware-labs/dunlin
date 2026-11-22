@@ -17,7 +17,7 @@ use std::time::Instant;
 use serde_json::{Map, Value, json};
 use yaml_rust2::Yaml;
 
-use crate::pipeline::{RunRequest, run};
+use crate::pipeline::{LATEST, RunRequest, run};
 use crate::records::object_id;
 use crate::settings::{SECTIONS, Settings, document, entries, plain_name, section};
 use crate::store::{Outcome, SnapshotId, Store, StoreError, StoreResult};
@@ -92,8 +92,11 @@ pub struct Candidate {
     pub state: State,
     /// The stages that did work.
     pub ran: Vec<String>,
-    /// The tags of what the trial makes itself, one for each stage.
-    pub tags: Vec<String>,
+    /// The name of what the trial makes itself: the name of the optimization and the number.
+    pub tag: String,
+    /// The kinds of snapshot that have the name: `chunks` and `index` when the trial makes them
+    /// itself, and `eval-report` for its result. Empty when the trial was not evaluated.
+    pub named: Vec<String>,
     pub index: Option<SnapshotId>,
     pub report: Option<SnapshotId>,
     pub recall: Option<f64>,
@@ -298,7 +301,7 @@ fn instruction(source: &str) -> StoreResult<Instruction> {
 }
 
 /// The entries of a section without its tag, and with `tag` when one is given.
-fn retagged(settings: &Settings, name: &str, tag: Option<&str>) -> Value {
+fn retagged(settings: &Settings, name: &str, tag: Option<&String>) -> Value {
     let mut entries: Vec<Value> = settings
         .get(name)
         .and_then(Value::as_array)
@@ -345,12 +348,18 @@ struct Ground<'a> {
 }
 
 impl Ground<'_> {
-    /// The configuration file of a trial, and the tags it gives to what it makes itself.
+    /// The name of a trial. Each kind of snapshot has its own names, so one name does for the
+    /// chunks, the index and the result of a trial.
+    fn tag(&self, number: usize) -> String {
+        format!("{}/{number:03}", self.name)
+    }
+
+    /// The configuration file of a trial, and the kinds of snapshot it gives its name to.
     ///
     /// The documents are the ones the base's name points at, so no trial scans the folder. A
-    /// section a trial rewrites, and those after it, get a tag of the trial; the sections before
-    /// keep their modules and lose their tag, so that the base's names do not move. Nothing is
-    /// released.
+    /// section a trial rewrites, and those after it, get the name of the trial; the sections
+    /// before keep their modules and lose their tag, so that the base's names do not move. The
+    /// result always gets the name. Nothing is released.
     fn trial(&self, number: usize, rewrites: &[&Map<String, Value>]) -> (String, Vec<String>) {
         let mut settings = self.base.clone();
         let mut rewritten = Vec::new();
@@ -362,23 +371,28 @@ impl Ground<'_> {
         }
         let own_chunks = rewritten.contains(&"transform");
         let own_index = own_chunks || rewritten.contains(&"index");
-        let tag = |stage: &str| format!("{}/{number:03}/{stage}", self.name);
-        let mut tags = Vec::new();
+        let tag = self.tag(number);
+        let mut named = Vec::new();
         settings.replace("extract", json!([{ "from": self.start }]));
-        for (section, stage, own) in [
+        for (section, kind, own) in [
             ("transform", "chunks", own_chunks),
             ("index", "index", own_index),
         ] {
-            let tag = own.then(|| tag(stage));
-            settings.replace(section, retagged(&settings, section, tag.as_deref()));
-            tags.extend(tag);
+            settings.replace(section, retagged(&settings, section, own.then_some(&tag)));
+            if own {
+                named.push(kind.to_owned());
+            }
         }
         settings.replace(
             "eval",
-            json!([{ "eval.evidence": { "data": self.data, "split": self.split } }]),
+            json!([
+                { "eval.evidence": { "data": self.data, "split": self.split } },
+                { "tag": tag },
+            ]),
         );
+        named.push("eval-report".to_owned());
         settings.remove("serve");
-        (settings.to_text(), tags)
+        (settings.to_text(), named)
     }
 }
 
@@ -399,7 +413,8 @@ fn recorded(candidate: &Candidate) -> Value {
         "state": state,
         "reason": reason,
         "ran": candidate.ran,
-        "tags": candidate.tags,
+        "tag": candidate.tag,
+        "named": candidate.named,
         "index": candidate.index.map(|id| id.0),
         "report": candidate.report.map(|id| id.0),
         "recall": candidate.recall,
@@ -502,6 +517,16 @@ pub fn table(record: &Value) -> String {
         "The files of the trials are in {}.",
         record["folder"].as_str().unwrap_or_default()
     ));
+    let documents = &record["documents"];
+    if let (Some(name), Some(version), Some(count)) = (
+        documents["name"].as_str(),
+        documents["version"].as_i64(),
+        documents["count"].as_u64(),
+    ) {
+        lines.push(format!(
+            "Every trial used the documents {name}, version {version} ({count} documents)."
+        ));
+    }
     lines.join("\n")
 }
 
@@ -543,9 +568,13 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
     let start = base_plan
         .extract
         .as_ref()
-        .and_then(|extract| extract.name())
-        .ok_or_else(|| refused("The extract section of the base configuration has no tag."))?;
-    if kind(store.resolve(start)?.ok_or_else(not_built)?)? != "extracted" {
+        .ok_or_else(|| refused("The base configuration has no extract section."))?
+        .name()
+        .unwrap_or(LATEST);
+    // Every trial starts from these documents, as they are now: the folder is not scanned, so
+    // that the trials differ in their settings and in nothing else.
+    let corpus = store.snapshot(store.resolve("extracted", start)?.ok_or_else(not_built)?)?;
+    if corpus.kind != "extracted" {
         return Err(refused("The tag of extract does not name documents."));
     }
     let judging = base_plan.eval.as_ref();
@@ -562,7 +591,7 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
         .or(judging.map(|judging| judging.split.as_str()))
         .unwrap_or("dev");
     let found = store
-        .resolve(data)?
+        .resolve("eval-data", data)?
         .ok_or_else(|| refused(format!("There is no evaluation data {data}.")))?;
     if kind(found)? != "eval-data" {
         return Err(refused(format!("{data} is not evaluation data.")));
@@ -596,7 +625,7 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
             .collect();
         let rewrites: Vec<&Map<String, Value>> =
             picked.iter().map(|(_, sections)| sections).collect();
-        let (config, tags) = ground.trial(number, &rewrites);
+        let (config, named) = ground.trial(number, &rewrites);
         let state = match Settings::parse(&config).and_then(|settings| settings.plan()) {
             Ok(_) => State::Pending,
             Err(reason) => State::Invalid(reason),
@@ -616,8 +645,9 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
             choices,
             config,
             file: format!("{folder}/{number:03}.yaml"),
-            tags: if state == State::Pending {
-                tags
+            tag: ground.tag(number),
+            named: if state == State::Pending {
+                named
             } else {
                 Vec::new()
             },
@@ -641,7 +671,7 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
         for number in order.split_off(kept.min(order.len())) {
             candidates[number].state =
                 State::Skipped(format!("The limit of {limit} candidates was reached."));
-            candidates[number].tags.clear();
+            candidates[number].named.clear();
         }
     }
 
@@ -660,6 +690,11 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
             "base": object_id(base_text.as_bytes()).as_str(),
             "data": data,
             "split": split,
+            "documents": {
+                "name": start,
+                "version": corpus.id.0,
+                "count": corpus.items.len(),
+            },
             "metric": "recall",
             "candidates": candidates.iter().map(recorded).collect::<Vec<_>>(),
         })
@@ -680,7 +715,7 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
             candidates[number].state = State::Skipped(format!(
                 "{FAILURES} trials in a row failed, so the rest were not tried."
             ));
-            candidates[number].tags.clear();
+            candidates[number].named.clear();
             continue;
         }
         let candidate = &mut candidates[number];
@@ -697,7 +732,9 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
                 project: request.project,
                 indexes: request.indexes,
                 config: &candidate.config,
+                evaluate: true,
                 release: false,
+                latest: false,
                 cause: Some(&cause),
                 progress: &|stage, outcome| {
                     (request.progress)(&Event::Stage { stage, outcome });
@@ -717,7 +754,7 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
             Err(error) => {
                 failures += 1;
                 candidate.state = State::Failed(error.to_string());
-                candidate.tags.clear();
+                candidate.named.clear();
             }
         }
         (request.progress)(&Event::Done {

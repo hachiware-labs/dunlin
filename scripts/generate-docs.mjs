@@ -18,10 +18,9 @@ const section = (...parts) => parts.join('\n\n');
 const types = ['mcp', 'rag', 'wiki', 'para'];
 const commandGroups = [
   ['初期化と設定', 'init config validate defaults modules add remove'],
-  ['構築と提供', 'source transform index build search ask serve status use tag'],
-  ['評価と辞書', 'eval-data eval report dictionary evidence-map'],
+  ['構築と提供', 'source transform index build search ask serve status use tag list release'],
+  ['評価と辞書', 'eval-data eval report dictionary evidence-map optimize results'],
   ['Wiki・PARA の操作', 'ingress query verify issue rules progress cite instruct save-answer archive undo'],
-  ['版を持つ保管（開発中）', 'store'],
 ];
 
 function cliGuide() {

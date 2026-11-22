@@ -22,23 +22,27 @@ dunlin remove <tool> [--project <directory>] [--json]
 dunlin source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]
 dunlin transform [--project <directory>] [--config <file>] [--dry-run] [--json]
 dunlin index [--project <directory>] [--config <file>] [--dry-run] [--json]
-dunlin build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]
-dunlin search <query> [--project <directory>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]
+dunlin build [<config>] [--release] [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]
+dunlin search <query> [--project <directory>] [--index <name>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]
 dunlin ask <question> [--project <directory>] [--build <ref>] [--config <file>] [--json]
 dunlin serve [--project <directory>] [--transport <http|stdio>] [--host <address>] [--port <port>] [--print-config [--json]]
 dunlin status [--project <directory>] [--json]
 dunlin use <build> [--project <directory>] [--json]
 dunlin tag <name> [build] [--move] [--project <directory>] [--json]
+dunlin list [documents|chunks|indexes|eval-data|results] [--project <directory>] [--json]
+dunlin release <index> [--name <served-name>] [--project <directory>] [--json]
 ```
 
 ## 評価と辞書
 
 ```text
-dunlin eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]
-dunlin eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]
+dunlin eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--tag <name>] [--project <directory>] [--json]
+dunlin eval [<config>] [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]
 dunlin report <show|list|compare> [--project <directory>] [--json]
 dunlin dictionary suggest [--report <ref>] | dunlin dictionary add <file> --config <candidate> [--project <directory>] [--json]
 dunlin evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]
+dunlin optimize <instruction> [--name <name>] [--project <directory>] [--json]
+dunlin results [<name>] [--project <directory>] [--json]
 ```
 
 ## Wiki・PARA の操作
@@ -55,12 +59,6 @@ dunlin instruct <page> <instruction> [--target <text>] [--supplement <text> --by
 dunlin save-answer <query-run> <page> <title> [--project <directory>] [--json]
 dunlin archive <page> [--project <directory>] [--restore] [--json]
 dunlin undo <work-id> [--project <directory>] [--json]
-```
-
-## 版を持つ保管（開発中）
-
-```text
-dunlin store run <config> [--release] | dunlin store eval-data <file> [--tag <name>] | dunlin store optimize <instruction> [--name <name>] | dunlin store results [<name>] [--project <directory>] [--json]
 ```
 
 ## 主な引数

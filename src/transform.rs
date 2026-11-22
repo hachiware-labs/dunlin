@@ -170,7 +170,7 @@ pub fn transform(store: &Store, request: &TransformRequest<'_>) -> StoreResult<T
     let process = process(request.chunking, request.context);
     let applied = process.id();
     let before = match request.tag {
-        Some(tag) => store.resolve(tag)?,
+        Some(tag) => store.resolve("chunks", tag)?,
         None => None,
     };
     let before = before

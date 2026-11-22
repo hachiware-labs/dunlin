@@ -504,12 +504,20 @@ fn dispatch(
 ) -> Result<Done, CliError> {
     let command = state.command;
     let env = state.env;
-    if command == "store" {
-        // The versioned store has its own files and takes no Dunlinfile.yaml.
-        let project = env.resolve(parsed.string("project").or(explicit).unwrap_or("."));
-        let (data, text) = crate::cli_store::command(parsed, &project, env, &|line| {
-            print_error(line);
-        })?;
+    // The versioned store has its own files. Its own commands always go there; the commands
+    // both stores have go there when the configuration file is written for it.
+    let project = env.resolve(parsed.string("project").or(explicit).unwrap_or("."));
+    if let Some((action, argument)) = crate::cli_store::route(command, parsed, &project, env)? {
+        let (data, text) = crate::cli_store::command(
+            action,
+            argument.as_deref(),
+            parsed,
+            &project,
+            env,
+            &|line| {
+                print_error(line);
+            },
+        )?;
         if json {
             return Ok(Done::Data(parse_json(&data.to_string())?));
         }

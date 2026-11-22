@@ -78,7 +78,9 @@ impl Project {
                 project: self.root.path(),
                 indexes: &self.indexes(),
                 config,
+                evaluate: true,
                 release,
+                latest: true,
                 cause: None,
                 progress: &|_, _| {},
             },
@@ -119,8 +121,24 @@ impl Project {
         .to_string()
     }
 
-    fn resolve(&self, tag: &str) -> SnapshotId {
-        self.store.resolve(tag).unwrap().unwrap()
+    fn resolve(&self, kind: &str, tag: &str) -> SnapshotId {
+        self.store.resolve(kind, tag).unwrap().unwrap()
+    }
+
+    /// The index that is served now.
+    fn served(&self) -> SnapshotId {
+        *self.store.releases("release").unwrap().last().unwrap()
+    }
+
+    /// What `default` names, for each kind that has it.
+    fn latest(&self) -> Vec<(String, SnapshotId)> {
+        self.store
+            .names()
+            .unwrap()
+            .into_iter()
+            .filter(|(_, name, _)| name == "default")
+            .map(|(kind, _, snapshot)| (kind, snapshot))
+            .collect()
     }
 
     /// The runs an optimization started.
@@ -163,8 +181,22 @@ fn states(optimization: &Optimization) -> Vec<&str> {
 #[test]
 fn writes_a_file_for_each_trial_and_runs_it() {
     let project = Project::new();
-    let served = project.resolve("release");
-    let chunks = project.resolve("chunks-200");
+    let served = project.served();
+    let chunks = project.resolve("chunks", "chunks-200");
+    // What a run by hand made last is also named default, for each kind.
+    let defaults = project.latest();
+    assert_eq!(
+        defaults,
+        [
+            ("extracted".to_owned(), project.resolve("extracted", "docs")),
+            ("chunks".to_owned(), chunks),
+            ("index".to_owned(), served),
+            (
+                "eval-data".to_owned(),
+                project.resolve("eval-data", "default")
+            ),
+        ]
+    );
     let text = instruction("chunk-and-search.yaml");
 
     let heard = RefCell::new(Vec::new());
@@ -220,7 +252,12 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     assert_eq!(base.ran, ["eval"]);
     assert_eq!(base.index, Some(served));
     assert_eq!(base.recall, Some(1.0));
-    assert!(base.tags.is_empty());
+    assert_eq!(base.tag, "chunk-and-search/000");
+    assert_eq!(base.named, ["eval-report"]);
+    assert_eq!(
+        Some(project.resolve("eval-report", "chunk-and-search/000")),
+        base.report
+    );
     // The option that changes nothing is the base again: everything is found by its key.
     let same = named(&made, "chunking=as-is,search=top10");
     assert!(same.ran.is_empty());
@@ -230,7 +267,7 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     let top1 = named(&made, "chunking=as-is,search=top1");
     assert_eq!(top1.ran, ["eval"]);
     assert_eq!(top1.index, Some(served));
-    assert!(top1.tags.is_empty());
+    assert_eq!(top1.named, ["eval-report"]);
     assert!(top1.recall.unwrap() <= base.recall.unwrap());
 
     // An array of values is one trial for each value. A trial tags what it makes itself, at
@@ -241,20 +278,15 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     assert_eq!((small.number, small_top1.number), (4, 5));
     assert_eq!(small.ran, ["transform", "index", "eval"]);
     assert_eq!(small_top1.ran, ["eval"]);
-    assert_eq!(
-        small.tags,
-        ["chunk-and-search/004/chunks", "chunk-and-search/004/index"]
-    );
+    assert_eq!(small.tag, "chunk-and-search/004");
+    assert_eq!(small.named, ["chunks", "index", "eval-report"]);
     assert_eq!(small.index, small_top1.index);
     assert_ne!(small.index, Some(served));
     let index = project.store.snapshot(small.index.unwrap()).unwrap();
-    assert_eq!(
-        index.tags,
-        ["chunk-and-search/004/index", "chunk-and-search/005/index"]
-    );
+    assert_eq!(index.tags, ["chunk-and-search/004", "chunk-and-search/005"]);
     assert_eq!(
         project.store.snapshot(index.parents[0]).unwrap().tags,
-        ["chunk-and-search/004/chunks", "chunk-and-search/005/chunks"]
+        ["chunk-and-search/004", "chunk-and-search/005"]
     );
     // Chunks of twenty characters hold only the one sentence of evidence that is that short.
     assert_eq!(small.recall, Some(0.2));
@@ -304,11 +336,11 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     );
     assert_eq!(
         settings.section("transform").unwrap().tag.as_deref(),
-        Some("chunk-and-search/010/chunks")
+        Some("chunk-and-search/010")
     );
     assert_eq!(
         settings.section("index").unwrap().tag.as_deref(),
-        Some("chunk-and-search/010/index")
+        Some("chunk-and-search/010")
     );
     // Every trial is measured the same way, and none releases.
     let plan = settings.plan().unwrap();
@@ -325,8 +357,21 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     assert_eq!(transform_section.tag, None);
     assert_eq!(settings.section("index").unwrap().tag, None);
 
-    // Running the file of a trial by hand is the trial again.
+    // The optimization left default where it was: a trial names only what it makes itself.
+    assert_eq!(project.latest(), defaults);
+    assert_eq!(
+        project.store.snapshot(served).unwrap().tags,
+        ["main", "default"]
+    );
+
+    // Running the file of a trial by hand is the trial again. Nothing runs, and what it made
+    // is now what was made last by hand, so default names it.
     let again = project.run(&project.file(structure), false);
+    assert_eq!(Some(project.resolve("index", "default")), structure.index);
+    assert_eq!(
+        Some(project.resolve("eval-report", "default")),
+        structure.report
+    );
     assert!(again.ran.is_empty());
     assert_eq!(
         (Some(again.index), again.report),
@@ -342,7 +387,7 @@ fn writes_a_file_for_each_trial_and_runs_it() {
         vector.state,
         State::Invalid("index.vector is not on the new store yet.".into())
     );
-    assert!(vector.ran.is_empty() && vector.index.is_none() && vector.tags.is_empty());
+    assert!(vector.ran.is_empty() && vector.index.is_none() && vector.named.is_empty());
     assert!(project.file(vector).contains("index.vector"));
     assert_eq!(
         states(&made),
@@ -364,10 +409,9 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     );
 
     // What is served, and the tags of the base, did not move.
-    assert_eq!(project.resolve("release"), served);
-    assert_eq!(project.resolve("main"), served);
-    assert_eq!(project.resolve("chunks-200"), chunks);
-    assert_eq!(project.store.snapshot(served).unwrap().tags.len(), 2);
+    assert_eq!(project.served(), served);
+    assert_eq!(project.resolve("index", "main"), served);
+    assert_eq!(project.resolve("chunks", "chunks-200"), chunks);
 
     // The optimization is one run that keeps the instruction and lists the trials. The runs it
     // started name it.
@@ -417,6 +461,14 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     assert_eq!(
         lines[15],
         "The files of the trials are in .dunlin/trials/chunk-and-search."
+    );
+    // Every trial starts from the same documents, and the table says which.
+    assert_eq!(
+        lines[16],
+        format!(
+            "Every trial used the documents docs, version {} (6 documents).",
+            project.resolve("extracted", "docs")
+        )
     );
     // The latest optimization of a name is found again, for showing its results later.
     let (kept, running) = latest(&project.store, Some("chunk-and-search"))
@@ -493,11 +545,11 @@ fn leaves_what_goes_over_the_limit_and_refuses_a_wrong_instruction() {
         skipped.state,
         State::Skipped("The limit of 2 candidates was reached.".into())
     );
-    assert!(skipped.index.is_none() && skipped.tags.is_empty());
+    assert!(skipped.index.is_none() && skipped.named.is_empty());
     assert!(
         project
             .store
-            .resolve("chunk-and-search/010/index")
+            .resolve("index", "chunk-and-search/010")
             .unwrap()
             .is_none()
     );
@@ -552,7 +604,10 @@ fn goes_on_after_a_trial_that_fails() {
     let project = Project::new();
     // The text of one document is lost from the store. A trial that chunks the documents anew
     // fails; one that uses the chunks that are there does not read the text.
-    let documents = project.store.snapshot(project.resolve("docs")).unwrap();
+    let documents = project
+        .store
+        .snapshot(project.resolve("extracted", "docs"))
+        .unwrap();
     let item = ItemId::parse(&documents.items[0].1).unwrap();
     let lost = project.store.item(&item).unwrap()[0].object.clone();
     rusqlite::Connection::open(project.root.path().join(".dunlin/store/objects.sqlite"))
@@ -585,7 +640,7 @@ fn goes_on_after_a_trial_that_fails() {
     );
     let failed = named(&made, "search=top10,chunking=length");
     assert!(matches!(&failed.state, State::Failed(reason) if !reason.is_empty()));
-    assert!(failed.tags.is_empty() && failed.recall.is_none() && failed.elapsed_ms.is_some());
+    assert!(failed.named.is_empty() && failed.recall.is_none() && failed.elapsed_ms.is_some());
     // The trial after the one that failed ran as usual.
     assert_eq!(named(&made, "search=top1,chunking=as-is").ran, ["eval"]);
     // The optimization is complete, and the run that failed is recorded as failed.
@@ -621,4 +676,63 @@ fn goes_on_after_a_trial_that_fails() {
         made.candidates[4].state,
         State::Skipped("3 trials in a row failed, so the rest were not tried.".into())
     );
+}
+
+#[test]
+fn says_what_a_scan_found_and_checks_the_evaluation_before_it_builds() {
+    let project = Project::new();
+    let config = instruction("Dunlinfile.yaml");
+    let first = project.served();
+    assert_eq!(
+        project.store.served().unwrap(),
+        [("release".to_owned(), first)]
+    );
+
+    // A run says which documents the scan found changed, and how many were chunked.
+    fs::write(project.root.path().join("docs/new.md"), "新しい文書です。").unwrap();
+    let made = project.run(&config, false);
+    let scan = made.scan.as_ref().unwrap();
+    assert_eq!(scan.added, ["new.md"]);
+    assert!(scan.updated.is_empty() && scan.deleted.is_empty());
+    assert_eq!(scan.unchanged, 6);
+    assert_eq!(made.chunked, Some(1));
+
+    // What is served stays until an index is released, and the one before is kept.
+    assert_eq!(project.served(), first);
+    project.store.release("release", made.index).unwrap();
+    project.store.release("release", made.index).unwrap();
+    assert_eq!(
+        project.store.releases("release").unwrap(),
+        [first, made.index]
+    );
+    assert!(
+        project
+            .store
+            .release("release", made.chunks.unwrap())
+            .is_err()
+    );
+
+    // Evaluation data that is not there stops the run before anything is built.
+    fs::write(
+        project.root.path().join("docs/more.md"),
+        "もう一つの文書です。",
+    )
+    .unwrap();
+    let runs = project.store.runs().unwrap().len();
+    let error = run(
+        &project.store,
+        &RunRequest {
+            project: project.root.path(),
+            indexes: &project.indexes(),
+            config: &format!("{config}\neval:\n  - eval.evidence: {{ data: absent }}\n"),
+            evaluate: true,
+            release: false,
+            latest: true,
+            cause: None,
+            progress: &|_, _| {},
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(), "There is no evaluation data absent.");
+    assert_eq!(project.store.runs().unwrap().len(), runs);
 }

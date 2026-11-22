@@ -71,7 +71,8 @@ fn invalid(what: &str) -> StoreError {
     StoreError::new(format!("The saved {what} is not valid."))
 }
 
-/// Saves the cases as the evaluation data `tag` names. The same cases are the same version.
+/// Saves the cases as the evaluation data `tag` names, and as `default`. The same cases are the
+/// same version.
 pub fn save_eval_data(store: &Store, tag: &str, cases: &[Case]) -> StoreResult<Committed> {
     let mut draft = store.begin_scan("eval-data", "eval-data")?;
     let mut cases: Vec<&Case> = cases.iter().collect();
@@ -96,7 +97,10 @@ pub fn save_eval_data(store: &Store, tag: &str, cases: &[Case]) -> StoreResult<C
         draft.list(vec![case.id.clone()], object.to_string());
     }
     draft.set_stats(json!({ "cases": cases.len() }));
-    draft.commit(Some(tag), None)
+    let saved = draft.commit(Some(tag), None)?;
+    // What was saved last is also the data a configuration means when it says `default`.
+    store.tag(crate::pipeline::LATEST, saved.snapshot)?;
+    Ok(saved)
 }
 
 /// The cases of an `eval-data` snapshot.

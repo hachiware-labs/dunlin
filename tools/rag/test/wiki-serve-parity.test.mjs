@@ -90,6 +90,9 @@ function screenParts(body) {
   // source and open their quoted passage.
   center = center.replace(/<form class="inline"[\s\S]*?<\/form>/gu, '').replace(/<a href="\/\?source=[^"]*">(.*?)<\/a>/gu, '$1')
     .replace(/<a class="ref" href="#cite-\d+">(\d+)<\/a>/gu, ' [$1]').replace(/<li id="cite-\d+">/gu, '<li>');
+  // A page of the Rust screen has its contents, and its text and its citations in boxes of their own.
+  center = center.replace(/<nav class="toc"[\s\S]*?<\/nav>/gu, '').replace(/<h2 id="section-\d+">/gu, '<h2>')
+    .replace('<div class="body">', '').replace('</div><section class="notes">', '').replace(/<\/ol><\/section>$/u, '</ol>');
   return 'content: ' + center + '\nwork: ' + work;
 }
 

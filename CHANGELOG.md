@@ -28,6 +28,7 @@
 - Wiki と PARA の `ingress` に URL を渡せるようにしました。画面では左上の **資料を取り込む** に URL を書きます。HTML、PDF、Markdown、テキスト、Office 文書を取得して原本として保存し、出典は元の URL を指します。Shift_JIS や EUC-JP のページは UTF-8 に直します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。
 - `serve.access.allowed_clients` を追加しました。`192.168.11.0/24` のようなアドレスの範囲を書くと、その範囲とサーバーのマシン自身からの接続だけを受け付け、ほかは `403 CLIENT_FORBIDDEN` で断ります。RAG のサーバーと Wiki・PARA の画面の両方に効きます。ループバックの外で待ち受けるときの認証は必須ですが、`allowed_clients` が家や職場のネットワークの範囲（`192.168.0.0/16` など）だけなら、認証なしでも起動できます。
 - `nest config set serve` を追加しました。待ち受けるアドレス、ポート、宛先名、接続元の範囲、認証を、この PC のすべてのプロジェクトに対して設定できます（`~/.knowledge-nest/config.yaml` に保存）。`--project <directory>` を付けると、そのプロジェクトの `KnowledgeNestfile.yaml` だけを書き換えます。プロジェクトで標準の値から変えた項目はプロジェクトの値が優先です。`nest config unset serve` で消し、`nest config list --project <directory>` でプロジェクトの設定を表示します。
+- Wiki と PARA の `serve` の画面のデザインを変えました。白地に黒の文字と1色のアクセントで、ライトとダークの両方に対応します。ページは、節が3つ以上あると **目次** が付き、広い画面では本文の右に、狭い画面では最初の段落の下に出ます。引用番号は文末の小さな番号札になり、出典はカードで並びます。
 - README を CLI 利用者向けにし、Node.js API、検索評価、Wiki・PARA、設定や運用のガイドを整備しました。
 
 ### 以前のプロジェクトから移行する

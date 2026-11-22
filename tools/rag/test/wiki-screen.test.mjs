@@ -37,7 +37,7 @@ function model(stops) {
     if (body.format.properties.pages) {
       result = { pages: input.sources.map(({ id, text }) => {
         const quote = text.split('\n').map((line) => line.trim()).find(Boolean);
-        return { id: 'guides/note-' + id, title: quote.slice(0, 8), facts: [{ text: quote, citations: [{ id, quote }] }] };
+        return { id: 'guides/note-' + id, title: quote.slice(0, 8), facts: [{ text: '## 概要\n\n## 手順\n\n## 根拠\n\n' + quote, citations: [{ id, quote }] }] };
       }) };
     }
     response.setHeader('content-type', 'application/json');
@@ -177,6 +177,9 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   assert.match(after.body, /title="http:\/\/127\.0\.0\.1:\d+\/manuals\/pump"><span class="name">\/manuals\/pump<\/span><\/a><\/li>/u);
   const pageId = /href="\/\?page=([^"]+)"/u.exec(after.body)[1];
   const page = await send(port, { path: '/?page=' + pageId });
+  // A page of three sections or more has its contents, and each entry jumps to its section.
+  assert.match(page.body, /<nav class="toc" aria-label="目次"><h2>目次<\/h2><ol><li><a href="#section-1">概要<\/a><\/li><li><a href="#section-2">手順<\/a><\/li><li><a href="#section-3">根拠<\/a><\/li><\/ol><\/nav><div class="body"><h2 id="section-1">概要<\/h2>/u);
+  assert.match(page.body, /<h2 id="section-3">根拠<\/h2>.*<\/div><section class="notes"><h2>出典<\/h2><ol><li id="cite-1">/su);
   assert.match(page.body, /<h2>出典<\/h2><ol><li id="cite-1"><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a>/u);
   // Citation numbers in the text jump to their citation.
   assert.match(page.body, /<a class="ref" href="#cite-1">1<\/a>/u);

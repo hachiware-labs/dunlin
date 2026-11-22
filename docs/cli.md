@@ -57,6 +57,12 @@ dunlin archive <page> [--project <directory>] [--restore] [--json]
 dunlin undo <work-id> [--project <directory>] [--json]
 ```
 
+## 版を持つ保管（開発中）
+
+```text
+dunlin store run <config> [--release] | dunlin store eval-data <file> [--tag <name>] | dunlin store optimize <instruction> [--name <name>] | dunlin store results [<name>] [--project <directory>] [--json]
+```
+
 ## 主な引数
 
 | 引数 | 用途 |

@@ -4,8 +4,10 @@
 //! Only what the new store can run is accepted. A configuration that asks for anything else is
 //! refused with a reason, before anything is built.
 //!
-//! Not here yet: `extract` as more than one loader, `from`, normalization and context modules,
-//! the vector index, and declarations that come from the modules themselves.
+//! Not here yet: `extract` as more than one loader, normalization modules, the vector index, and
+//! declarations that come from the modules themselves.
+
+use std::path::Path;
 
 use serde_json::{Map, Value, json};
 use yaml_rust2::{Yaml, YamlLoader};
@@ -14,7 +16,7 @@ use crate::extract::Apply;
 use crate::records::{ModuleIdentity, Process};
 use crate::transform::{Chunking, Context};
 
-/// The sections that hold a list of modules.
+/// The sections that hold a list of modules and that a build or a search runs.
 pub const SECTIONS: [&str; 4] = ["extract", "transform", "index", "search"];
 
 /// A configuration file: its top-level entries, in the order they are written.
@@ -30,25 +32,79 @@ pub struct Step {
     pub args: Map<String, Value>,
 }
 
-/// A section: its modules in order, and the tag it gives its result.
+/// A section: its modules in order, the tag it gives its result, or the name it starts from
+/// instead of making anything.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Section {
     pub steps: Vec<Step>,
     pub tag: Option<String>,
+    pub from: Option<String>,
+}
+
+/// A section that ends in a snapshot: it names one that is there, or says how one is made.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Stage<T> {
+    From(String),
+    Make { what: T, tag: Option<String> },
+}
+
+impl<T> Stage<T> {
+    /// The name the snapshot of the section has: the one it starts from, or its tag.
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::From(name) => Some(name),
+            Self::Make { tag, .. } => tag.as_deref(),
+        }
+    }
+}
+
+/// What `extract` reads.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Scan {
+    /// The ID of the source: `id` of `source.filesystem`, or the name of its folder.
+    pub source: String,
+    /// The folder, as it is written. A relative path starts at the project.
+    pub path: String,
+    /// Which changes of the folder are taken in.
+    pub apply: Apply,
+}
+
+/// How `transform` splits the text, and what the chunks say about their place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Chunks {
+    pub chunking: Chunking,
+    pub context: Context,
+}
+
+impl Chunks {
+    /// What the chunking is to the store, with the context it adds.
+    pub fn process(&self) -> Process {
+        crate::transform::process(self.chunking, self.context)
+    }
+}
+
+/// What a result is measured with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Judging {
+    /// The name of the evaluation data.
+    pub data: String,
+    /// The cases to use: `dev` or `test`.
+    pub split: String,
 }
 
 /// What a configuration asks the stages to do.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
-    /// The tag of the `extract` section. The documents are read from the snapshot it points at.
-    pub extract_tag: Option<String>,
-    /// Which changes of the folder `extract` takes in.
-    pub apply: Apply,
-    pub chunking: Chunking,
-    /// What the chunks say about their place in the document.
-    pub context: Context,
+    /// Not written when `transform` starts from a name.
+    pub extract: Option<Stage<Scan>>,
+    /// Not written when `index` starts from a name.
+    pub transform: Option<Stage<Chunks>>,
+    pub index: Stage<()>,
     /// The most chunks a search returns.
     pub top_k: usize,
+    pub eval: Option<Judging>,
+    /// The name that is served, from `serve`.
+    pub release: Option<String>,
 }
 
 fn value(yaml: &Yaml) -> Result<Value, String> {
@@ -126,6 +182,14 @@ pub fn section(name: &str, value: &Value) -> Result<Section, String> {
                 return Err(format!("The tag of {name} is not its last entry."));
             }
             section.tag = Some(tag.clone());
+        } else if key == "from" {
+            let Value::String(from) = args else {
+                return Err(format!("The from of {name} is not a name."));
+            };
+            if position != 0 {
+                return Err(format!("The from of {name} is not its first entry."));
+            }
+            section.from = Some(from.clone());
         } else if key.contains('.') {
             let args = match args {
                 Value::Object(args) => args.clone(),
@@ -139,6 +203,11 @@ pub fn section(name: &str, value: &Value) -> Result<Section, String> {
         } else {
             return Err(format!("{key} in {name} is not a module."));
         }
+    }
+    if section.from.is_some() && (!section.steps.is_empty() || section.tag.is_some()) {
+        return Err(format!(
+            "{name} starts from a name, so it has no modules and no tag."
+        ));
     }
     Ok(section)
 }
@@ -234,6 +303,55 @@ fn changes_taken(value: &Value) -> Result<Apply, String> {
     Ok(apply)
 }
 
+/// A name of a source or of an optimization: letters, digits, `_`, `.` and `-`.
+pub(crate) fn plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
+/// What `extract` reads, from its modules.
+fn scan(extract: &Section) -> Result<Scan, String> {
+    let mut scan = None;
+    for step in &extract.steps {
+        match step.name.as_str() {
+            "source.filesystem" => {
+                only(step, &["path", "id", "apply"], &[])?;
+                let Some(path) = step.args.get("path").and_then(Value::as_str) else {
+                    return Err("source.filesystem needs path as a folder.".into());
+                };
+                let source = match step.args.get("id") {
+                    Some(id) => id.as_str().map(str::to_owned),
+                    None => Path::new(path)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned()),
+                }
+                .filter(|source| plain_name(source))
+                .ok_or("source.filesystem needs id as a name of letters, digits, _, . and -.")?;
+                let apply = match step.args.get("apply") {
+                    Some(changes) => changes_taken(changes)?,
+                    None => Apply::ALL,
+                };
+                let made = Scan {
+                    source,
+                    path: path.to_owned(),
+                    apply,
+                };
+                if scan.replace(made).is_some() {
+                    return Err(
+                        "More than one source.filesystem is not on the new store yet.".into(),
+                    );
+                }
+            }
+            "loader.text" => {}
+            name => return Err(format!("{name} is not on the new store yet.")),
+        }
+    }
+    scan.ok_or_else(|| "extract has no source.filesystem.".into())
+}
+
 impl Settings {
     pub fn parse(text: &str) -> Result<Self, String> {
         Ok(Self {
@@ -254,6 +372,11 @@ impl Settings {
             Some(entry) => entry.1 = value,
             None => self.entries.push((name.to_owned(), value)),
         }
+    }
+
+    /// Takes a top-level entry out.
+    pub fn remove(&mut self, name: &str) {
+        self.entries.retain(|(key, _)| key != name);
     }
 
     /// The modules of a section. A section that is not written has none.
@@ -294,21 +417,17 @@ impl Settings {
 
     /// Checks the configuration against what the modules take and what they need of each other,
     /// and says what the stages are to do. The error is the reason it cannot run.
+    #[allow(clippy::too_many_lines)]
     pub fn plan(&self) -> Result<Plan, String> {
         let extract = self.section("extract")?;
-        let mut apply = Apply::ALL;
-        for step in &extract.steps {
-            match step.name.as_str() {
-                "source.filesystem" => {
-                    only(step, &["path", "apply"], &[])?;
-                    if let Some(changes) = step.args.get("apply") {
-                        apply = changes_taken(changes)?;
-                    }
-                }
-                "loader.text" => {}
-                name => return Err(format!("{name} is not on the new store yet.")),
-            }
-        }
+        let extract = match &extract.from {
+            Some(from) => Some(Stage::From(from.clone())),
+            None if extract.steps.is_empty() && extract.tag.is_none() => None,
+            None => Some(Stage::Make {
+                what: scan(&extract)?,
+                tag: extract.tag.clone(),
+            }),
+        };
 
         let transform = self.section("transform")?;
         let mut chunking = None;
@@ -346,7 +465,15 @@ impl Settings {
                 return Err("transform has more than one chunking module.".into());
             }
         }
-        let chunking = chunking.ok_or("transform has no chunking module.")?;
+        let transform = match (&transform.from, chunking) {
+            (Some(from), _) => Some(Stage::From(from.clone())),
+            (None, Some(chunking)) => Some(Stage::Make {
+                what: Chunks { chunking, context },
+                tag: transform.tag.clone(),
+            }),
+            (None, None) if transform.steps.is_empty() && transform.tag.is_none() => None,
+            (None, None) => return Err("transform has no chunking module.".into()),
+        };
 
         let index = self.section("index")?;
         let mut keyword = false;
@@ -361,10 +488,13 @@ impl Settings {
                 name => return Err(format!("{name} is not on the new store yet.")),
             }
         }
+        // An index that is named, not made, is taken to be a keyword index: that is checked
+        // when it is opened.
+        keyword |= index.from.is_some();
 
         let search = self.section("search")?;
-        if search.tag.is_some() {
-            return Err("search makes no snapshot, so it has no tag.".into());
+        if search.tag.is_some() || search.from.is_some() {
+            return Err("search makes no snapshot, so it has no tag and no from.".into());
         }
         let mut top_k = None;
         for step in &search.steps {
@@ -391,20 +521,73 @@ impl Settings {
         if !keyword {
             return Err("index has no index module.".into());
         }
+        let index = match &index.from {
+            Some(from) => Stage::From(from.clone()),
+            None => Stage::Make {
+                what: (),
+                tag: index.tag.clone(),
+            },
+        };
+        if matches!(index, Stage::Make { .. }) && transform.is_none() {
+            return Err("index needs transform before it, or a name to start from.".into());
+        }
+        if matches!(transform, Some(Stage::Make { .. })) && extract.is_none() {
+            return Err("transform needs extract before it, or a name to start from.".into());
+        }
+
+        let eval = self.section("eval")?;
+        if eval.tag.is_some() || eval.from.is_some() {
+            return Err("eval has no tag and no from in the configuration.".into());
+        }
+        let mut judging = None;
+        for step in &eval.steps {
+            if step.name != "eval.evidence" {
+                return Err(format!("{} is not on the new store yet.", step.name));
+            }
+            only(step, &["data", "split"], &[("match", "quote")])?;
+            let Some(data) = step.args.get("data").and_then(Value::as_str) else {
+                return Err("eval.evidence needs data as the name of evaluation data.".into());
+            };
+            let split = match step.args.get("split") {
+                None => "dev",
+                Some(Value::String(split)) if split == "dev" || split == "test" => split,
+                Some(_) => return Err("eval.evidence takes split as dev or test.".into()),
+            };
+            let made = Judging {
+                data: data.to_owned(),
+                split: split.to_owned(),
+            };
+            if judging.replace(made).is_some() {
+                return Err("eval has more than one eval.evidence.".into());
+            }
+        }
+
+        let release = match self.get("serve") {
+            None => None,
+            Some(serve) => match serve.get("tag") {
+                None => None,
+                Some(Value::String(tag)) => Some(tag.clone()),
+                Some(_) => return Err("The tag of serve is not a name.".into()),
+            },
+        };
         Ok(Plan {
-            extract_tag: extract.tag,
-            apply,
-            chunking,
-            context,
+            extract,
+            transform,
+            index,
             top_k: top_k.ok_or("search has no retrieval module.")?,
+            eval: judging,
+            release,
         })
     }
 }
 
 impl Plan {
-    /// What the chunking is to the store, with the context it adds.
-    pub fn chunking_process(&self) -> Process {
-        crate::transform::process(self.chunking, self.context)
+    /// How `transform` makes the chunks, when it makes them.
+    pub fn chunks(&self) -> Option<&Chunks> {
+        match &self.transform {
+            Some(Stage::Make { what, .. }) => Some(what),
+            _ => None,
+        }
     }
 
     /// What the search is to the store. It is part of the key of an evaluation, and of nothing
@@ -424,27 +607,59 @@ impl Plan {
 mod tests {
     use super::*;
 
-    const CONFIG: &str = "extract:\n  - source.filesystem: { path: ./docs }\n  - loader.text: {}\n  - tag: docs\n\ntransform:\n  - chunk.length: { unit: characters, size: 200, overlap: 20 }\n  - tag: chunks-200\n\nindex:\n  - index.keyword: { tokenizer: lindera }\n  - tag: main\n\nsearch:\n  - retrieval.keyword: { top_k: 10 }\n\nserve:\n  tag: release\n";
+    const CONFIG: &str = "extract:\n  - source.filesystem: { path: ./docs }\n  - loader.text: {}\n  - tag: docs\n\ntransform:\n  - chunk.length: { unit: characters, size: 200, overlap: 20 }\n  - tag: chunks-200\n\nindex:\n  - index.keyword: { tokenizer: lindera }\n  - tag: main\n\nsearch:\n  - retrieval.keyword: { top_k: 10 }\n\neval:\n  - eval.evidence: { data: default }\n\nserve:\n  tag: release\n";
+
+    fn replaced(section: &str, entries: &str) -> Settings {
+        let mut settings = Settings::parse(CONFIG).unwrap();
+        let given = Settings::parse(&format!("{section}:\n{entries}")).unwrap();
+        settings.replace(section, given.get(section).unwrap().clone());
+        settings
+    }
 
     #[test]
     fn reads_a_configuration_and_writes_it_again() {
         let settings = Settings::parse(CONFIG).unwrap();
         let plan = settings.plan().unwrap();
-        assert_eq!(plan.extract_tag.as_deref(), Some("docs"));
         assert_eq!(
-            plan.chunking,
-            Chunking::Length {
-                size: 200,
-                overlap: 20
+            plan.extract,
+            Some(Stage::Make {
+                what: Scan {
+                    source: "docs".into(),
+                    path: "./docs".into(),
+                    apply: Apply::ALL,
+                },
+                tag: Some("docs".into()),
+            })
+        );
+        assert_eq!(
+            plan.transform,
+            Some(Stage::Make {
+                what: Chunks {
+                    chunking: Chunking::Length {
+                        size: 200,
+                        overlap: 20
+                    },
+                    context: Context::default(),
+                },
+                tag: Some("chunks-200".into()),
+            })
+        );
+        assert_eq!(
+            plan.index,
+            Stage::Make {
+                what: (),
+                tag: Some("main".into())
             }
         );
         assert_eq!(plan.top_k, 10);
-        assert_eq!(plan.apply, Apply::ALL);
-        assert_eq!(plan.context, Context::default());
         assert_eq!(
-            settings.section("index").unwrap().tag.as_deref(),
-            Some("main")
+            plan.eval,
+            Some(Judging {
+                data: "default".into(),
+                split: "dev".into()
+            })
         );
+        assert_eq!(plan.release.as_deref(), Some("release"));
 
         let written = settings.to_text();
         assert!(written.contains("transform:\n  - chunk.length: {"));
@@ -452,13 +667,40 @@ mod tests {
     }
 
     #[test]
+    fn starts_a_section_from_a_name() {
+        // The documents are the ones a name points at: nothing is scanned.
+        let plan = replaced("extract", "  - from: docs\n").plan().unwrap();
+        assert_eq!(plan.extract, Some(Stage::From("docs".into())));
+        assert_eq!(plan.extract.as_ref().unwrap().name(), Some("docs"));
+        assert!(plan.chunks().is_some());
+
+        // Only a search: the index is named, and the sections before it are not written.
+        let mut settings = replaced("index", "  - from: main\n");
+        settings.remove("extract");
+        settings.remove("transform");
+        let plan = settings.plan().unwrap();
+        assert_eq!(
+            (plan.extract, plan.transform, plan.index),
+            (None, None, Stage::From("main".into()))
+        );
+
+        assert_eq!(
+            replaced("transform", "  - from: chunks-200\n  - tag: mine\n")
+                .plan()
+                .unwrap_err(),
+            "transform starts from a name, so it has no modules and no tag."
+        );
+        let mut settings = Settings::parse(CONFIG).unwrap();
+        settings.remove("extract");
+        assert_eq!(
+            settings.plan().unwrap_err(),
+            "transform needs extract before it, or a name to start from."
+        );
+    }
+
+    #[test]
     fn says_why_a_configuration_cannot_run() {
-        let reason = |section: &str, entries: &str| {
-            let mut settings = Settings::parse(CONFIG).unwrap();
-            let replaced = Settings::parse(&format!("{section}:\n{entries}")).unwrap();
-            settings.replace(section, replaced.get(section).unwrap().clone());
-            settings.plan().unwrap_err()
-        };
+        let reason = |section: &str, entries: &str| replaced(section, entries).plan().unwrap_err();
         assert_eq!(
             reason(
                 "extract",
@@ -466,17 +708,24 @@ mod tests {
             ),
             "source.filesystem takes apply as a list of add, update and delete."
         );
-        let mut settings = Settings::parse(CONFIG).unwrap();
-        let only_new = "extract:\n  - source.filesystem: { path: ./docs, apply: [add] }\n";
-        let replaced = Settings::parse(only_new).unwrap();
-        settings.replace("extract", replaced.get("extract").unwrap().clone());
+        let only_new = replaced(
+            "extract",
+            "  - source.filesystem: { path: ./docs, id: manuals, apply: [add] }\n",
+        );
         assert_eq!(
-            settings.plan().unwrap().apply,
-            Apply {
-                add: true,
-                update: false,
-                delete: false
-            }
+            only_new.plan().unwrap().extract,
+            Some(Stage::Make {
+                what: Scan {
+                    source: "manuals".into(),
+                    path: "./docs".into(),
+                    apply: Apply {
+                        add: true,
+                        update: false,
+                        delete: false
+                    },
+                },
+                tag: None,
+            })
         );
         assert_eq!(
             reason(
@@ -492,14 +741,17 @@ mod tests {
             ),
             "The context of chunk.structure uses document only with prepend."
         );
-        let mut settings = Settings::parse(CONFIG).unwrap();
-        let before = settings.plan().unwrap().chunking_process().id();
-        let with_context = "transform:\n  - chunk.length: { size: 200, overlap: 20, context: { document: true, headings: true, prepend: true } }\n";
-        let replaced = Settings::parse(with_context).unwrap();
-        settings.replace("transform", replaced.get("transform").unwrap().clone());
-        let plan = settings.plan().unwrap();
+        let before = Settings::parse(CONFIG).unwrap().plan().unwrap();
+        let before = before.chunks().unwrap().process().id();
+        let plan = replaced(
+            "transform",
+            "  - chunk.length: { size: 200, overlap: 20, context: { document: true, headings: true, prepend: true } }\n",
+        )
+        .plan()
+        .unwrap();
+        let chunks = plan.chunks().unwrap();
         assert_eq!(
-            plan.context,
+            chunks.context,
             Context {
                 document: true,
                 headings: true,
@@ -507,7 +759,7 @@ mod tests {
             }
         );
         // The context is part of what the chunking is: another context is another result.
-        assert_ne!(plan.chunking_process().id(), before);
+        assert_ne!(chunks.process().id(), before);
         assert_eq!(
             reason("search", "  - retrieval.vector: { top_k: 10 }\n"),
             "retrieval.vector needs index.vector in index."
@@ -533,6 +785,10 @@ mod tests {
                 "  - chunk.length:\n    size: 100\n    overlap: 0\n"
             ),
             "Entry 1 of transform is not one module with its arguments. Check the indentation."
+        );
+        assert_eq!(
+            reason("eval", "  - eval.evidence: { split: dev }\n"),
+            "eval.evidence needs data as the name of evaluation data."
         );
     }
 }

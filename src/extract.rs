@@ -27,6 +27,8 @@ pub struct ExtractRequest<'a> {
     pub config: Option<&'a [u8]>,
     /// Which changes of the folder are taken in.
     pub apply: Apply,
+    /// The run that started this one, such as an optimization.
+    pub cause: Option<&'a str>,
 }
 
 /// The changes of a folder a run takes in. A change that is left out stays as it was in the
@@ -153,6 +155,9 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
     let mut draft = store.begin_scan("extract", "files")?;
     if let Some(config) = request.config {
         draft.set_config(config)?;
+    }
+    if let Some(cause) = request.cause {
+        draft.set_cause(cause);
     }
     let apply = request.apply;
     let mut withheld = Withheld::default();
@@ -293,6 +298,9 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
     draft.set_counts(counts);
     if let Some(config) = request.config {
         draft.set_config(config)?;
+    }
+    if let Some(cause) = request.cause {
+        draft.set_cause(cause);
     }
     let mut read = 0;
     let mut skipped = Vec::new();

@@ -1,56 +1,83 @@
 //! Optimization on the new store (docs/data-management.md, chapter 11): an instruction says what
-//! to vary, a configuration file is made for each candidate, and each candidate is built and
-//! evaluated.
+//! to vary, a configuration file is written for each trial, and each file is run like any other:
+//! built and evaluated.
 //!
-//! Nothing here is new to the store. A candidate is a build and an evaluation like any other, so
-//! what two candidates share is made once, and a candidate that was evaluated before is not run
-//! again. The optimization itself is one run that makes no snapshot; the runs it starts name it
-//! as their cause.
+//! Nothing here is new to the store. A trial is a run of a configuration file, so what two
+//! trials share is made once, and a trial that was evaluated before is not run again. The
+//! optimization itself is one run that makes no snapshot; the runs it starts name it as their
+//! cause. A trial that fails is recorded with the reason and the next one goes on.
 //!
-//! Not here yet: options that rewrite `extract`, limits other than the number of candidates,
-//! measures other than recall, and the CLI.
+//! Not here yet: options that rewrite `extract`, limits other than the number of trials,
+//! measures other than recall, and choosing the next values from the results so far.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::time::Instant;
 
 use serde_json::{Map, Value, json};
 use yaml_rust2::Yaml;
 
-use crate::assess::{EvalRequest, evaluate, process as judging};
-use crate::index::{IndexRequest, index, indexing};
+use crate::pipeline::{RunRequest, run};
 use crate::records::object_id;
-use crate::settings::{Plan, SECTIONS, Settings, document, entries, section};
+use crate::settings::{SECTIONS, Settings, document, entries, plain_name, section};
 use crate::store::{Outcome, SnapshotId, Store, StoreError, StoreResult};
-use crate::transform::{TransformRequest, transform};
+
+/// How many trials may fail one after the other before the rest are left.
+const FAILURES: usize = 3;
 
 pub struct OptimizeRequest<'a> {
-    /// The name of the optimization. The tags of its candidates start with it.
+    /// The name of the optimization. The files and the tags of its trials start with it.
     pub name: &'a str,
     /// The instruction, as YAML.
     pub instruction: &'a str,
-    /// The folder the instruction names its base configuration in.
+    /// The folder of the project: the base configuration is read from it, and the files of the
+    /// trials are written below `.dunlin/trials` in it.
     pub project: &'a Path,
     /// Where the directories of indexes are made.
     pub indexes: &'a Path,
-    /// Only say what would run.
-    pub plan_only: bool,
+    /// Hears what is going on.
+    pub progress: &'a dyn Fn(&Event<'_>),
 }
 
-/// What became of a candidate.
+/// What an optimization says while it runs.
+#[derive(Debug)]
+pub enum Event<'a> {
+    /// A trial starts: the `position`-th of the `total` that are tried.
+    Trial {
+        number: usize,
+        position: usize,
+        total: usize,
+        name: &'a str,
+    },
+    /// A stage of the trial starts, and ends with an outcome.
+    Stage {
+        stage: &'a str,
+        outcome: Option<Outcome>,
+    },
+    /// The trial ended.
+    Done {
+        number: usize,
+        state: &'a State,
+        recall: Option<f64>,
+    },
+}
+
+/// What became of a trial.
 #[derive(Clone, Debug, PartialEq)]
 pub enum State {
+    /// Not tried yet.
+    Pending,
     /// Built as far as needed and evaluated.
     Evaluated,
-    /// Would be evaluated: the request was only for a plan.
-    Planned,
     /// The configuration cannot run. Nothing was built.
     Invalid(String),
-    /// The same processing as the candidate with this number.
-    Same(usize),
-    /// Not run, with the reason.
+    /// The run failed. The trials after it went on.
+    Failed(String),
+    /// Not tried, with the reason.
     Skipped(String),
 }
 
+/// One trial: a configuration file and what running it gave.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
     /// Zero is the base configuration as it is.
@@ -58,28 +85,29 @@ pub struct Candidate {
     /// The option chosen on each axis.
     pub name: String,
     pub choices: Vec<(String, String)>,
-    /// The configuration file of the candidate.
+    /// The configuration file of the trial.
     pub config: String,
+    /// Where the file is, from the project, with `/`.
+    pub file: String,
     pub state: State,
-    /// The sections that were expected to run, found by looking up keys.
-    pub expected: Vec<String>,
-    /// The documents `transform` was expected to chunk.
-    pub items: usize,
-    /// The sections that ran.
+    /// The stages that did work.
     pub ran: Vec<String>,
-    /// The name of the candidate's index.
-    pub tag: Option<String>,
+    /// The tags of what the trial makes itself, one for each stage.
+    pub tags: Vec<String>,
     pub index: Option<SnapshotId>,
     pub report: Option<SnapshotId>,
     pub recall: Option<f64>,
+    pub elapsed_ms: Option<u64>,
 }
 
 #[derive(Debug)]
 pub struct Optimization {
-    /// The run of the optimization. A plan has none.
-    pub run: Option<String>,
-    /// The base first, then the candidates in the order of the instruction.
+    /// The run of the optimization.
+    pub run: String,
+    /// The base first, then the trials in the order of the instruction.
     pub candidates: Vec<Candidate>,
+    /// What the run keeps: `table` prints it.
+    pub record: Value,
 }
 
 struct Axis {
@@ -91,8 +119,8 @@ struct Axis {
 struct Instruction {
     base: String,
     axes: Vec<Axis>,
-    data: String,
-    split: String,
+    data: Option<String>,
+    split: Option<String>,
     limit: Option<usize>,
 }
 
@@ -121,6 +149,11 @@ fn variants(
     // Where the arrays are: section, entry, module, argument.
     let mut slots: Vec<(String, usize, String, String, Vec<Value>)> = Vec::new();
     for (name, value) in sections {
+        if name == "eval" {
+            return Err(refused(format!(
+                "Option {option} rewrites eval. Every trial is measured the same way."
+            )));
+        }
         if !SECTIONS.contains(&name.as_str()) {
             return Err(refused(format!(
                 "Option {option} rewrites {name}, which is not a section of modules."
@@ -133,9 +166,9 @@ fn variants(
         }
         let parsed =
             section(name, value).map_err(|reason| refused(format!("{option}: {reason}")))?;
-        if parsed.tag.is_some() {
+        if parsed.tag.is_some() || parsed.from.is_some() {
             return Err(refused(format!(
-                "Option {option} writes a tag. The candidates are named by the optimization."
+                "Option {option} writes a tag. The trials are named by the optimization."
             )));
         }
         for (position, step) in parsed.steps.iter().enumerate() {
@@ -245,6 +278,11 @@ fn instruction(source: &str) -> StoreResult<Instruction> {
             )));
         }
     }
+    let split = match eval["split"].as_str() {
+        None => None,
+        Some(split) if split == "dev" || split == "test" => Some(split.to_owned()),
+        Some(_) => return Err(refused("eval.split is dev or test.")),
+    };
     let limit = match &root["limit"]["candidates"] {
         Yaml::BadValue => None,
         Yaml::Integer(limit) if *limit > 0 => Some(*limit as usize),
@@ -253,8 +291,8 @@ fn instruction(source: &str) -> StoreResult<Instruction> {
     Ok(Instruction {
         base: text(&root["base"], "base configuration")?,
         axes,
-        data: text(&eval["data"], "evaluation data")?,
-        split: eval["split"].as_str().unwrap_or("dev").to_owned(),
+        data: eval["data"].as_str().map(str::to_owned),
+        split,
         limit,
     })
 }
@@ -296,149 +334,202 @@ fn combinations(axes: &[Axis]) -> Vec<Vec<usize>> {
     made
 }
 
-/// What is needed to run candidates: where they start and how they are judged.
+/// What every trial shares: where it starts, how it is measured and what it is named after.
 struct Ground<'a> {
-    store: &'a Store,
-    /// The `extracted` snapshot every candidate starts from.
-    input: SnapshotId,
-    data: SnapshotId,
+    name: &'a str,
+    base: &'a Settings,
+    /// The name of the documents every trial starts from.
+    start: &'a str,
+    data: &'a str,
     split: &'a str,
-    indexes: &'a Path,
 }
 
 impl Ground<'_> {
-    /// The sections that would run, and the documents `transform` would chunk, by looking up
-    /// keys. No document is read.
-    fn expect(&self, plan: &Plan) -> StoreResult<(Vec<String>, usize)> {
-        let store = self.store;
-        let chunking = plan.chunking_process();
-        let chunks = store.lookup("chunks", &[self.input], &chunking)?;
-        let index = match chunks {
-            Some(chunks) => store.lookup("index", &[chunks], &indexing())?,
-            None => None,
-        };
-        let report = match index {
-            Some(index) => store.lookup(
-                "eval-report",
-                &[index, self.data],
-                &judging(&plan.retrieval(), self.split),
-            )?,
-            None => None,
-        };
-        let mut items = 0;
-        if chunks.is_none() {
-            let applied = chunking.id();
-            for (_, item) in store.snapshot(self.input)?.items {
-                items += usize::from(store.result(&item, &applied)?.is_none());
+    /// The configuration file of a trial, and the tags it gives to what it makes itself.
+    ///
+    /// The documents are the ones the base's name points at, so no trial scans the folder. A
+    /// section a trial rewrites, and those after it, get a tag of the trial; the sections before
+    /// keep their modules and lose their tag, so that the base's names do not move. Nothing is
+    /// released.
+    fn trial(&self, number: usize, rewrites: &[&Map<String, Value>]) -> (String, Vec<String>) {
+        let mut settings = self.base.clone();
+        let mut rewritten = Vec::new();
+        for sections in rewrites {
+            for (name, value) in *sections {
+                settings.replace(name, value.clone());
+                rewritten.push(name.as_str());
             }
         }
-        let expected = [
-            ("transform", chunks.is_none()),
-            ("index", index.is_none()),
-            ("eval", report.is_none()),
-        ]
-        .into_iter()
-        .filter(|(_, runs)| *runs)
-        .map(|(name, _)| name.to_owned())
-        .collect();
-        Ok((expected, items))
-    }
-
-    /// Builds what the candidate needs and evaluates it.
-    fn run(
-        &self,
-        candidate: &mut Candidate,
-        plan: &Plan,
-        own: bool,
-        cause: &str,
-    ) -> StoreResult<()> {
-        let config = Some(candidate.config.as_bytes());
-        let cause = Some(cause);
-        let chunked = transform(
-            self.store,
-            &TransformRequest {
-                input: self.input,
-                chunking: plan.chunking,
-                context: plan.context,
-                tag: None,
-                config,
-                cause,
-            },
-        )?;
-        let indexed = index(
-            self.store,
-            &IndexRequest {
-                input: chunked.chunks.snapshot,
-                directory: self.indexes,
-                // A candidate that makes no index of its own uses the base's and moves no name.
-                tag: candidate.tag.as_deref().filter(|_| own),
-                config,
-                cause,
-            },
-        )?;
-        let judged = evaluate(
-            self.store,
-            &EvalRequest {
-                index: indexed.index.snapshot,
-                data: self.data,
-                retrieval: &plan.retrieval(),
-                top_k: plan.top_k,
-                split: self.split,
-                directory: self.indexes,
-                tag: None,
-                config,
-                cause,
-            },
-        )?;
-        candidate.ran = [
-            ("transform", chunked.chunks.outcome),
-            ("index", indexed.index.outcome),
-            ("eval", judged.report.outcome),
-        ]
-        .into_iter()
-        .filter(|(_, outcome)| *outcome != Outcome::Reused)
-        .map(|(name, _)| name.to_owned())
-        .collect();
-        candidate.index = Some(indexed.index.snapshot);
-        candidate.report = Some(judged.report.snapshot);
-        candidate.recall = Some(judged.result.recall);
-        candidate.state = State::Evaluated;
-        Ok(())
+        let own_chunks = rewritten.contains(&"transform");
+        let own_index = own_chunks || rewritten.contains(&"index");
+        let tag = |stage: &str| format!("{}/{number:03}/{stage}", self.name);
+        let mut tags = Vec::new();
+        settings.replace("extract", json!([{ "from": self.start }]));
+        for (section, stage, own) in [
+            ("transform", "chunks", own_chunks),
+            ("index", "index", own_index),
+        ] {
+            let tag = own.then(|| tag(stage));
+            settings.replace(section, retagged(&settings, section, tag.as_deref()));
+            tags.extend(tag);
+        }
+        settings.replace(
+            "eval",
+            json!([{ "eval.evidence": { "data": self.data, "split": self.split } }]),
+        );
+        settings.remove("serve");
+        (settings.to_text(), tags)
     }
 }
 
 fn recorded(candidate: &Candidate) -> Value {
-    let (state, reason, same) = match &candidate.state {
-        State::Evaluated => ("evaluated", None, None),
-        State::Planned => ("planned", None, None),
-        State::Invalid(reason) => ("invalid", Some(reason.clone()), None),
-        State::Same(number) => ("same", None, Some(*number)),
-        State::Skipped(reason) => ("skipped", Some(reason.clone()), None),
+    let (state, reason) = match &candidate.state {
+        State::Pending => ("pending", None),
+        State::Evaluated => ("evaluated", None),
+        State::Invalid(reason) => ("invalid", Some(reason)),
+        State::Failed(reason) => ("failed", Some(reason)),
+        State::Skipped(reason) => ("skipped", Some(reason)),
     };
     json!({
         "number": candidate.number,
         "name": candidate.name,
         "choices": candidate.choices.iter().cloned().collect::<BTreeMap<_, _>>(),
         "config": object_id(candidate.config.as_bytes()).as_str(),
+        "file": candidate.file,
         "state": state,
         "reason": reason,
-        "same": same,
-        "expected": candidate.expected,
-        "items": candidate.items,
         "ran": candidate.ran,
-        "tag": candidate.tag,
+        "tags": candidate.tags,
         "index": candidate.index.map(|id| id.0),
         "report": candidate.report.map(|id| id.0),
         "recall": candidate.recall,
+        "elapsed_ms": candidate.elapsed_ms,
     })
 }
 
-/// Makes the candidates of an instruction, builds and evaluates them.
+/// The results of an optimization as lines to read: the trials that were evaluated, the best
+/// first, and then the others with the reason.
+pub fn table(record: &Value) -> String {
+    let empty = Vec::new();
+    let candidates = record["candidates"].as_array().unwrap_or(&empty);
+    let base = candidates
+        .iter()
+        .find(|candidate| candidate["number"] == 0)
+        .and_then(|candidate| candidate["recall"].as_f64());
+    let mut order: Vec<&Value> = candidates.iter().collect();
+    order.sort_by(|a, b| {
+        let key = |candidate: &Value| {
+            (
+                candidate["recall"].as_f64().map_or(1, |_| 0),
+                -candidate["recall"].as_f64().unwrap_or(0.0),
+                candidate["number"].as_u64().unwrap_or(0),
+            )
+        };
+        key(a)
+            .partial_cmp(&key(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut rows = vec![[
+        "Trial".to_owned(),
+        "Recall".to_owned(),
+        "To base".to_owned(),
+        "Ran".to_owned(),
+        "Time".to_owned(),
+        "What".to_owned(),
+    ]];
+    for candidate in order {
+        let recall = candidate["recall"].as_f64();
+        let ran: Vec<&str> = candidate["ran"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        let mut what = candidate["name"].as_str().unwrap_or_default().to_owned();
+        if let Some(state) = candidate["state"].as_str().filter(|_| recall.is_none()) {
+            what.push_str(&format!(" ({state}"));
+            if let Some(reason) = candidate["reason"].as_str() {
+                what.push_str(&format!(": {reason}"));
+            }
+            what.push(')');
+        }
+        rows.push([
+            format!("{:03}", candidate["number"].as_u64().unwrap_or(0)),
+            recall.map_or("-".into(), |recall| format!("{recall:.3}")),
+            match (recall, base) {
+                (Some(recall), Some(base)) if candidate["number"] != 0 => {
+                    format!("{:+.3}", recall - base)
+                }
+                _ => "-".into(),
+            },
+            if recall.is_none() {
+                "-".into()
+            } else if ran.is_empty() {
+                "nothing".into()
+            } else {
+                ran.join("+")
+            },
+            candidate["elapsed_ms"]
+                .as_u64()
+                .map_or("-".into(), |ms| format!("{:.1}s", ms as f64 / 1000.0)),
+            what,
+        ]);
+    }
+    let widths: Vec<usize> = (0..5)
+        .map(|column| {
+            rows.iter()
+                .map(|row| row[column].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let mut lines = vec![format!(
+        "Optimization {} ({} on {}, {})",
+        record["name"].as_str().unwrap_or_default(),
+        record["metric"].as_str().unwrap_or_default(),
+        record["data"].as_str().unwrap_or_default(),
+        record["split"].as_str().unwrap_or_default(),
+    )];
+    for row in &rows {
+        let mut line = String::new();
+        for (cell, width) in row.iter().zip(&widths) {
+            line.push_str(&format!("{cell:<width$}  "));
+        }
+        line.push_str(&row[5]);
+        lines.push(line);
+    }
+    lines.push(format!(
+        "The files of the trials are in {}.",
+        record["folder"].as_str().unwrap_or_default()
+    ));
+    lines.join("\n")
+}
+
+/// What the latest optimization keeps, and whether it is still going. With a name, the latest
+/// one of that name.
+pub fn latest(store: &Store, name: Option<&str>) -> StoreResult<Option<(Value, bool)>> {
+    Ok(store
+        .runs()?
+        .into_iter()
+        .rev()
+        .filter(|run| run.stage == "optimize" && run.stats["candidates"].is_array())
+        .find(|run| name.is_none_or(|name| run.stats["name"] == name))
+        .map(|run| (run.stats, run.state != "complete" && run.state != "failed")))
+}
+
+/// Writes a configuration file for each trial of an instruction and runs them one after the
+/// other.
 ///
 /// The names that are served and the tags of the base configuration do not move. An instruction
-/// that is wrong in itself is an error; a candidate that cannot run is recorded with the reason
-/// and the others go on.
+/// that is wrong in itself is an error; a trial that cannot run or that fails is recorded with
+/// the reason and the others go on.
+#[allow(clippy::too_many_lines)]
 pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Optimization> {
+    if !plain_name(request.name) {
+        return Err(refused(
+            "The name of an optimization is letters, digits, _, . and -.",
+        ));
+    }
     let instruction = instruction(request.instruction)?;
     let base_text = std::fs::read_to_string(request.project.join(&instruction.base))
         .map_err(|error| refused(format!("{} cannot be read: {error}", instruction.base)))?;
@@ -448,166 +539,199 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
         .map_err(|reason| refused(format!("The base configuration cannot run: {reason}")))?;
 
     let kind = |snapshot| store.snapshot(snapshot).map(|snapshot| snapshot.kind);
-    let input = match &base_plan.extract_tag {
-        Some(tag) => store.resolve(tag)?,
-        None => None,
-    }
-    .ok_or_else(|| refused("The base configuration is not built yet. Run a build first."))?;
-    if kind(input)? != "extracted" {
+    let not_built = || refused("The base configuration is not built yet. Run it first.");
+    let start = base_plan
+        .extract
+        .as_ref()
+        .and_then(|extract| extract.name())
+        .ok_or_else(|| refused("The extract section of the base configuration has no tag."))?;
+    if kind(store.resolve(start)?.ok_or_else(not_built)?)? != "extracted" {
         return Err(refused("The tag of extract does not name documents."));
     }
-    let data = store
-        .resolve(&instruction.data)?
-        .ok_or_else(|| refused(format!("There is no evaluation data {}.", instruction.data)))?;
-    if kind(data)? != "eval-data" {
-        return Err(refused(format!(
-            "{} is not evaluation data.",
-            instruction.data
-        )));
+    let judging = base_plan.eval.as_ref();
+    let data = instruction
+        .data
+        .as_deref()
+        .or(judging.map(|judging| judging.data.as_str()))
+        .ok_or_else(|| {
+            refused("The instruction and the base configuration name no evaluation data.")
+        })?;
+    let split = instruction
+        .split
+        .as_deref()
+        .or(judging.map(|judging| judging.split.as_str()))
+        .unwrap_or("dev");
+    let found = store
+        .resolve(data)?
+        .ok_or_else(|| refused(format!("There is no evaluation data {data}.")))?;
+    if kind(found)? != "eval-data" {
+        return Err(refused(format!("{data} is not evaluation data.")));
     }
     let ground = Ground {
-        store,
-        input,
+        name: request.name,
+        base: &base,
+        start,
         data,
-        split: &instruction.split,
-        indexes: request.indexes,
+        split,
     };
-    let base_tag = base.section("index").map_err(refused)?.tag;
 
-    // The base is always evaluated, so that what a candidate is compared with is measured the
-    // same way.
-    let blank = |number, name: String, choices, config, tag| Candidate {
-        number,
-        name,
-        choices,
-        config,
-        state: State::Planned,
-        expected: Vec::new(),
-        items: 0,
-        ran: Vec::new(),
-        tag,
-        index: None,
-        report: None,
-        recall: None,
-    };
-    let mut candidates = vec![blank(
-        0,
-        "base".to_owned(),
-        Vec::new(),
-        base_text.clone(),
-        base_tag.clone(),
-    )];
-    let mut plans: Vec<Option<Plan>> = vec![Some(base_plan)];
-    // Which candidates make an index of their own.
-    let mut owns = vec![false];
-    for (position, chosen) in combinations(&instruction.axes).into_iter().enumerate() {
-        let number = position + 1;
-        let mut settings = base.clone();
-        let mut choices = Vec::new();
-        let mut rewritten = Vec::new();
-        for (axis, variant) in instruction.axes.iter().zip(chosen) {
-            let (label, sections) = &axis.variants[variant];
-            choices.push((axis.name.clone(), label.clone()));
-            for (name, value) in sections {
-                settings.replace(name, value.clone());
-                rewritten.push(name.as_str());
-            }
-        }
-        // A rewritten section and those after it are the candidate's own: the base's tags stay
-        // where they are.
-        let own = rewritten
+    // The base is always tried, and first, so that what a trial is compared with is measured
+    // the same way.
+    let folder = format!(".dunlin/trials/{}", request.name);
+    let mut candidates = Vec::new();
+    let mut chosen: Vec<Vec<usize>> = vec![Vec::new()];
+    chosen.extend(combinations(&instruction.axes));
+    for (number, chosen) in chosen.into_iter().enumerate() {
+        let picked: Vec<&(String, Map<String, Value>)> = instruction
+            .axes
             .iter()
-            .any(|name| *name == "transform" || *name == "index");
-        let tag = format!("{}/{number}", request.name);
-        if rewritten.contains(&"transform") {
-            settings.replace("transform", retagged(&settings, "transform", None));
-        }
-        if own {
-            settings.replace("index", retagged(&settings, "index", Some(&tag)));
-        }
-        let name = choices
+            .zip(chosen)
+            .map(|(axis, variant)| &axis.variants[variant])
+            .collect();
+        let choices: Vec<(String, String)> = instruction
+            .axes
             .iter()
-            .map(|(axis, label)| format!("{axis}={label}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let tag = if own { Some(tag) } else { base_tag.clone() };
-        let mut candidate = blank(number, name, choices, settings.to_text(), tag);
-        let plan = match settings.plan() {
-            Ok(plan) => Some(plan),
-            Err(reason) => {
-                candidate.state = State::Invalid(reason);
-                candidate.tag = None;
-                None
-            }
+            .zip(&picked)
+            .map(|(axis, (label, _))| (axis.name.clone(), label.clone()))
+            .collect();
+        let rewrites: Vec<&Map<String, Value>> =
+            picked.iter().map(|(_, sections)| sections).collect();
+        let (config, tags) = ground.trial(number, &rewrites);
+        let state = match Settings::parse(&config).and_then(|settings| settings.plan()) {
+            Ok(_) => State::Pending,
+            Err(reason) => State::Invalid(reason),
         };
-        candidates.push(candidate);
-        plans.push(plan);
-        owns.push(own);
-    }
-
-    // Candidates that ask for the same processing are one candidate, however they are written.
-    let mut seen: HashMap<String, usize> = HashMap::new();
-    for (candidate, plan) in candidates.iter_mut().zip(&plans) {
-        let Some(plan) = plan else { continue };
-        let identity = format!("{} {}", plan.chunking_process().id(), plan.retrieval().id());
-        match seen.get(&identity) {
-            Some(first) => {
-                candidate.state = State::Same(*first);
-                candidate.tag = None;
-            }
-            None => {
-                seen.insert(identity, candidate.number);
-                (candidate.expected, candidate.items) = ground.expect(plan)?;
-            }
-        }
-    }
-
-    // The cheapest first. What goes over the limit is left, and stays in the list.
-    let mut order: Vec<usize> = candidates
-        .iter()
-        .filter(|candidate| candidate.state == State::Planned && candidate.number > 0)
-        .map(|candidate| candidate.number)
-        .collect();
-    order.sort_by_key(|number| {
-        let candidate = &candidates[*number];
-        (candidate.expected.len(), candidate.items, *number)
-    });
-    if let Some(limit) = instruction.limit {
-        for number in order.split_off(limit.min(order.len())) {
-            candidates[number].state =
-                State::Skipped(format!("The limit of {limit} candidates was reached."));
-        }
-    }
-    if request.plan_only {
-        return Ok(Optimization {
-            run: None,
-            candidates,
+        let name = if number == 0 {
+            "base".to_owned()
+        } else {
+            choices
+                .iter()
+                .map(|(axis, label)| format!("{axis}={label}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        candidates.push(Candidate {
+            number,
+            name,
+            choices,
+            config,
+            file: format!("{folder}/{number:03}.yaml"),
+            tags: if state == State::Pending {
+                tags
+            } else {
+                Vec::new()
+            },
+            state,
+            ran: Vec::new(),
+            index: None,
+            report: None,
+            recall: None,
+            elapsed_ms: None,
         });
     }
 
+    // In the order of the instruction. What goes over the limit is left, and stays in the list.
+    let mut order: Vec<usize> = candidates
+        .iter()
+        .filter(|candidate| candidate.state == State::Pending)
+        .map(|candidate| candidate.number)
+        .collect();
+    if let Some(limit) = instruction.limit {
+        let kept = order.iter().filter(|number| **number == 0).count() + limit;
+        for number in order.split_off(kept.min(order.len())) {
+            candidates[number].state =
+                State::Skipped(format!("The limit of {limit} candidates was reached."));
+            candidates[number].tags.clear();
+        }
+    }
+
+    // Every trial has a file, also the ones that are not run: the reason is in the list.
+    let written = |error: std::io::Error| refused(format!("{folder} cannot be written: {error}"));
+    std::fs::create_dir_all(request.project.join(&folder)).map_err(written)?;
+    for candidate in &candidates {
+        std::fs::write(request.project.join(&candidate.file), &candidate.config)
+            .map_err(written)?;
+    }
+
+    let record = |candidates: &[Candidate]| {
+        json!({
+            "name": request.name,
+            "folder": folder,
+            "base": object_id(base_text.as_bytes()).as_str(),
+            "data": data,
+            "split": split,
+            "metric": "recall",
+            "candidates": candidates.iter().map(recorded).collect::<Vec<_>>(),
+        })
+    };
     let mut draft = store.begin_scan("optimize", "optimization")?;
     draft.set_config(request.instruction.as_bytes())?;
     for candidate in &candidates {
         draft.save(candidate.config.as_bytes())?;
     }
-    // The runs of the candidates write objects too.
+    // The runs of the trials write objects too.
     draft.flush()?;
+    draft.report_progress(&record(&candidates))?;
     let cause = draft.run().to_owned();
-    order.insert(0, 0);
-    for number in order {
-        let plan = plans[number].as_ref().expect("a planned candidate");
-        ground.run(&mut candidates[number], plan, owns[number], &cause)?;
+    let total = order.len();
+    let mut failures = 0;
+    for (position, number) in order.into_iter().enumerate() {
+        if failures >= FAILURES {
+            candidates[number].state = State::Skipped(format!(
+                "{FAILURES} trials in a row failed, so the rest were not tried."
+            ));
+            candidates[number].tags.clear();
+            continue;
+        }
+        let candidate = &mut candidates[number];
+        (request.progress)(&Event::Trial {
+            number,
+            position: position + 1,
+            total,
+            name: &candidate.name,
+        });
+        let started = Instant::now();
+        let outcome = run(
+            store,
+            &RunRequest {
+                project: request.project,
+                indexes: request.indexes,
+                config: &candidate.config,
+                release: false,
+                cause: Some(&cause),
+                progress: &|stage, outcome| {
+                    (request.progress)(&Event::Stage { stage, outcome });
+                },
+            },
+        );
+        candidate.elapsed_ms = Some(started.elapsed().as_millis() as u64);
+        match outcome {
+            Ok(made) => {
+                failures = 0;
+                candidate.ran = made.ran;
+                candidate.index = Some(made.index);
+                candidate.report = made.report;
+                candidate.recall = made.result.map(|result| result.recall);
+                candidate.state = State::Evaluated;
+            }
+            Err(error) => {
+                failures += 1;
+                candidate.state = State::Failed(error.to_string());
+                candidate.tags.clear();
+            }
+        }
+        (request.progress)(&Event::Done {
+            number,
+            state: &candidate.state,
+            recall: candidate.recall,
+        });
+        draft.report_progress(&record(&candidates))?;
     }
-    draft.set_stats(json!({
-        "name": request.name,
-        "base": object_id(base_text.as_bytes()).as_str(),
-        "data": instruction.data,
-        "split": instruction.split,
-        "metric": "recall",
-        "candidates": candidates.iter().map(recorded).collect::<Vec<_>>(),
-    }));
+    let record = record(&candidates);
+    draft.set_stats(record.clone());
     Ok(Optimization {
-        run: Some(draft.finish()?),
+        run: draft.finish()?,
         candidates,
+        record,
     })
 }

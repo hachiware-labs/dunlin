@@ -363,6 +363,7 @@ fn searches_a_chunk_by_the_headings_above_it() {
             tag: Some("docs"),
             config: None,
             apply: Apply::ALL,
+            cause: None,
         },
     )
     .unwrap()

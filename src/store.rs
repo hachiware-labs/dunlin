@@ -128,7 +128,7 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Created => "created",
             Self::Reused => "reused",
@@ -735,6 +735,16 @@ impl Draft<'_> {
         self.stats = stats;
     }
 
+    /// Writes details on the run while it is going, for whoever watches it from elsewhere. The
+    /// details the run ends with take their place.
+    pub fn report_progress(&self, stats: &Value) -> StoreResult<()> {
+        self.store.records.execute(
+            "UPDATE runs SET stats = ? WHERE id = ?",
+            params![canonical(stats), self.run],
+        )?;
+        Ok(())
+    }
+
     fn write(&mut self, id: &str, data: &[u8]) -> StoreResult<()> {
         if !self.writing {
             self.store.objects.execute_batch("BEGIN IMMEDIATE")?;
@@ -969,9 +979,16 @@ impl Drop for Draft<'_> {
             return;
         }
         let _ = self.flush();
+        // A run that failed still says what started it and with which configuration.
         let _ = self.store.records.execute(
-            "UPDATE runs SET state = 'failed', completed_at = ? WHERE id = ? AND state = 'building'",
-            params![now_ms() as i64, self.run],
+            "UPDATE runs SET state = 'failed', completed_at = ?, config = ?, cause = ?
+             WHERE id = ? AND state = 'building'",
+            params![
+                now_ms() as i64,
+                self.config.as_ref().map(ObjectId::as_str),
+                self.cause,
+                self.run
+            ],
         );
     }
 }

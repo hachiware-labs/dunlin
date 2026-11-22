@@ -500,10 +500,22 @@ fn dispatch(
     state: &mut Run,
     parsed: &Parsed,
     explicit: Option<&str>,
-    _json: bool,
+    json: bool,
 ) -> Result<Done, CliError> {
     let command = state.command;
     let env = state.env;
+    if command == "store" {
+        // The versioned store has its own files and takes no Dunlinfile.yaml.
+        let project = env.resolve(parsed.string("project").or(explicit).unwrap_or("."));
+        let (data, text) = crate::cli_store::command(parsed, &project, env, &|line| {
+            print_error(line);
+        })?;
+        if json {
+            return Ok(Done::Data(parse_json(&data.to_string())?));
+        }
+        print(&text);
+        return Ok(Done::Quiet);
+    }
     let positionals = &parsed.positionals;
     let value = |name: &str| parsed.string(name);
     let flag = |name: &str| parsed.flag(name);

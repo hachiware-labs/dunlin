@@ -21,6 +21,7 @@ const commandGroups = [
   ['構築と提供', 'source transform index build search ask serve status use tag'],
   ['評価と辞書', 'eval-data eval report dictionary evidence-map'],
   ['Wiki・PARA の操作', 'ingress query verify issue rules progress cite instruct save-answer archive undo'],
+  ['版を持つ保管（開発中）', 'store'],
 ];
 
 function cliGuide() {

@@ -6,7 +6,7 @@
 
 use crate::config_value::ConfigValue;
 
-pub const COMMANDS: [(&str, &str); 33] = [
+pub const COMMANDS: [(&str, &str); 34] = [
     (
         "init",
         "dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]",
@@ -130,6 +130,10 @@ pub const COMMANDS: [(&str, &str); 33] = [
         "undo",
         "dunlin undo <work-id> [--project <directory>] [--json]",
     ),
+    (
+        "store",
+        "dunlin store run <config> [--release] | dunlin store eval-data <file> [--tag <name>] | dunlin store optimize <instruction> [--name <name>] | dunlin store results [<name>] [--project <directory>] [--json]",
+    ),
 ];
 
 pub fn usage(command: &str) -> Option<&'static str> {
@@ -140,7 +144,7 @@ pub fn usage(command: &str) -> Option<&'static str> {
 }
 
 /// The commands of `dunlin --help` in groups, each with what it does.
-pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
+pub const GROUPS: [(&str, &[(&str, &str)]); 6] = [
     (
         "Start",
         &[
@@ -219,6 +223,13 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
             ),
             ("modules", "List the modules and their arguments"),
         ],
+    ),
+    (
+        "Versioned store (in development)",
+        &[(
+            "store",
+            "Run a configuration file or an optimization on the versioned store",
+        )],
     ),
 ];
 
@@ -457,6 +468,11 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
             options.push((name, String));
         }
         options.push(("case", Strings));
+    }
+    if command == "store" {
+        options.push(("release", Boolean));
+        options.push(("tag", String));
+        options.push(("name", String));
     }
     if command == "serve" {
         options.push(("print-config", Boolean));

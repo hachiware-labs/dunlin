@@ -84,6 +84,7 @@ impl Project {
                 tag: Some("docs"),
                 config: Some(CONFIG.as_bytes()),
                 apply,
+                cause: None,
             },
         )
         .unwrap()

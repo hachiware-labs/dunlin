@@ -279,3 +279,77 @@ test('lets in the machine itself and the clients of the listed ranges', { timeou
   assert.equal((await send(free.port, { address: home })).status, 200);
   assert.equal((await send(free.port, {})).status, 200);
 });
+
+test('config keeps who may connect, for every project of the machine or for one', { timeout: 120_000 }, async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'knowledge-nest-wiki-config-')));
+  const stops = [];
+  t.after(async () => {
+    for (const stop of stops.reverse()) await stop();
+    await rm(root, { recursive: true, force: true, maxRetries: 5 });
+  });
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const nest = async (...args) => JSON.parse((await runNode(process.execPath, [cli, ...args, '--json'], { cwd: root, env, encoding: 'utf8' })).stdout).data;
+  const refused = (...args) => assert.rejects(nest(...args), (error) => error.code === 2 && JSON.parse(error.stdout).errors[0].code === 'INVALID_ARGUMENT', args.join(' '));
+  await runNode(process.execPath, [cli, 'init', 'wiki', 'kb', '--purpose', '設備保全の手順'], { cwd: root, env });
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
+  const written = async () => parse(await readFile(configPath, 'utf8')).serve;
+  const config = parse(await readFile(configPath, 'utf8'));
+  config.serve.port = 0;
+  await writeFile(configPath, stringify(config));
+  const standard = await written();
+
+  // Outside loopback, the settings name the clients of a home or office network, or ask a token.
+  await refused('config', 'set', 'serve', '--host', '0.0.0.0');
+  await refused('config', 'set', 'serve', '--host', '0.0.0.0', '--allowed-clients', '203.0.113.0/24');
+  await refused('config', 'set', 'serve', '--allowed-clients', '192.168.11.*');
+  await refused('config', 'set', 'serve', '--auth', 'token');
+  await refused('config', 'set', 'serve');
+  await refused('config', 'set', 'llm', '--model', 'x', '--project', 'kb');
+  const own = Object.values(networkInterfaces()).flat()
+    .find((entry) => entry.family === 'IPv4' && /^(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))\./u.test(entry.address))?.address;
+  const hosts = ['localhost', '127.0.0.1', ...(own ? [own] : [])];
+  const machine = { host: '0.0.0.0', access: { allowed_hosts: hosts, allowed_clients: ['10.255.255.0/24'] } };
+  assert.deepEqual((await nest('config', 'set', 'serve', '--host', '0.0.0.0', '--allowed-hosts', hosts.join(','), '--allowed-clients', '10.255.255.0/24')).serve, machine);
+  assert.deepEqual((await nest('config', 'list')).serve, machine);
+  assert.match((await runNode(process.execPath, [cli, 'config', 'list'], { cwd: root, env, encoding: 'utf8' })).stdout, /^serve\.allowed_clients {2}10\.255\.255\.0\/24$/mu);
+  // The file of the project is not touched: it keeps the standard values, so the machine's apply.
+  assert.deepEqual(await written(), standard);
+
+  const start = async () => {
+    const child = spawn(process.execPath, [cli, '--project', 'kb', 'serve'], { cwd: root, env, stdio: ['ignore', 'ignore', 'pipe'] });
+    const stopped = once(child, 'exit');
+    const stop = async () => { child.kill(); await stopped; };
+    stops.push(stop);
+    let log = '';
+    for await (const chunk of child.stderr) {
+      log += chunk;
+      const port = /http:\/\/0\.0\.0\.0:(\d+)/u.exec(log)?.[1];
+      if (port) return { port, stop };
+    }
+    assert.fail(log);
+  };
+  const shared = await start();
+  assert.equal((await send(shared.port, {})).status, 200);
+  if (own) assert.match((await send(shared.port, { address: own })).body, /CLIENT_FORBIDDEN/u);
+  await shared.stop();
+
+  // What the project chooses wins over the machine; the rest still comes from the machine.
+  const range = own ? own + '/24' : '10.0.0.0/8';
+  const chosen = await nest('config', 'set', 'serve', '--allowed-clients', range, '--project', 'kb');
+  assert.equal(chosen.path, configPath);
+  assert.deepEqual(chosen.serve.access.allowed_clients, [range]);
+  assert.deepEqual(await written(), { ...standard, access: { allowed_hosts: standard.access.allowed_hosts, allowed_origins: [], allowed_clients: [range], auth: standard.access.auth } });
+  assert.deepEqual(Object.keys((await written()).access), ['allowed_hosts', 'allowed_origins', 'allowed_clients', 'auth']);
+  assert.deepEqual((await nest('config', 'list', '--project', 'kb')).serve, { host: '127.0.0.1', access: { allowed_hosts: ['localhost', '127.0.0.1'], allowed_clients: [range], auth: { type: 'none', token_env: null } } });
+  const narrowed = await start();
+  if (own) assert.equal((await send(narrowed.port, { address: own })).status, 200);
+  await narrowed.stop();
+
+  // Taking the settings away puts the standard values back, in the project and on the machine.
+  await nest('config', 'unset', 'serve', '--project', 'kb');
+  assert.deepEqual(await written(), standard);
+  assert.equal((await nest('config', 'unset', 'serve')).serve, undefined);
+  assert.deepEqual(parse(await readFile(join(root, 'global.yaml'), 'utf8')), { version: 1 });
+  // A project that binds outside loopback by itself is refused when nothing lets it.
+  await refused('config', 'set', 'serve', '--host', '0.0.0.0', '--project', 'kb');
+});

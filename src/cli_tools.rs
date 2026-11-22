@@ -1518,7 +1518,7 @@ fn read_global(path: &str) -> Result<ConfigValue, CliError> {
             2,
             "INVALID_GLOBAL_CONFIG",
             format!(
-                "Check {path}. Expected version: 1, optional embedding and llm entries with provider and model, and optional ocr with tool: oar-ocr or lightonocr."
+                "Check {path}. Expected version: 1, optional embedding and llm entries with provider and model, optional ocr with tool: oar-ocr or lightonocr, and optional serve with host and access."
             ),
         )
     };
@@ -1527,7 +1527,7 @@ fn read_global(path: &str) -> Result<ConfigValue, CliError> {
     let ConfigValue::Object(entries) = &parsed.value else {
         return Err(fail());
     };
-    let allowed = ["version", "embedding", "llm", "ocr"];
+    let allowed = ["version", "embedding", "llm", "ocr", "serve"];
     if entries
         .iter()
         .any(|(key, _)| !allowed.contains(&key.as_str()))
@@ -1540,6 +1540,12 @@ fn read_global(path: &str) -> Result<ConfigValue, CliError> {
         if let Some(value) = parsed.value.get(role) {
             settings.push((role, selection(role, value).ok_or_else(fail)?));
         }
+    }
+    if let Some(serve) = parsed.value.get("serve") {
+        if !crate::config_check::user_serve_valid(serve) {
+            return Err(fail());
+        }
+        settings.push(("serve", serve.clone()));
     }
     Ok(object(settings))
 }
@@ -1614,6 +1620,295 @@ pub fn configure_global(
         atomic_write(&path, crate::yaml_emit::stringify(&settings).as_bytes()).map_err(stage)?;
         Ok(with_path(&path, settings))
     })
+}
+
+/// The settings of `serve` kept for every project of the machine, if any.
+pub fn global_serve(env: &CliEnv) -> Result<Option<ConfigValue>, CliError> {
+    Ok(read_global(&global_path(env))?.get("serve").cloned())
+}
+
+/// The keys of `access` that `config` sets, in the order they are written.
+const ACCESS_KEYS: [&str; 3] = ["allowed_hosts", "allowed_clients", "auth"];
+
+const SERVE_USAGE: &str = "Use config set serve [--host <address>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>], config unset serve [--project <directory>], or config list [--project <directory>].";
+
+/// The values of `config set serve`. A list is separated by commas, and an empty value takes
+/// the setting away.
+pub struct ServeChoice<'a> {
+    pub host: Option<&'a str>,
+    pub allowed_hosts: Option<&'a str>,
+    pub allowed_clients: Option<&'a str>,
+    pub auth: Option<&'a str>,
+    pub token_env: Option<&'a str>,
+}
+
+impl ServeChoice<'_> {
+    pub fn any(&self) -> bool {
+        [
+            self.host,
+            self.allowed_hosts,
+            self.allowed_clients,
+            self.auth,
+            self.token_env,
+        ]
+        .iter()
+        .any(Option::is_some)
+    }
+
+    /// `host` and the three keys of `access` of `current`, with the chosen values in place.
+    fn apply(&self, current: Option<&ConfigValue>) -> Result<Option<ConfigValue>, CliError> {
+        let mut host = current.and_then(|current| current.get("host")).cloned();
+        let mut access: Vec<(String, ConfigValue)> = Vec::new();
+        for key in ACCESS_KEYS {
+            let kept = current
+                .and_then(|current| current.get("access"))
+                .and_then(|access| access.get(key));
+            assign(&mut access, key, kept.cloned());
+        }
+        if let Some(chosen) = self.host {
+            host = (!chosen.is_empty()).then(|| text(chosen));
+        }
+        for (key, list) in [
+            ("allowed_hosts", self.allowed_hosts),
+            ("allowed_clients", self.allowed_clients),
+        ] {
+            if let Some(list) = list {
+                let names: Vec<ConfigValue> = list
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(text)
+                    .collect();
+                assign(
+                    &mut access,
+                    key,
+                    (!names.is_empty()).then_some(ConfigValue::Array(names)),
+                );
+            }
+        }
+        if self.auth.is_some() || self.token_env.is_some() {
+            let kept = access
+                .iter()
+                .find(|(key, _)| key == "auth")
+                .and_then(|(_, auth)| string_field(auth, "token_env"))
+                .map(str::to_owned);
+            let auth = match (self.auth, self.token_env) {
+                (Some(""), None) => None,
+                (Some("none"), None) => Some(object(vec![
+                    ("type", text("none")),
+                    ("token_env", ConfigValue::Null),
+                ])),
+                (Some("token") | None, name) => {
+                    let name = name
+                        .map(str::to_owned)
+                        .or(kept)
+                        .filter(|name| !name.is_empty())
+                        .ok_or_else(|| {
+                            invalid(
+                                "Name the environment variable that holds the token with --token-env <NAME>.",
+                            )
+                        })?;
+                    Some(object(vec![
+                        ("type", text("token")),
+                        ("token_env", text(&name)),
+                    ]))
+                }
+                _ => {
+                    return Err(invalid(
+                        "Use --auth none, or --auth token with --token-env <NAME>.",
+                    ));
+                }
+            };
+            assign(&mut access, "auth", auth);
+        }
+        let mut fields = Vec::new();
+        if let Some(host) = host {
+            fields.push(("host", host));
+        }
+        if !access.is_empty() {
+            let mut ordered = Vec::new();
+            for key in ACCESS_KEYS {
+                if let Some((_, value)) = access.iter().find(|(name, _)| name == key) {
+                    ordered.push((key.to_owned(), value.clone()));
+                }
+            }
+            fields.push(("access", ConfigValue::Object(ordered)));
+        }
+        Ok((!fields.is_empty()).then(|| object(fields)))
+    }
+}
+
+/// The first thing wrong with a `serve` section as a project of `kind` would run it.
+fn serve_problem(kind: &str, serve: &ConfigValue) -> Option<CliError> {
+    let (_, issues) = crate::cli_project::validate_serve(kind, Some(serve));
+    let issue = issues.first()?;
+    let host = items(issue.get("path"))
+        .last()
+        .and_then(ConfigValue::as_str)
+        == Some("host");
+    Some(
+        if string_field(issue, "code") == Some("ARG_CONFLICT") && host {
+            invalid(
+                "A host outside loopback needs --allowed-clients with only home or office ranges (such as 192.168.11.0/24), or --auth token --token-env <NAME>.",
+            )
+        } else {
+            invalid(format!(
+                "Check the values of serve. {}",
+                string_field(issue, "hint").unwrap_or_default()
+            ))
+        },
+    )
+}
+
+/// `config set serve`, `config unset serve` and `config list --project`: who may connect to the
+/// servers of every project of the machine, or with `project` (its configuration file) of one.
+/// A project runs with its own value wherever it chose one, else with the value of the machine.
+pub fn configure_serve(
+    env: &CliEnv,
+    action: &str,
+    role: Option<&str>,
+    choice: &ServeChoice,
+    project: Option<&str>,
+    warnings: &mut Vec<ConfigValue>,
+) -> Result<ConfigValue, CliError> {
+    let listing = action == "list";
+    if (listing && (role.is_some() || choice.any() || project.is_none()))
+        || (!listing && role != Some("serve"))
+        || (action == "set") != choice.any()
+    {
+        return Err(invalid(SERVE_USAGE));
+    }
+    let template = crate::config_check::serve_template;
+    let Some(config_path) = project else {
+        let path = global_path(env);
+        let folder = node_path::dirname(&path);
+        std::fs::create_dir_all(&folder)
+            .map_err(|error| stage(fs_error("mkdir", &folder, &error)))?;
+        return with_write_lock(&folder, || {
+            let ConfigValue::Object(mut settings) = read_global(&path)? else {
+                unreachable!()
+            };
+            let current = settings
+                .iter()
+                .find(|(key, _)| key == "serve")
+                .map(|(_, serve)| serve.clone());
+            let next = if action == "set" {
+                choice.apply(current.as_ref())?
+            } else {
+                None
+            };
+            if let Some(next) = &next {
+                if !crate::config_check::user_serve_valid(next) {
+                    return Err(invalid(
+                        "Check the values of serve: a host name or address, host names, address ranges such as 192.168.11.0/24, and the name of an environment variable.",
+                    ));
+                }
+                let run = crate::config_check::with_user_serve("rag", &template("rag"), next);
+                if let Some(problem) = serve_problem("rag", &run) {
+                    return Err(problem);
+                }
+            }
+            if next != current {
+                assign(&mut settings, "serve", next);
+                atomic_write(
+                    &path,
+                    crate::yaml_emit::stringify(&ConfigValue::Object(settings.clone())).as_bytes(),
+                )
+                .map_err(stage)?;
+            }
+            Ok(with_path(&path, ConfigValue::Object(settings)))
+        });
+    };
+    let loaded = crate::cli_project::load_project(Some(config_path), "serve", None, env, warnings)?;
+    let written = loaded.config.get("serve").cloned().unwrap_or_default();
+    if string_field(&written, "transport") != Some("http") {
+        return Err(invalid(
+            "This project serves over stdio, which has no access settings.",
+        ));
+    }
+    let shown = |serve: &ConfigValue| {
+        let mut access = Vec::new();
+        for key in ACCESS_KEYS {
+            if let Some(value) = serve.get("access").and_then(|access| access.get(key)) {
+                access.push((key, value.clone()));
+            }
+        }
+        object(vec![
+            ("path", text(&loaded.config_path)),
+            (
+                "serve",
+                object(vec![
+                    ("host", serve.get("host").cloned().unwrap_or_default()),
+                    ("access", object(access)),
+                ]),
+            ),
+        ])
+    };
+    if listing {
+        return Ok(shown(&written));
+    }
+    // Taking a setting away puts the standard value back, so the value of the machine applies.
+    let next = if action == "set" {
+        choice.apply(Some(&written))?
+    } else {
+        None
+    };
+    let standard = template(&loaded.kind);
+    let ConfigValue::Object(mut fields) = written.clone() else {
+        unreachable!()
+    };
+    let chosen = |key: &str| next.as_ref().and_then(|next| next.get(key));
+    assign(
+        &mut fields,
+        "host",
+        chosen("host").or(standard.get("host")).cloned(),
+    );
+    let mut access = match written.get("access") {
+        Some(ConfigValue::Object(access)) => access.clone(),
+        _ => Vec::new(),
+    };
+    for key in ACCESS_KEYS {
+        let value = chosen("access")
+            .and_then(|access| access.get(key))
+            .or(standard.get("access").and_then(|access| access.get(key)));
+        assign(&mut access, key, value.cloned());
+    }
+    // A key the file did not have goes before `auth`, where `init` would have written it.
+    if let Some(from) = access.iter().position(|(key, _)| key == "allowed_clients")
+        && let Some(to) = access.iter().position(|(key, _)| key == "auth")
+        && from > to
+    {
+        let moved = access.remove(from);
+        access.insert(to, moved);
+    }
+    assign(&mut fields, "access", Some(ConfigValue::Object(access)));
+    let serve = ConfigValue::Object(fields);
+    let run = match global_serve(env)? {
+        Some(user) => crate::config_check::with_user_serve(&loaded.kind, &serve, &user),
+        None => serve.clone(),
+    };
+    if let Some(problem) = serve_problem(&loaded.kind, &run) {
+        return Err(problem);
+    }
+    if serve != written {
+        let ConfigValue::Object(mut config) = loaded.config.clone() else {
+            unreachable!()
+        };
+        assign(&mut config, "serve", Some(serve.clone()));
+        let config = ConfigValue::Object(config);
+        with_write_lock(&loaded.paths.data, || {
+            let current = read_utf8(&loaded.config_path)?;
+            if crate::cli_project::revision(current.as_bytes()) != loaded.config_digest {
+                return Err(coded(
+                    4,
+                    "CONFIG_CHANGED",
+                    "The KnowledgeNestfile changed. Retry the command.",
+                ));
+            }
+            atomic_write(&loaded.config_path, write_template(&config).as_bytes()).map_err(stage)
+        })?;
+    }
+    Ok(shown(&serve))
 }
 
 /// `projectModel(kind, { provider, model })`

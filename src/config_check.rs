@@ -2431,6 +2431,73 @@ fn merge_serve(project_type: &str, input: &ConfigValue) -> ConfigValue {
     ConfigValue::Object(merged)
 }
 
+/// Whether `value` is what a user keeps for the servers of every project on the machine:
+/// `host` and, under `access`, `allowed_hosts`, `allowed_clients` and `auth`.
+pub fn user_serve_valid(value: &ConfigValue) -> bool {
+    let known = |value: &ConfigValue, keys: &[&str]| {
+        matches!(value, ConfigValue::Object(fields)
+            if fields.iter().all(|(key, _)| keys.contains(&key.as_str())))
+    };
+    if !known(value, &["host", "access"]) || entries(value).is_empty() {
+        return false;
+    }
+    if let Some(access) = value.get("access")
+        && !(known(access, &["allowed_hosts", "allowed_clients", "auth"])
+            && !entries(access).is_empty())
+    {
+        return false;
+    }
+    let mut serve = vec![("transport".to_owned(), ConfigValue::String("http".into()))];
+    serve.extend(entries(value).iter().cloned());
+    serve_issues(&ConfigValue::Object(serve)).is_empty()
+}
+
+/// The `serve` section a project runs with on this machine. Where the project keeps the
+/// standard value of `host`, `allowed_hosts`, `allowed_clients` or `auth`, the value of the
+/// user's settings takes its place; a value the project chose stays.
+pub fn with_user_serve(project_type: &str, serve: &ConfigValue, user: &ConfigValue) -> ConfigValue {
+    if serve.get("transport").and_then(ConfigValue::as_str) != Some("http")
+        || !matches!(serve.get("access"), None | Some(ConfigValue::Object(_)))
+    {
+        return serve.clone();
+    }
+    fn set(target: &mut Vec<(String, ConfigValue)>, key: &str, value: &ConfigValue) {
+        match target.iter_mut().find(|(existing, _)| existing == key) {
+            Some(entry) => entry.1 = value.clone(),
+            None => target.push((key.to_owned(), value.clone())),
+        }
+    }
+    let same = |value: Option<&ConfigValue>, standard: Option<&ConfigValue>| {
+        value.map(ConfigValue::to_js_json) == standard.map(ConfigValue::to_js_json)
+    };
+    let mut fields = entries(serve).to_vec();
+    if let Some(host) = user.get("host")
+        && (serve.get("host").is_none()
+            || same(serve.get("host"), serve_template(project_type).get("host")))
+    {
+        set(&mut fields, "host", host);
+    }
+    if let Some(theirs) = user.get("access") {
+        let standard = default_access();
+        let own = serve.get("access");
+        let mut access = own.map(|own| entries(own).to_vec()).unwrap_or_default();
+        for (key, value) in entries(theirs) {
+            let chosen = own.and_then(|own| own.get(key));
+            let untouched = match key.as_str() {
+                "auth" => !chosen
+                    .and_then(|auth| auth.get("type"))
+                    .is_some_and(|kind| kind.as_str() != Some("none")),
+                _ => chosen.is_none() || same(chosen, standard.get(key)),
+            };
+            if untouched {
+                set(&mut access, key, value);
+            }
+        }
+        set(&mut fields, "access", &ConfigValue::Object(access));
+    }
+    ConfigValue::Object(fields)
+}
+
 /// A list in `access`: its key, whether it needs an item, and how to check each item.
 type ListCheck = (&'static str, bool, fn(&str) -> bool);
 
@@ -2627,7 +2694,7 @@ fn serve_issues(input: &ConfigValue) -> Vec<(Issue, Vec<String>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Network, client_allowed, private_clients};
+    use super::{Network, client_allowed, private_clients, user_serve_valid, with_user_serve};
     use crate::config_value::ConfigValue;
 
     fn ranges(values: &[&str]) -> Vec<Network> {
@@ -2729,5 +2796,70 @@ mod tests {
         }
         assert!(!private_clients(None));
         assert!(!private_clients(Some(&ConfigValue::Object(Vec::new()))));
+    }
+
+    fn yaml(text: &str) -> ConfigValue {
+        crate::yaml_config::parse_config(text).unwrap().value
+    }
+
+    #[test]
+    fn checks_the_serve_settings_of_a_user() {
+        for text in [
+            "host: 0.0.0.0",
+            "access: { allowed_clients: [192.168.11.0/24] }",
+            "host: 192.168.11.16
+access: { allowed_hosts: [localhost, 192.168.11.16], auth: { type: token, token_env: NEST_TOKEN } }",
+        ] {
+            assert!(user_serve_valid(&yaml(text)), "{text}");
+        }
+        for text in [
+            "{}",
+            "port: 4319",
+            "host: 5",
+            "access: {}",
+            "access: { allowed_clients: [] }",
+            "access: { allowed_clients: [192.168.11.*] }",
+            "access: { allowed_origins: [] }",
+            "access: { auth: { type: key } }",
+        ] {
+            assert!(!user_serve_valid(&yaml(text)), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_project_keeps_what_it_chose_and_takes_the_rest_from_the_user() {
+        let user = yaml(
+            "host: 0.0.0.0
+access: { allowed_hosts: [localhost, 192.168.11.16], allowed_clients: [192.168.11.0/24], auth: { type: token, token_env: NEST_TOKEN } }",
+        );
+        let standard = super::serve_template("wiki");
+        let merged = with_user_serve("wiki", &standard, &user);
+        assert_eq!(merged.get("host"), user.get("host"));
+        assert_eq!(merged.get("port"), standard.get("port"));
+        let access = merged.get("access").unwrap();
+        for key in ["allowed_hosts", "allowed_clients", "auth"] {
+            assert_eq!(
+                access.get(key),
+                user.get("access").unwrap().get(key),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            access.get("allowed_origins"),
+            standard.get("access").unwrap().get("allowed_origins")
+        );
+
+        let own = yaml(
+            "transport: http
+host: 10.0.0.5
+access: { allowed_hosts: [nest.internal], allowed_clients: [10.0.0.0/8], auth: { type: token, token_env: OWN } }",
+        );
+        assert_eq!(with_user_serve("wiki", &own, &user), own);
+        let stdio = yaml("transport: stdio");
+        assert_eq!(with_user_serve("mcp", &stdio, &user), stdio);
+        // A section without the keys takes them all.
+        let bare = with_user_serve("rag", &yaml("transport: http"), &user);
+        assert_eq!(bare.get("host"), user.get("host"));
+        assert_eq!(bare.get("access"), user.get("access"));
     }
 }

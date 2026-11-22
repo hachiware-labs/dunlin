@@ -356,6 +356,26 @@ serve:
 
 この例は合言葉なしです。範囲の中の端末なら、だれでも読み書きできます。Wiki・PARA の画面では、サーバーのマシンにあるファイルをパスで取り込むこともできます。同じネットワークに信用できない端末があるなら、`auth: { type: token, token_env: NEST_TOKEN }` を足してください。
 
+**コマンドで設定する。** 接続の設定は、ファイルを編集する代わりに `nest config` でも書けます。
+
+```sh
+# この PC のすべてのプロジェクトに効かせる（~/.knowledge-nest/config.yaml に保存）
+nest config set serve --host 0.0.0.0 --allowed-hosts localhost,127.0.0.1,192.168.11.16 --allowed-clients 192.168.11.0/24
+
+# 1つのプロジェクトだけに効かせる（そのプロジェクトの KnowledgeNestfile.yaml を書き換える）
+nest config set serve --allowed-clients 192.168.11.0/24 --project ./my-wiki
+
+nest config list                              # この PC の設定を見る
+nest config list --project ./my-wiki          # プロジェクトの設定を見る
+nest config unset serve                       # この PC の設定を消す
+nest config unset serve --project ./my-wiki   # プロジェクトの設定を標準の値に戻す
+```
+
+- 設定できるのは `host`、`allowed_hosts`、`allowed_clients`、`auth` です。認証は `--auth none`、または `--auth token --token-env NEST_TOKEN` と書きます。一覧はコンマで区切ります。空の値（`--allowed-clients ""`）を渡すと、その項目を消します。
+- **プロジェクトが優先です。** プロジェクトのファイルで標準の値（`init` が書いた値）から変えた項目は、プロジェクトの値を使います。標準の値のままの項目に、この PC の設定を使います。`nest serve --host` と `--port` は、どちらよりも優先します。
+- 合言葉そのものは保存しません。`--token-env` には環境変数の名前を渡し、値は環境変数に入れます。
+- ループバックの外の `host` は、家や職場の範囲の `--allowed-clients` か `--auth token` を一緒に渡さないと、保存を断ります。
+
 ```sh
 export NEST_TOKEN=...      # 長い乱数にする
 nest validate --json       # 矛盾があれば、起動する前にここで分かる

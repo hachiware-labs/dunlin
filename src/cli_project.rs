@@ -1076,10 +1076,26 @@ pub fn load_project(
             ),
         ]));
     }
+    // The server runs with the settings of the machine wherever the project kept the standard
+    // value, so the project is checked as it will run here.
+    let run = match (effective.get("serve"), crate::cli_tools::global_serve(env)?) {
+        (Some(serve), Some(user)) => {
+            let ConfigValue::Object(mut entries) = effective.clone() else {
+                unreachable!()
+            };
+            assign(
+                &mut entries,
+                "serve",
+                Some(crate::config_check::with_user_serve(&kind, serve, &user)),
+            );
+            ConfigValue::Object(entries)
+        }
+        _ => effective.clone(),
+    };
     let checked = if is_search_project(&kind) {
-        validate_rag(&effective, &file, &parsed.lines)
+        validate_rag(&run, &file, &parsed.lines)
     } else {
-        validate_wiki(&effective, &file, &parsed)
+        validate_wiki(&run, &file, &parsed)
     };
     warnings.extend(checked.warnings.iter().cloned());
     if !checked.errors.is_empty() && command != "defaults" {

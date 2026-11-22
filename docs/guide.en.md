@@ -358,6 +358,26 @@ serve:
 
 This example has no token: every device in the range can read and write. On the Wiki and PARA pages, it can also take in a file of the server's machine by its path. If the network has devices you do not trust, add `auth: { type: token, token_env: NEST_TOKEN }`.
 
+**Setting it with a command.** Instead of editing the file, `nest config` writes the access settings.
+
+```sh
+# For every project on this machine (kept in ~/.knowledge-nest/config.yaml)
+nest config set serve --host 0.0.0.0 --allowed-hosts localhost,127.0.0.1,192.168.11.16 --allowed-clients 192.168.11.0/24
+
+# For one project only (rewrites that project's KnowledgeNestfile.yaml)
+nest config set serve --allowed-clients 192.168.11.0/24 --project ./my-wiki
+
+nest config list                              # the settings of this machine
+nest config list --project ./my-wiki          # the settings of the project
+nest config unset serve                       # remove the settings of this machine
+nest config unset serve --project ./my-wiki   # put the standard values back in the project
+```
+
+- It sets `host`, `allowed_hosts`, `allowed_clients` and `auth`. Authentication is `--auth none`, or `--auth token --token-env NEST_TOKEN`. Lists are separated by commas. An empty value (`--allowed-clients ""`) removes that setting.
+- **The project wins.** Where the project file differs from the standard value that `init` wrote, the project's value is used; where it still has the standard value, the machine's value is used. `nest serve --host` and `--port` win over both.
+- The token itself is never stored. `--token-env` takes the name of an environment variable; put the value in that variable.
+- A `host` outside loopback is refused unless `--allowed-clients` with home or office ranges, or `--auth token`, comes with it.
+
 ```sh
 export NEST_TOKEN=...      # use a long random value
 nest validate --json       # reports conflicts before you start the server

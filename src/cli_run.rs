@@ -377,7 +377,9 @@ fn text_output(
         }
         "config" => {
             let mut lines = vec![field("path")];
-            for role in ["embedding", "llm"] {
+            // The settings of one project are its `serve` alone.
+            let machine = data.get("version").is_some();
+            for role in ["embedding", "llm"].into_iter().filter(|_| machine) {
                 let setting = data.get(role).filter(|setting| truthy(Some(setting)));
                 lines.push(format!(
                     "{role}  {}",
@@ -392,10 +394,36 @@ fn text_output(
                 .get("ocr")
                 .and_then(|ocr| ocr.get("tool"))
                 .filter(|tool| !matches!(tool, ConfigValue::Null));
-            lines.push(format!(
-                "ocr  {}",
-                ocr.map_or("unset".into(), |tool| js_string(Some(tool)))
-            ));
+            if machine {
+                lines.push(format!(
+                    "ocr  {}",
+                    ocr.map_or("unset".into(), |tool| js_string(Some(tool)))
+                ));
+            }
+            if let Some(serve) = data.get("serve") {
+                let access = serve.get("access");
+                if let Some(host) = serve.get("host").and_then(ConfigValue::as_str) {
+                    lines.push(format!("serve.host  {host}"));
+                }
+                for key in ["allowed_hosts", "allowed_clients"] {
+                    if let Some(list) = access.and_then(|access| access.get(key)) {
+                        let names: Vec<String> = items(Some(list))
+                            .iter()
+                            .map(|item| js_string(Some(item)))
+                            .collect();
+                        lines.push(format!("serve.{key}  {}", names.join(", ")));
+                    }
+                }
+                if let Some(auth) = access.and_then(|access| access.get("auth")) {
+                    lines.push(format!(
+                        "serve.auth  {}",
+                        match string_field(auth, "token_env") {
+                            Some(name) => format!("token ({name})"),
+                            None => "none".to_owned(),
+                        }
+                    ));
+                }
+            }
             lines.join("\n")
         }
         "dictionary" => {
@@ -573,7 +601,7 @@ fn dispatch(
         || value("source") == Some("")
         || value("project") == Some("")
         || (explicit.is_some() && parsed.value("project").is_some())
-        || (["init", "config"].contains(&command) && explicit.is_some())
+        || (command == "init" && explicit.is_some())
     {
         return Err(usage());
     }
@@ -708,6 +736,26 @@ fn dispatch(
     if command == "config" {
         if kind.as_deref() != Some("list") {
             state.run_id = Some(new_run_id());
+        }
+        let choice = crate::cli_tools::ServeChoice {
+            host: value("host"),
+            allowed_hosts: value("allowed-hosts"),
+            allowed_clients: value("allowed-clients"),
+            auth: value("auth"),
+            token_env: value("token-env"),
+        };
+        let scope = value("project").or(explicit);
+        if directory.as_deref() == Some("serve") || scope.is_some() || choice.any() {
+            let path = find_project(scope, &env.cwd)?.filter(|_| scope.is_some());
+            return crate::cli_tools::configure_serve(
+                env,
+                kind.as_deref().unwrap_or_default(),
+                directory.as_deref(),
+                &choice,
+                path.as_deref(),
+                &mut state.warnings,
+            )
+            .map(Done::Data);
         }
         return crate::cli_tools::configure_global(
             env,

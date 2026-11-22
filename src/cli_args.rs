@@ -13,7 +13,7 @@ pub const COMMANDS: [(&str, &str); 37] = [
     ),
     (
         "config",
-        "nest config list | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config unset <embedding|llm|ocr> [--json]",
+        "nest config list [--project <directory>] | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config set serve [--host <address>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>] | nest config unset <embedding|llm|ocr|serve> [--project <directory>] [--json]",
     ),
     (
         "build",
@@ -163,7 +163,7 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
             ("init", "Create a project: mcp, rag, wiki or para"),
             (
                 "config",
-                "Set the models and OCR tool that new projects use",
+                "Set the models and OCR tool of new projects, and who may connect to serve",
             ),
             ("add", "Install an optional tool such as OCR or hannoy"),
             ("remove", "Remove an installed tool from the project"),
@@ -456,6 +456,16 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
             options.push(("provider", String));
             options.push(("model", String));
             options.push(("tool", String));
+            for key in [
+                "host",
+                "allowed-hosts",
+                "allowed-clients",
+                "auth",
+                "token-env",
+                "project",
+            ] {
+                options.push((key, String));
+            }
         }
         _ => options.push(("project", String)),
     }

@@ -3,6 +3,9 @@
 //! A run scans the folder and makes a `files` snapshot, then makes the `extracted` snapshot from
 //! it. Files that did not change are neither opened nor read again.
 //!
+//! The file list is what the source is taken to hold: a change `apply` leaves out is not in it,
+//! so nothing after the list knows of the choice.
+//!
 //! Not here yet: the other parsers, several sources in one run, the stop on a large drop in the
 //! number of documents, and the command line.
 
@@ -22,6 +25,41 @@ pub struct ExtractRequest<'a> {
     pub tag: Option<&'a str>,
     /// The configuration file as it is now. It is kept with the runs.
     pub config: Option<&'a [u8]>,
+    /// Which changes of the folder are taken in.
+    pub apply: Apply,
+}
+
+/// The changes of a folder a run takes in. A change that is left out stays as it was in the
+/// file list: a new file is not listed, a rewritten file keeps its earlier content and a deleted
+/// file stays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Apply {
+    pub add: bool,
+    pub update: bool,
+    pub delete: bool,
+}
+
+impl Apply {
+    /// The folder as it is.
+    pub const ALL: Self = Self {
+        add: true,
+        update: true,
+        delete: true,
+    };
+}
+
+impl Default for Apply {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+/// The documents whose change was not taken in.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Withheld {
+    pub added: Vec<String>,
+    pub updated: Vec<String>,
+    pub deleted: Vec<String>,
 }
 
 /// What a run of `extract` did. Documents are named by their path below the root, with `/`.
@@ -30,11 +68,13 @@ pub struct ExtractOutcome {
     /// The file list: which documents there were, with what content.
     pub files: Committed,
     pub extracted: Committed,
-    /// Compared with the file list of the run that last moved the tag.
+    /// Compared with the file list of the run that last moved the tag, after `apply`.
     pub added: Vec<String>,
     pub updated: Vec<String>,
     pub deleted: Vec<String>,
     pub unchanged: usize,
+    /// Changes of the folder that `apply` left out.
+    pub withheld: Withheld,
     /// Files whose bytes were read to hash them.
     pub hashed: usize,
     /// Documents that were parsed.
@@ -114,6 +154,8 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
     if let Some(config) = request.config {
         draft.set_config(config)?;
     }
+    let apply = request.apply;
+    let mut withheld = Withheld::default();
     let mut hashed = 0;
     let mut files: Vec<(String, String)> = Vec::new();
     let mut notes = serde_json::Map::new();
@@ -140,6 +182,12 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
             .map_or(0, |elapsed| elapsed.as_millis() as u64);
         let size = metadata.len();
         let earlier = listed_before.get(&name(&document)).copied();
+        if earlier.is_none() && !apply.add {
+            // A new file that is not taken in is not opened.
+            withheld.added.push(document);
+            continue;
+        }
+        let mut kept = false;
         let id = match (noted(seen, &document), earlier) {
             // The same size and time as last seen: the file is not opened.
             (Some((seen_size, seen_modified, false)), Some(earlier))
@@ -150,21 +198,59 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
             _ => {
                 hashed += 1;
                 let bytes = std::fs::read(entry.path())?;
-                if media_type(&document).is_some() {
-                    // A file a parser takes is kept, so that it is read once.
-                    draft.save(&bytes)?.to_string()
-                } else {
-                    object_id(&bytes).to_string()
+                let id = object_id(&bytes).to_string();
+                match earlier {
+                    // A rewritten file that is not taken in keeps the content it had.
+                    Some(earlier) if !apply.update && *earlier != id => {
+                        kept = true;
+                        earlier.clone()
+                    }
+                    _ => {
+                        if media_type(&document).is_some() {
+                            // A file a parser takes is kept, so that it is read once.
+                            draft.save(&bytes)?;
+                        }
+                        id
+                    }
                 }
             }
         };
         // A write in the same tick as the hashing would keep this time: hash again next time.
+        // So would a file whose size and time are not the ones of the content that is listed.
         notes.insert(
             document.clone(),
-            json!([size, modified_ms, modified_ms >= started]),
+            json!([size, modified_ms, kept || modified_ms >= started]),
         );
+        if kept {
+            withheld.updated.push(document.clone());
+        }
         draft.list(name(&document), id.clone());
         files.push((document, id));
+    }
+    if !apply.delete {
+        // A deleted file that is not taken in stays in the list with the content it had.
+        let present: std::collections::HashSet<&str> = files
+            .iter()
+            .map(|(document, _)| document.as_str())
+            .collect();
+        let mut gone: Vec<(String, String)> = before
+            .iter()
+            .flat_map(|snapshot| &snapshot.items)
+            .filter_map(|(name, id)| match name.as_slice() {
+                [source, document]
+                    if source == request.source && !present.contains(document.as_str()) =>
+                {
+                    Some((document.clone(), id.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        gone.sort();
+        for (document, id) in gone {
+            draft.list(name(&document), id.clone());
+            withheld.deleted.push(document.clone());
+            files.push((document, id));
+        }
     }
     let listed: Vec<(ItemName, String)> = files
         .iter()
@@ -187,6 +273,11 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
         "source": request.source,
         "root": request.root.to_string_lossy(),
         "hashed": hashed,
+        "withheld": {
+            "added": withheld.added,
+            "updated": withheld.updated,
+            "deleted": withheld.deleted,
+        },
     }));
     let listing = draft.commit(None, before.as_ref().map(|snapshot| snapshot.id))?;
     store.note(listing.snapshot, "seen", &Value::Object(notes))?;
@@ -265,6 +356,7 @@ pub fn extract(store: &Store, request: &ExtractRequest<'_>) -> StoreResult<Extra
         updated: documents(changes.updated),
         deleted: documents(changes.removed),
         unchanged: changes.unchanged,
+        withheld,
         hashed,
         read,
         skipped,

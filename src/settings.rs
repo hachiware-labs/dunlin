@@ -10,6 +10,7 @@
 use serde_json::{Map, Value, json};
 use yaml_rust2::{Yaml, YamlLoader};
 
+use crate::extract::Apply;
 use crate::records::{ModuleIdentity, Process};
 use crate::transform::Chunking;
 
@@ -41,6 +42,8 @@ pub struct Section {
 pub struct Plan {
     /// The tag of the `extract` section. The documents are read from the snapshot it points at.
     pub extract_tag: Option<String>,
+    /// Which changes of the folder `extract` takes in.
+    pub apply: Apply,
     pub chunking: Chunking,
     /// The most chunks a search returns.
     pub top_k: usize,
@@ -171,6 +174,31 @@ fn only(step: &Step, known: &[&str], fixed: &[(&str, &str)]) -> Result<(), Strin
     Ok(())
 }
 
+/// `apply` of `source.filesystem`: the changes of the folder that are taken in.
+fn changes_taken(value: &Value) -> Result<Apply, String> {
+    const REASON: &str = "source.filesystem takes apply as a list of add, update and delete.";
+    let Value::Array(names) = value else {
+        return Err(REASON.into());
+    };
+    let mut apply = Apply {
+        add: false,
+        update: false,
+        delete: false,
+    };
+    for name in names {
+        let change = match name.as_str() {
+            Some("add") => &mut apply.add,
+            Some("update") => &mut apply.update,
+            Some("delete") => &mut apply.delete,
+            _ => return Err(REASON.into()),
+        };
+        if std::mem::replace(change, true) {
+            return Err(REASON.into());
+        }
+    }
+    Ok(apply)
+}
+
 impl Settings {
     pub fn parse(text: &str) -> Result<Self, String> {
         Ok(Self {
@@ -233,9 +261,16 @@ impl Settings {
     /// and says what the stages are to do. The error is the reason it cannot run.
     pub fn plan(&self) -> Result<Plan, String> {
         let extract = self.section("extract")?;
+        let mut apply = Apply::ALL;
         for step in &extract.steps {
             match step.name.as_str() {
-                "source.filesystem" | "loader.text" => {}
+                "source.filesystem" => {
+                    only(step, &["path", "apply"], &[])?;
+                    if let Some(changes) = step.args.get("apply") {
+                        apply = changes_taken(changes)?;
+                    }
+                }
+                "loader.text" => {}
                 name => return Err(format!("{name} is not on the new store yet.")),
             }
         }
@@ -316,6 +351,7 @@ impl Settings {
         }
         Ok(Plan {
             extract_tag: extract.tag,
+            apply,
             chunking,
             top_k: top_k.ok_or("search has no retrieval module.")?,
         })
@@ -355,6 +391,7 @@ mod tests {
             }
         );
         assert_eq!(plan.top_k, 10);
+        assert_eq!(plan.apply, Apply::ALL);
         assert_eq!(
             settings.section("index").unwrap().tag.as_deref(),
             Some("main")
@@ -373,6 +410,25 @@ mod tests {
             settings.replace(section, replaced.get(section).unwrap().clone());
             settings.plan().unwrap_err()
         };
+        assert_eq!(
+            reason(
+                "extract",
+                "  - source.filesystem: { path: ./docs, apply: [add, remove] }\n"
+            ),
+            "source.filesystem takes apply as a list of add, update and delete."
+        );
+        let mut settings = Settings::parse(CONFIG).unwrap();
+        let only_new = "extract:\n  - source.filesystem: { path: ./docs, apply: [add] }\n";
+        let replaced = Settings::parse(only_new).unwrap();
+        settings.replace("extract", replaced.get("extract").unwrap().clone());
+        assert_eq!(
+            settings.plan().unwrap().apply,
+            Apply {
+                add: true,
+                update: false,
+                delete: false
+            }
+        );
         assert_eq!(
             reason("search", "  - retrieval.vector: { top_k: 10 }\n"),
             "retrieval.vector needs index.vector in index."

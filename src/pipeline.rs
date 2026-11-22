@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crate::extract::{ExtractOutcome, ExtractRequest, extract};
+use crate::extract::{Apply, ExtractOutcome, ExtractRequest, extract};
 use crate::index::{IndexOutcome, IndexRequest, index};
 use crate::store::{Store, StoreResult};
 use crate::transform::{Chunking, TransformOutcome, TransformRequest, transform};
@@ -20,6 +20,8 @@ pub struct BuildRequest<'a> {
     pub indexes: &'a Path,
     /// The configuration file as it is now. It is kept with the runs.
     pub config: Option<&'a [u8]>,
+    /// Which changes of the folder are taken in.
+    pub apply: Apply,
     /// The tags of the three sections.
     pub extract_tag: &'a str,
     pub transform_tag: &'a str,
@@ -49,6 +51,7 @@ pub fn build(store: &Store, request: &BuildRequest<'_>) -> StoreResult<BuildOutc
             root: request.root,
             tag: Some(request.extract_tag),
             config: request.config,
+            apply: request.apply,
         },
     )?;
     let transform = transform(

@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use dunlin::extract::{ExtractOutcome, ExtractRequest, extract};
+use dunlin::extract::{Apply, ExtractOutcome, ExtractRequest, Withheld, extract};
 use dunlin::records::{ItemId, Location, object_id};
 use dunlin::store::{Counts, Outcome, SnapshotId, Store};
 
@@ -67,6 +67,15 @@ impl Project {
     }
 
     fn extract_from(&self, root: &Path) -> ExtractOutcome {
+        self.run(root, Apply::ALL)
+    }
+
+    /// Extracts, taking in only some of the changes of the folder.
+    fn extract_with(&self, apply: Apply) -> ExtractOutcome {
+        self.run(&self.docs, apply)
+    }
+
+    fn run(&self, root: &Path, apply: Apply) -> ExtractOutcome {
         extract(
             &self.store,
             &ExtractRequest {
@@ -74,6 +83,7 @@ impl Project {
                 root,
                 tag: Some("docs"),
                 config: Some(CONFIG.as_bytes()),
+                apply,
             },
         )
         .unwrap()
@@ -431,6 +441,133 @@ fn keeps_an_earlier_text_for_a_file_it_cannot_read() {
     // With nothing failing, the next run is found by its key again.
     let fifth = project.extract();
     assert_eq!(fifth.extracted.outcome, Outcome::Reused);
+}
+
+#[test]
+fn takes_in_only_the_changes_it_is_told_to() {
+    let project = Project::new();
+    let first = project.extract();
+    let version_1 = first.extracted.snapshot;
+    let original = project.text(version_1, "guide.md").0;
+
+    // One document is rewritten, one is deleted and two are added.
+    let guide = project.docs.join("guide.md");
+    let rewritten = original.clone() + "\n## 追記\n\n更新した内容。\n";
+    fs::write(&guide, &rewritten).unwrap();
+    set_age(&guide, Duration::from_secs(600));
+    fs::remove_file(project.docs.join("faq.txt")).unwrap();
+    copy_into(
+        &fixtures("additional"),
+        &project.docs,
+        Duration::from_secs(1800),
+    );
+
+    // Only additions are taken in: the rewritten document keeps its text and the deleted one
+    // stays.
+    let only_new = Apply {
+        add: true,
+        update: false,
+        delete: false,
+    };
+    let held_back = || Withheld {
+        added: Vec::new(),
+        updated: vec!["guide.md".into()],
+        deleted: vec!["faq.txt".into()],
+    };
+    let second = project.extract_with(only_new);
+    assert_eq!(second.added, ADDED);
+    assert!(second.updated.is_empty() && second.deleted.is_empty());
+    assert_eq!(second.withheld, held_back());
+    // The rewritten file is hashed to see that it changed; only the new ones are read.
+    assert_eq!((second.unchanged, second.hashed, second.read), (4, 3, 2));
+    let version_2 = second.extracted.snapshot;
+    assert_eq!(
+        project.documents(version_2),
+        [
+            "faq.txt",
+            "guide.md",
+            "manuals/pump.md",
+            "manuals/valve.md",
+            "manuals/フィルター.md",
+            "release-notes.md"
+        ]
+    );
+    assert_eq!(project.text(version_2, "guide.md").0, original);
+    assert!(
+        project
+            .text(version_2, "faq.txt")
+            .0
+            .contains("よくある質問")
+    );
+    // The file list is the folder as it is taken, so the documents follow from it alone.
+    assert_eq!(
+        project.documents(second.files.snapshot),
+        project.documents(version_2)
+    );
+    let runs = project.store.runs().unwrap();
+    assert_eq!(
+        runs[runs.len() - 2].stats["withheld"],
+        serde_json::json!({ "added": [], "updated": ["guide.md"], "deleted": ["faq.txt"] })
+    );
+
+    // The same again: nothing is made, and what is held back is said again.
+    let third = project.extract_with(only_new);
+    assert_eq!(third.files.outcome, Outcome::Unchanged);
+    assert_eq!(third.extracted.outcome, Outcome::Reused);
+    assert_eq!(third.withheld, held_back());
+    assert_eq!((third.unchanged, third.hashed, third.read), (6, 1, 0));
+
+    // Every change is taken in: what was held back comes in now.
+    let fourth = project.extract();
+    assert!(fourth.added.is_empty());
+    assert_eq!(fourth.updated, ["guide.md"]);
+    assert_eq!(fourth.deleted, ["faq.txt"]);
+    assert_eq!(fourth.withheld, Withheld::default());
+    assert_eq!((fourth.unchanged, fourth.hashed, fourth.read), (4, 1, 1));
+    let version_3 = fourth.extracted.snapshot;
+    assert_eq!(project.documents(version_3).len(), 5);
+    assert_eq!(project.text(version_3, "guide.md").0, rewritten);
+
+    // Only deletions are taken in: a new file is not opened.
+    let pump = project.docs.join("manuals/pump.md");
+    fs::write(&pump, "# ポンプ\n\n書き換えた。\n").unwrap();
+    set_age(&pump, Duration::from_secs(300));
+    let new = project.docs.join("new.md");
+    fs::write(&new, "# 新しい文書\n").unwrap();
+    set_age(&new, Duration::from_secs(300));
+    fs::remove_file(project.docs.join("release-notes.md")).unwrap();
+    let fifth = project.extract_with(Apply {
+        add: false,
+        update: false,
+        delete: true,
+    });
+    assert!(fifth.added.is_empty() && fifth.updated.is_empty());
+    assert_eq!(fifth.deleted, ["release-notes.md"]);
+    assert_eq!(
+        fifth.withheld,
+        Withheld {
+            added: vec!["new.md".into()],
+            updated: vec!["manuals/pump.md".into()],
+            deleted: Vec::new(),
+        }
+    );
+    assert_eq!((fifth.unchanged, fifth.hashed, fifth.read), (4, 1, 0));
+    let version_4 = fifth.extracted.snapshot;
+    assert_eq!(
+        project.documents(version_4),
+        [
+            "guide.md",
+            "manuals/pump.md",
+            "manuals/valve.md",
+            "manuals/フィルター.md"
+        ]
+    );
+    assert!(
+        !project
+            .text(version_4, "manuals/pump.md")
+            .0
+            .contains("書き換えた")
+    );
 }
 
 impl Project {

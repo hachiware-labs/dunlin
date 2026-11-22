@@ -59,6 +59,7 @@ impl Project {
                 root: &project.root.path().join("docs"),
                 indexes: &project.indexes(),
                 config: Some(config.as_bytes()),
+                apply: dunlin::extract::Apply::ALL,
                 extract_tag: "docs",
                 transform_tag: "chunks-200",
                 index_tag: "main",

@@ -104,7 +104,7 @@ impl SourceObject {
         let original = metadata.original_sha256.take();
         let revision = serde_json::to_vec(&(format, &metadata))
             .map_err(|_| Error::Invalid("Invalid corpus metadata"))?;
-        let parsed_version = blake3::Hasher::new_derive_key("Dunlin parsed revision v1")
+        let parsed_version = blake3::Hasher::new_derive_key("Knowledge-Nest parsed revision v1")
             .update(blake3::hash(&revision).as_bytes())
             .update(content.as_bytes())
             .finalize()

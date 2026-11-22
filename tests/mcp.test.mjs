@@ -7,23 +7,23 @@ import { fileURLToPath } from 'node:url';
 
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 test('stdio publishes search and read using the same persisted knowledge base', { timeout: 20_000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-mcp-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-mcp-'));
   const store = join(root, 'index');
   const document = join(root, 'source.md');
   const policy = join(root, 'policy.txt');
-  const content = '# OAuth\n日本語の根拠\n[Policy](dunlin://policies/policy.txt)';
+  const content = '# OAuth\n日本語の根拠\n[Policy](knowledge-nest://policies/policy.txt)';
   const imported = {
     objectId: 'guide.md', url: 'https://example.invalid/guide#setup', format: 'markdown',
     content: '# Intro\nOverview\n## Setup\nimported evidence',
   };
-  const client = new Client({ name: 'dunlin-test', version: '0.1.0' });
+  const client = new Client({ name: 'knowledge-nest-test', version: '0.1.0' });
   try {
     await writeFile(document, content);
     await writeFile(policy, 'Linked policy evidence');
-    const database = await Dunlin.open(store);
+    const database = await KnowledgeNest.open(store);
     try {
       await database.addSource({ id: 'docs', kind: 'filesystem', path: document });
       await database.addSource({ id: 'policies', kind: 'filesystem', path: policy });

@@ -43,18 +43,18 @@ const rocmWindows = 'https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1';
 const rocmLinux = 'https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1';
 
 export function dataRoot() {
-  const override = process.env.DUNLIN_OCR_HOME;
+  const override = process.env.KNOWLEDGE_NEST_OCR_HOME;
   if (override !== undefined) {
-    if (!isAbsolute(override)) throw new Error('DUNLIN_OCR_HOME must be an absolute path');
+    if (!isAbsolute(override)) throw new Error('KNOWLEDGE_NEST_OCR_HOME must be an absolute path');
     return override;
   }
   if (windows) {
     const local = process.env.LOCALAPPDATA;
-    return join(local && isAbsolute(local) ? local : join(homedir(), 'AppData', 'Local'), 'Dunlin', 'ocr');
+    return join(local && isAbsolute(local) ? local : join(homedir(), 'AppData', 'Local'), 'Knowledge-Nest', 'ocr');
   }
-  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'Dunlin', 'ocr');
+  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'Knowledge-Nest', 'ocr');
   const xdg = process.env.XDG_DATA_HOME;
-  return join(xdg && isAbsolute(xdg) ? xdg : join(homedir(), '.local', 'share'), 'dunlin', 'ocr');
+  return join(xdg && isAbsolute(xdg) ? xdg : join(homedir(), '.local', 'share'), 'knowledge-nest', 'ocr');
 }
 
 function pythonPath(runtime) {
@@ -93,7 +93,7 @@ export async function managedOcr({ required = true, requireModel = true } = {}) 
   }));
   if (!runtime || (files && files.some((present) => !present))) {
     if (required) {
-      throw Object.assign(new Error('Local GPU OCR is not prepared. Run dunlin add ocr.'), { code: 'OCR_NOT_PREPARED' });
+      throw Object.assign(new Error('Local GPU OCR is not prepared. Run nest add ocr.'), { code: 'OCR_NOT_PREPARED' });
     }
     return;
   }
@@ -173,7 +173,7 @@ async function installRuntime(runtime, backend) {
 }
 
 export async function setupManagedOcr(requestedBackend) {
-  if (!Object.hasOwn(uvAssets, platform)) throw new Error(`Managed GPU OCR is unavailable on ${platform}. Use oar-ocr instead: dunlin add oar-ocr.`);
+  if (!Object.hasOwn(uvAssets, platform)) throw new Error(`Managed GPU OCR is unavailable on ${platform}. Use oar-ocr instead: nest add oar-ocr.`);
   if (requestedBackend !== undefined && !backends.includes(requestedBackend)) {
     throw new Error(`Expected --backend ${backends.join(' or ')} on ${platform}`);
   }

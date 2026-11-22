@@ -1,0 +1,18 @@
+extract:
+  - source.filesystem: { path: ./docs }
+  - loader.text: {}
+  - tag: docs
+
+transform:
+  - chunk.length: { unit: characters, size: 200, overlap: 20 }
+  - tag: chunks-200
+
+index:
+  - index.keyword: { tokenizer: lindera }
+  - tag: main
+
+search:
+  - retrieval.keyword: { top_k: 10 }
+
+serve:
+  tag: release

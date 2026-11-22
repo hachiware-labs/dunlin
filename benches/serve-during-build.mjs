@@ -1,4 +1,4 @@
-// Search latency of `dunlin serve` while a build adds documents to the shared corpus. Builds a
+// Search latency of `nest serve` while a build adds documents to the shared corpus. Builds a
 // project, serves it over HTTP, sends searches one after another, then adds documents and builds
 // again. Prints the latency before, during and after that build.
 //
@@ -15,10 +15,10 @@ import { promisify } from 'node:util';
 const [initial = 2000, added = 3000, size = 16000] = process.argv.slice(2).map(Number);
 const cli = fileURLToPath(new URL('../tools/rag/cli.mjs', import.meta.url));
 const temp = await realpath(tmpdir());
-const root = await realpath(await mkdtemp(join(temp, 'dunlin-serve-bench-')));
-if (dirname(root) !== temp || !basename(root).startsWith('dunlin-serve-bench-')) throw new Error('Unexpected temporary directory.');
+const root = await realpath(await mkdtemp(join(temp, 'knowledge-nest-serve-bench-')));
+if (dirname(root) !== temp || !basename(root).startsWith('knowledge-nest-serve-bench-')) throw new Error('Unexpected temporary directory.');
 const exec = promisify(execFile);
-const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'empty-global.yaml') };
+const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'empty-global.yaml') };
 const port = 40000 + Math.floor(Math.random() * 20000);
 
 function document(id) {

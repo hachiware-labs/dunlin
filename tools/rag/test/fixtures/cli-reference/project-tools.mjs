@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { atomicWrite, revision, withWriteLock } from './authoring/files.mjs';
 import { lightonModel } from './parsers/catalog.mjs';
@@ -25,7 +25,7 @@ export function projectOcr(tools) {
   return { tool: entry.name === 'ocr' ? 'lightonocr' : entry.name, version: entry.version };
 }
 
-/** The tools that dunlin add --list shows. */
+/** The tools that nest add --list shows. */
 export function listedTools() {
   return [...toolsCatalog.values()].filter(({ legacy }) => !legacy).map(({ ocr, legacy, ...tool }) => tool);
 }
@@ -34,23 +34,23 @@ export function listedTools() {
 export function checkTools(config, issue) {
   if (config.tools === undefined) return;
   const catalog = [...toolsCatalog.values()].map(({ name, version }) => [name, version]);
-  for (const { code, path, expected, hint } of Dunlin.checkTools(config.tools, catalog)) issue(code, path, expected, hint);
+  for (const { code, path, expected, hint } of KnowledgeNest.checkTools(config.tools, catalog)) issue(code, path, expected, hint);
 }
 
 export async function changeTool(project, requested, remove, writeTemplate) {
   const fail = (code, message, exitCode = 2) => Object.assign(new Error(message), { code, exitCode });
   const recorded = (project.config.tools ?? []).find((entry) => toolsCatalog.get(entry?.name)?.ocr);
-  // dunlin add ocr prepares the OCR tool the project records, or the standard one.
+  // nest add ocr prepares the OCR tool the project records, or the standard one.
   const name = requested === 'ocr' ? recorded?.name ?? (remove ? 'ocr' : 'oar-ocr') : requested;
   const tool = toolsCatalog.get(name);
-  if (!tool) throw fail('TOOL_UNKNOWN', 'Use dunlin add --list to see the available tools.');
+  if (!tool) throw fail('TOOL_UNKNOWN', 'Use nest add --list to see the available tools.');
   if (!remove && tool.ocr && recorded && recorded.name !== name && !(name === 'lightonocr' && recorded.name === 'ocr')) {
-    throw fail('TOOL_CONFLICT', 'A project uses one OCR tool. Run dunlin remove ' + recorded.name + ' first.');
+    throw fail('TOOL_CONFLICT', 'A project uses one OCR tool. Run nest remove ' + recorded.name + ' first.');
   }
   if (name === 'hannoy' && !isSearchProject(project.config.init.type)) throw fail('WRONG_PROJECT_TYPE', 'The hannoy tool requires a RAG/MCP project.');
   if (remove && ['source', 'ingress', 'index', 'search'].some((section) => project.config[section]?.modules?.some(({ use, with: args }) =>
     tool.modules.includes(use) || tool.ocr && args?.ocr === 'loader.ocr'))) {
-    throw fail('TOOL_IN_USE', 'Remove references to ' + name + ' modules from the Dunlinfile first.');
+    throw fail('TOOL_IN_USE', 'Remove references to ' + name + ' modules from the KnowledgeNestfile first.');
   }
   if (!remove) {
     if (name === 'oar-ocr') await setupOarOcr();
@@ -64,7 +64,7 @@ export async function changeTool(project, requested, remove, writeTemplate) {
   if (!config.tools.length) delete config.tools;
   await withWriteLock(project.paths.data, async () => {
     const current = await readFile(project.configPath, 'utf8');
-    if (revision(current) !== project.configDigest) throw fail('CONFIG_CHANGED', 'The Dunlinfile changed. Retry the tool operation.', 4);
+    if (revision(current) !== project.configDigest) throw fail('CONFIG_CHANGED', 'The KnowledgeNestfile changed. Retry the tool operation.', 4);
     await atomicWrite(project.configPath, writeTemplate(config));
   });
   return { name, version: tool.version, configured: !remove, ...(remove ? {} : { modules: tool.modules,

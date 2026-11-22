@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::Barrier;
 
-use dunlin::{Cancellation, Error, KnowledgeBase};
+use knowledge_nest::{Cancellation, Error, KnowledgeBase};
 
 #[test]
 fn simultaneous_first_opens_share_one_index() {

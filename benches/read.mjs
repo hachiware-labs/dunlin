@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 const generate = process.argv[2] === '--generate' ? Number(process.argv[3]) : 0;
 const folder = generate ? null : process.argv[2] ?? fileURLToPath(new URL('../docs', import.meta.url));
@@ -20,7 +20,7 @@ function percentiles(samples) {
   return { p50: quantile(0.5), p95: quantile(0.95), mean: Number((samples.reduce((a, b) => a + b, 0) / samples.length).toFixed(3)) };
 }
 
-const root = await mkdtemp(join(tmpdir(), 'dunlin-read-bench-'));
+const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-read-bench-'));
 let database;
 try {
   const docs = join(root, 'docs');
@@ -32,7 +32,7 @@ try {
   } else {
     await cp(folder, docs, { recursive: true, filter: (path) => !/\.(png|jpe?g|svg)$/iu.test(path) });
   }
-  database = await Dunlin.open(join(root, 'index'));
+  database = await KnowledgeNest.open(join(root, 'index'));
   await database.addSource({ id: 'bench', kind: 'filesystem', path: docs });
   const search = [];
   const read = [];

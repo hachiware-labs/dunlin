@@ -1013,7 +1013,7 @@ fn instruct(
         let digest = save_shared_original(project, content.as_bytes())?;
         let input = object(vec![
             ("objectId", text(&format!("{source_id}.txt"))),
-            ("url", text(&format!("urn:dunlin:{source_id}"))),
+            ("url", text(&format!("urn:knowledge-nest:{source_id}"))),
             ("format", text("text")),
             ("content", text(content)),
             ("corpus", object(vec![("originalSha256", text(&digest))])),

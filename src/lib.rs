@@ -1,5 +1,6 @@
 //! Local, single-tenant knowledge indexing and evidence retrieval.
 
+pub mod assess;
 pub mod chunk;
 pub mod config_check;
 pub mod config_value;
@@ -9,18 +10,26 @@ mod evaluate;
 mod evidence_match;
 mod excerpt;
 mod explore;
+pub mod extract;
 pub mod glob;
+pub mod index;
 mod japanese;
 mod legacy_delete;
 #[cfg(any(feature = "node", test))]
 mod markdown;
 mod model;
 mod node_path;
+pub mod optimize;
+pub mod pipeline;
 mod plans;
+pub mod records;
 pub mod registry;
+pub mod settings;
 mod source;
 mod storage;
+pub mod store;
 mod sync;
+pub mod transform;
 pub mod yaml_config;
 #[cfg(any(feature = "node", test))]
 mod yaml_emit;
@@ -39,6 +48,8 @@ mod cli_models;
 mod cli_project;
 #[cfg(all(feature = "node", not(test)))]
 mod cli_run;
+#[cfg(all(feature = "node", not(test)))]
+mod cli_store;
 #[cfg(any(feature = "node", test))]
 mod cli_text;
 #[cfg(all(feature = "node", not(test)))]
@@ -139,7 +150,7 @@ pub struct KnowledgeBase {
 impl KnowledgeBase {
     /// Inspects the current keyword index without creating a knowledge base.
     pub fn inspect_index(path: &Path, cancel: &Cancellation) -> Result<Option<IndexStatus>> {
-        KeywordIndex::inspect(&path.join(".dunlin-index-v1"), cancel)
+        KeywordIndex::inspect(&path.join(".knowledge-nest-index-v1"), cancel)
     }
 
     pub fn open(path: &Path, cancel: &Cancellation) -> Result<Self> {
@@ -162,17 +173,17 @@ impl KnowledgeBase {
         cancel: &Cancellation,
     ) -> Result<Self> {
         cancel.check()?;
-        let index_path = path.join(".dunlin-index-v1");
+        let index_path = path.join(".knowledge-nest-index-v1");
         std::fs::create_dir_all(&index_path)
             .map_err(|_| Error::Io("Could not create the index directory"))?;
         let index = KeywordIndex::open(
             &index_path,
-            corpus_path.unwrap_or(&path.join(".dunlin-corpus-v1")),
+            corpus_path.unwrap_or(&path.join(".knowledge-nest-corpus-v1")),
             backend,
             keyword,
             cancel,
         )?;
-        let plans = PlanStore::open(&path.join(".dunlin-plans-v1"))?;
+        let plans = PlanStore::open(&path.join(".knowledge-nest-plans-v1"))?;
         cancel.check()?;
         Ok(Self { index, plans })
     }

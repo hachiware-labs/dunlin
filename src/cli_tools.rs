@@ -18,7 +18,7 @@ use crate::wiki_project::{atomic_write, fs_error};
 pub struct CliEnv {
     pub cwd: String,
     pub home: String,
-    /// The `dunlin` package root, which holds `dist/tools` and `tools/rag/parsers`.
+    /// The `knowledge-nest` package root, which holds `dist/tools` and `tools/rag/parsers`.
     pub package: String,
     /// The `tools` folder of the platform package, when it is installed.
     pub native_tools: Option<String>,
@@ -159,7 +159,7 @@ fn hannoy_configuration() -> ConfigValue {
     ])
 }
 
-/// `listedTools()`: the tools that `dunlin add --list` shows.
+/// `listedTools()`: the tools that `nest add --list` shows.
 pub fn listed_tools() -> ConfigValue {
     ConfigValue::Array(
         CATALOG
@@ -190,7 +190,11 @@ const PROTOCOL: f64 = 1.0;
 
 fn binary_name() -> String {
     let suffix = if windows() { ".exe" } else { "" };
-    format!("dunlin-hannoy-{}-{}{suffix}", node_platform(), node_arch())
+    format!(
+        "knowledge-nest-hannoy-{}-{}{suffix}",
+        node_platform(),
+        node_arch()
+    )
 }
 
 /// Why a check of the index tool failed, as the JavaScript errors told them apart.
@@ -293,7 +297,7 @@ fn verified(
         Failure::Missing => coded(
             3,
             "TOOL_REQUIRED",
-            "The hannoy binary is missing. Run dunlin add hannoy.",
+            "The hannoy binary is missing. Run nest add hannoy.",
         ),
         Failure::Other => coded(
             2,
@@ -369,10 +373,12 @@ fn install_index_tool(env: &CliEnv, paths: &Paths) -> Result<(), CliError> {
 
 /// `dataRoot()`: where the managed OCR runtime and models live.
 pub fn data_root(env: &CliEnv) -> Result<String, CliError> {
-    if let Some(value) = std::env::var_os("DUNLIN_OCR_HOME") {
+    if let Some(value) = std::env::var_os("KNOWLEDGE_NEST_OCR_HOME") {
         let value = value.to_string_lossy().into_owned();
         if !node_path::is_absolute(&value) {
-            return Err(CliError::plain("DUNLIN_OCR_HOME must be an absolute path"));
+            return Err(CliError::plain(
+                "KNOWLEDGE_NEST_OCR_HOME must be an absolute path",
+            ));
         }
         return Ok(value);
     }
@@ -385,16 +391,16 @@ pub fn data_root(env: &CliEnv) -> Result<String, CliError> {
         "win32" => {
             let local = absolute("LOCALAPPDATA")
                 .unwrap_or_else(|| node_path::join(&env.home, &["AppData", "Local"]));
-            node_path::join(&local, &["Dunlin", "ocr"])
+            node_path::join(&local, &["Knowledge-Nest", "ocr"])
         }
         "darwin" => node_path::join(
             &env.home,
-            &["Library", "Application Support", "Dunlin", "ocr"],
+            &["Library", "Application Support", "Knowledge-Nest", "ocr"],
         ),
         _ => {
             let data = absolute("XDG_DATA_HOME")
                 .unwrap_or_else(|| node_path::join(&env.home, &[".local", "share"]));
-            node_path::join(&data, &["dunlin", "ocr"])
+            node_path::join(&data, &["knowledge-nest", "ocr"])
         }
     })
 }
@@ -1016,7 +1022,7 @@ fn setup_managed_ocr(env: &CliEnv) -> Result<(), CliError> {
     let platform = platform_key();
     if uv_asset().is_none() {
         return Err(CliError::plain(format!(
-            "Managed GPU OCR is unavailable on {platform}. Use oar-ocr instead: dunlin add oar-ocr."
+            "Managed GPU OCR is unavailable on {platform}. Use oar-ocr instead: nest add oar-ocr."
         )));
     }
     let root = data_root(env)?;
@@ -1258,12 +1264,12 @@ fn setup_oar_ocr(env: &CliEnv) -> Result<(), CliError> {
 // ---------------------------------------------------------------------------------------------
 // Adding and removing tools.
 
-/// `withWriteLock(root, write)`: `.dunlin-write.lock` held while `write` runs.
+/// `withWriteLock(root, write)`: `.knowledge-nest-write.lock` held while `write` runs.
 pub fn with_write_lock<T>(
     root: &str,
     write: impl FnOnce() -> Result<T, CliError>,
 ) -> Result<T, CliError> {
-    let path = node_path::join(root, &[".dunlin-write.lock"]);
+    let path = node_path::join(root, &[".knowledge-nest-write.lock"]);
     let lock = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -1309,7 +1315,7 @@ pub fn change_tool(
         return Err(coded(
             2,
             "TOOL_UNKNOWN",
-            "Use dunlin add --list to see the available tools.",
+            "Use nest add --list to see the available tools.",
         ));
     };
     if !remove
@@ -1321,7 +1327,7 @@ pub fn change_tool(
         return Err(coded(
             2,
             "TOOL_CONFLICT",
-            format!("A project uses one OCR tool. Run dunlin remove {recorded} first."),
+            format!("A project uses one OCR tool. Run nest remove {recorded} first."),
         ));
     }
     let kind = project
@@ -1358,7 +1364,7 @@ pub fn change_tool(
         return Err(coded(
             2,
             "TOOL_IN_USE",
-            format!("Remove references to {name} modules from the Dunlinfile first."),
+            format!("Remove references to {name} modules from the KnowledgeNestfile first."),
         ));
     }
     if !remove {
@@ -1400,7 +1406,7 @@ pub fn change_tool(
             return Err(coded(
                 4,
                 "CONFIG_CHANGED",
-                "The Dunlinfile changed. Retry the tool operation.",
+                "The KnowledgeNestfile changed. Retry the tool operation.",
             ));
         }
         atomic_write(&project.config_path, write_template(&config).as_bytes()).map_err(stage)
@@ -1457,9 +1463,12 @@ fn model_name(value: &ConfigValue) -> Option<String> {
 }
 
 fn global_path(env: &CliEnv) -> String {
-    match std::env::var("DUNLIN_GLOBAL_CONFIG") {
+    match std::env::var("KNOWLEDGE_NEST_GLOBAL_CONFIG") {
         Ok(path) if !path.is_empty() => env.resolve(&path),
-        _ => env.resolve(&node_path::join(&env.home, &[".dunlin", "config.yaml"])),
+        _ => env.resolve(&node_path::join(
+            &env.home,
+            &[".knowledge-nest", "config.yaml"],
+        )),
     }
 }
 
@@ -2023,7 +2032,7 @@ pub fn write_template(config: &ConfigValue) -> String {
         for (stage, example) in [
             (
                 "source",
-                "Additional parser: loader.ocr (requires dunlin add ocr).",
+                "Additional parser: loader.ocr (requires nest add ocr).",
             ),
             (
                 "transform",

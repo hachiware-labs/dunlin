@@ -109,7 +109,7 @@ export function validateWiki(config, file, line) {
   }
   for (const [stage, sequence] of Object.entries(checks)) plan[stage] = validateSequence(stage, 'modules', sequence);
   if (plan.ingress[0]?.ocr === 'loader.ocr' && !projectOcr(config.tools)) {
-    add('REQUIREMENT_MISSING', ['ingress', 'modules', 0, 'with', 'ocr'], 'The ocr tool', 'Run dunlin add ocr.');
+    add('REQUIREMENT_MISSING', ['ingress', 'modules', 0, 'with', 'ocr'], 'The ocr tool', 'Run nest add ocr.');
   }
   plan.content = validateSequence('verify', 'content', [['check.contradictions',
     z.strictObject({ model: z.string(), scope: z.literal('changed_and_related') })]]);
@@ -498,7 +498,7 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
       const supplement = values.supplement;
       if (supplement && (!supplement.trim() || !values.by?.trim())) throw new WikiError(2, 'AUTHOR_REQUIRED', 'Set --by when recording a supplement.');
       const sourceId = 'supplement-' + runId.slice(4);
-      const document = supplement ? { objectId: sourceId + '.txt', url: 'urn:dunlin:' + sourceId, format: 'text',
+      const document = supplement ? { objectId: sourceId + '.txt', url: 'urn:knowledge-nest:' + sourceId, format: 'text',
         content: 'Contributor: ' + values.by + '\nDate: ' + new Date().toISOString() + '\n\n' + supplement } : null;
       const modelRefs = refs.map(({ id, text }) => ({ id, text }));
       if (document) modelRefs.push({ id: refs.length + 1, text: document.content });

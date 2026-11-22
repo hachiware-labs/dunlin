@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import MarkdownIt from 'markdown-it';
 
 const markdownIt = new MarkdownIt({ html: false });
@@ -38,6 +38,6 @@ const samples = [
 
 test('renders Markdown like markdown-it', () => {
   for (const sample of samples) {
-    assert.equal(Dunlin.renderMarkdown(sample), markdownIt.render(sample), JSON.stringify(sample));
+    assert.equal(KnowledgeNest.renderMarkdown(sample), markdownIt.render(sample), JSON.stringify(sample));
   }
 });

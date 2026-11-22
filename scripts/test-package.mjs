@@ -9,7 +9,7 @@ import { platformPackages, stageNative, stageRoot } from './package-layout.mjs';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const output = join(project, 'dist', 'packages');
-const stage = await mkdtemp(join(tmpdir(), 'dunlin-package-'));
+const stage = await mkdtemp(join(tmpdir(), 'knowledge-nest-package-'));
 const cache = join(stage, 'npm-cache');
 const npmCli = process.env.npm_execpath;
 assert.ok(npmCli, 'Run this script via npm run test:package');
@@ -38,11 +38,11 @@ async function installAndSearch(name, tarballs) {
   npm(['install', ...options, ...tarballs], preparation);
   npm(['install', '--offline', ...options, ...tarballs], consumer);
   const installed = await readdir(join(consumer, 'node_modules'));
-  assert.ok(installed.includes('dunlin'));
+  assert.ok(installed.includes('knowledge-nest'));
   // The CLI runs in Rust: the package needs no JavaScript libraries at run time (spec 28.13).
   for (const name of ['cheerio', 'docling.rs', 'markdown-it', 'yaml', 'zod']) assert.ok(!installed.includes(name), name);
 
-  await writeFile(join(consumer, 'source.md'), '# 認証\nOAuthの根拠\n[Policy](dunlin://policies/policy.txt)');
+  await writeFile(join(consumer, 'source.md'), '# 認証\nOAuthの根拠\n[Policy](knowledge-nest://policies/policy.txt)');
   await writeFile(join(consumer, 'policy.txt'), 'Linked policy evidence');
   await copyFile(join(project, 'examples', 'search.mjs'), join(consumer, 'search.mjs'));
   const result = execFileSync(process.execPath, ['search.mjs', './source.md', 'OAuth'], {
@@ -50,15 +50,15 @@ async function installAndSearch(name, tarballs) {
     encoding: 'utf8',
   });
   assert.match(result, /OAuthの根拠/u);
-  const cli = join(consumer, 'node_modules', 'dunlin', 'tools', 'rag', 'cli.mjs');
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(consumer, 'global.yaml') };
+  const cli = join(consumer, 'node_modules', 'knowledge-nest', 'tools', 'rag', 'cli.mjs');
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(consumer, 'global.yaml') };
   const run = (...args) => execFileSync(process.execPath, [cli, ...args], { cwd: consumer, env, encoding: 'utf8' });
   await mkdir(join(consumer, 'manuals'));
   await writeFile(join(consumer, 'manuals', 'guide.md'), '# 認証\n作業手順を確認する。\n');
   run('init', 'mcp', 'kb', '--source', 'manuals');
   run('config', 'set', 'llm', '--model', 'packaged-test-model');
   run('init', 'rag', 'rag', '--source', 'manuals');
-  assert.match(await readFile(join(consumer, 'rag', 'Dunlinfile.yaml'), 'utf8'), /model: packaged-test-model/u);
+  assert.match(await readFile(join(consumer, 'rag', 'KnowledgeNestfile.yaml'), 'utf8'), /model: packaged-test-model/u);
   run('init', 'wiki', 'wiki', '--purpose', 'Wiki');
   run('init', 'para', 'para', '--purpose', 'PARA');
   run('--project', 'kb', 'build');
@@ -74,8 +74,8 @@ async function installAndSearch(name, tarballs) {
   assert.equal(JSON.parse(run('--project', 'kb', 'add', 'hannoy', '--json')).data.version, '0.2.0');
   execFileSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
-    import { Dunlin } from 'dunlin';
-    const database = await Dunlin.open('./knowledge');
+    import { KnowledgeNest } from 'knowledge-nest';
+    const database = await KnowledgeNest.open('./knowledge');
     try {
       const report = await database.optimize({
         evaluationSet: [{ question: 'OAuth 認証', doc: 'docs:source.md', quote: 'OAuthの根拠' }],

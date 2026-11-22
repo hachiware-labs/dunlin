@@ -1,4 +1,4 @@
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 /**
  * Orders the parser modules of a source plan. loader.auto is the fallback, so it is matched last
@@ -23,5 +23,5 @@ export function defaultRoutes(ocr = false) {
 export function routeFiles(routes, files) {
   const byName = new Map(routes.map((route) => [route.name, route]));
   const plain = routes.map(({ name, category, match, ocr }) => ({ name, category, ...(match && { match }), ocr }));
-  return Dunlin.routeFiles(plain, files).map(({ route, kind }) => route === null ? null : { route: byName.get(route), kind });
+  return KnowledgeNest.routeFiles(plain, files).map(({ route, kind }) => route === null ? null : { route: byName.get(route), kind });
 }

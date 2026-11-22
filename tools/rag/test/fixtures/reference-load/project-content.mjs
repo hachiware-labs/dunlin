@@ -5,7 +5,7 @@ import { open, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { revision } from '../cli-reference/authoring/files.mjs';
 import { listFiles } from '../cli-reference/ingest-files.mjs';
@@ -23,13 +23,13 @@ const flushMs = 1000;
 
 /** Runs synchronous writes in one savepoint, which also works inside an open transaction. */
 export function writeTogether(db, run) {
-  db.exec('SAVEPOINT dunlin_cache');
+  db.exec('SAVEPOINT knowledge_nest_cache');
   try {
     run();
-    db.exec('RELEASE dunlin_cache');
+    db.exec('RELEASE knowledge_nest_cache');
   } catch (error) {
-    db.exec('ROLLBACK TO dunlin_cache');
-    db.exec('RELEASE dunlin_cache');
+    db.exec('ROLLBACK TO knowledge_nest_cache');
+    db.exec('RELEASE knowledge_nest_cache');
     throw error;
   }
 }
@@ -61,7 +61,7 @@ export async function scanFolder(sources, { path, exclude }, { name, projectRoot
   for await (const file of listFiles(root)) {
     trialCheckpoint();
     const objectId = relative(root, file).split(sep).join('/');
-    if (projectRoot && file === join(projectRoot, 'Dunlinfile.yaml')) continue;
+    if (projectRoot && file === join(projectRoot, 'KnowledgeNestfile.yaml')) continue;
     if (!exclude.some((pattern) => matchesGlob(objectId, pattern))) files.push({ file, objectId });
   }
   files.sort((a, b) => a.objectId.localeCompare(b.objectId));
@@ -150,7 +150,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
     while (!ready.has(index)) {
       reading ??= (async () => {
         const batch = pending.slice(readFrom, readFrom + readFiles).map(({ file, kind }) => ({ path: file, limit: limitFor(kind) }));
-        const results = await Dunlin.readSourceFiles(batch, readBytes, { signal: trialSignal() });
+        const results = await KnowledgeNest.readSourceFiles(batch, readBytes, { signal: trialSignal() });
         results.forEach((result, offset) => ready.set(readFrom + offset, result));
         readFrom += results.length;
       })().finally(() => { reading = undefined; });
@@ -181,7 +181,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
     flushedAt = Date.now();
     flushing = flushing.then(async () => {
       if (storing.length) {
-        const errors = await Dunlin.storeOriginals(sharedOriginals, storing.map(([sha256, { bytes }]) => ({ sha256, bytes })));
+        const errors = await KnowledgeNest.storeOriginals(sharedOriginals, storing.map(([sha256, { bytes }]) => ({ sha256, bytes })));
         const failed = errors.findIndex((error) => error);
         if (failed >= 0) throw Object.assign(new Error('Could not load ' + storing[failed][1].target + '. ' + errors[failed]), { loadTarget: true });
       }
@@ -310,7 +310,7 @@ export function chunkCorpus({ groups, unicode }, { size, overlap, structure = fa
     let end = start;
     for (let chars = 0; end < pending.length && (end === start || chars < chunkBatchChars); end++) chars += pending[end].document.content.length;
     const batch = pending.slice(start, end);
-    const chunks = Dunlin.chunkDocuments(batch.map(({ document }) => document), options);
+    const chunks = KnowledgeNest.chunkDocuments(batch.map(({ document }) => document), options);
     const store = () => batch.forEach(({ group, index, key }, position) => {
       output[group][index] = chunks[position];
       if (key) cache.write(key, chunks[position]);

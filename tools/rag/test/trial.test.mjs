@@ -15,14 +15,14 @@ const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const runNode = promisify(execFile);
 
 test('limits evaluation trials and restores the configuration after a failed use', { timeout: 120_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-trial-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-trial-'));
   let state;
   // The database closes first, which Windows needs before removing its files.
   t.after(async () => {
     state?.close();
     await rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   const run = (...args) => runNode(process.execPath, [cli, '--project', 'kb', ...args, '--json'], { cwd: root, env, encoding: 'utf8', timeout: 60_000 })
     .then(({ stdout }) => JSON.parse(stdout), (error) => ({ exitCode: error.code, ...JSON.parse(error.stdout) }));
   await runNode(process.execPath, [cli, 'init', 'rag', 'kb', '--no-embedding'], { cwd: root, env });
@@ -32,7 +32,7 @@ test('limits evaluation trials and restores the configuration after a failed use
   const added = await run('eval-data', 'add', '--question', '交換', '--doc', 'guide.md', '--quote', 'ポンプの交換手順です。');
   assert.equal(added.status, 'succeeded', JSON.stringify(added.errors));
   assert.equal((await run('eval-data', 'use', added.data.id)).status, 'succeeded');
-  const configPath = join(root, 'kb', 'Dunlinfile.yaml');
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   // The base build was a trial run.
   config.trial_limits = { max_runs: 2 };
@@ -47,7 +47,7 @@ test('limits evaluation trials and restores the configuration after a failed use
   assert.equal((await run('eval')).status, 'succeeded');
   const status = await run('status');
   assert.equal(status.data.trials.usage.runs, 2);
-  state = new DatabaseSync(join(root, 'kb', '.dunlin', 'state.sqlite'));
+  state = new DatabaseSync(join(root, 'kb', '.knowledge-nest', 'state.sqlite'));
   assert.deepEqual(state.prepare('SELECT operation, status FROM trial_runs ORDER BY started').all().map((row) => ({ ...row })),
     [{ operation: 'build', status: 'succeeded' }, { operation: 'eval', status: 'succeeded' }]);
 
@@ -73,6 +73,6 @@ test('limits evaluation trials and restores the configuration after a failed use
   delete adopted.index.modules.find((module) => module.use === 'index.keyword').with.tokenizer;
   await writeFile(configPath, stringify(adopted));
   const { stderr } = await runNode(process.execPath, [cli, '--project', 'kb', 'status'], { cwd: root, env, encoding: 'utf8', timeout: 60_000 });
-  assert.match(stderr, /^Warning: .*Dunlinfile\.yaml:\d+ index index\.keyword tokenizer — ARG_DEFAULT: Write the default value/m);
+  assert.match(stderr, /^Warning: .*KnowledgeNestfile\.yaml:\d+ index index\.keyword tokenizer — ARG_DEFAULT: Write the default value/m);
   assert.doesNotMatch(stderr, /undefined/);
 });

@@ -1,4 +1,4 @@
-//! Reads `Dunlinfile.yaml` into configuration values and the line of each value.
+//! Reads `KnowledgeNestfile.yaml` into configuration values and the line of each value.
 //!
 //! The rules follow the YAML 1.2 core schema used by the JavaScript `yaml` package that this
 //! replaced: plain scalars become null, booleans, numbers or strings; aliases and duplicate keys

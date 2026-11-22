@@ -1,4 +1,4 @@
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
 import { generatorSettings } from './models.mjs';
@@ -29,7 +29,7 @@ export function answerModel(project, { optional = false } = {}) {
 
 /** Answers a question from a search result in Rust (spec 28.10 step 3b). Returns a Responses API object (spec 27.2). */
 export async function answerQuestion(project, search, query, model, signal) {
-  const result = await untilAborted(Dunlin.answerQuestion({ plan: moduleSettings(project.plan.ask), search, query, model: model.settings },
+  const result = await untilAborted(KnowledgeNest.answerQuestion({ plan: moduleSettings(project.plan.ask), search, query, model: model.settings },
     { signal }), signal);
   if (result.status === 'done') return result.output;
   const { code, message, exitCode, module } = result.error;

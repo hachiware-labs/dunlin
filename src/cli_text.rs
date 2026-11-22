@@ -115,7 +115,7 @@ fn scalar(value: &ConfigValue) -> Option<String> {
     }
 }
 
-/// Keys stay as written, since people type them back into Dunlinfile.yaml.
+/// Keys stay as written, since people type them back into KnowledgeNestfile.yaml.
 fn label(key: &str) -> String {
     key.to_owned()
 }
@@ -140,18 +140,18 @@ fn defaults_text(data: &ConfigValue) -> String {
     let mut lines = Vec::new();
     if let Some(section) = present(data.get("applied")) {
         lines.push(format!(
-            "Applied the current defaults of {} to Dunlinfile.yaml.",
+            "Applied the current defaults of {} to KnowledgeNestfile.yaml.",
             js_string(Some(section))
         ));
     }
     if differences.is_empty() {
         if lines.is_empty() {
-            lines.push("Dunlinfile.yaml uses the current defaults.".into());
+            lines.push("KnowledgeNestfile.yaml uses the current defaults.".into());
         }
         return lines.join("\n");
     }
     lines.push(format!(
-        "{} of Dunlinfile.yaml {} from the current defaults:",
+        "{} of KnowledgeNestfile.yaml {} from the current defaults:",
         plural(differences.len(), "section", "sections"),
         if differences.len() == 1 {
             "differs"
@@ -171,7 +171,7 @@ fn defaults_text(data: &ConfigValue) -> String {
         }
     }
     lines.push(
-        "Run dunlin defaults --apply <section> to use the defaults of a section; --json shows every setting."
+        "Run nest defaults --apply <section> to use the defaults of a section; --json shows every setting."
             .into(),
     );
     lines.join("\n")
@@ -358,11 +358,11 @@ fn build_text(command: &str, data: &ConfigValue) -> String {
             lines.push("Now serving this build.".to_owned());
         } else {
             lines.push(format!(
-                "The project still serves its previous build. Run dunlin use {} to serve this one.",
+                "The project still serves its previous build. Run nest use {} to serve this one.",
                 field(data, "build_id")
             ));
         }
-        lines.push("Next: dunlin search \"<words>\" or dunlin ask \"<question>\"".to_owned());
+        lines.push("Next: nest search \"<words>\" or nest ask \"<question>\"".to_owned());
     }
     lines.join("\n")
 }
@@ -372,7 +372,7 @@ fn search_text(data: &ConfigValue) -> String {
     let context = data.get("context");
     let body = context.and_then(|context| context.get("text"));
     if results.is_empty() || !truthy(body) {
-        return "No matches. Try other words, or check dunlin status for the serving build.".into();
+        return "No matches. Try other words, or check nest status for the serving build.".into();
     }
     let context = context.cloned().unwrap_or_default();
     let mut out = js_string(body).trim_end_matches('\n').to_owned();
@@ -419,7 +419,7 @@ pub fn answer_text(response: &ConfigValue, search: Option<&ConfigValue>) -> Stri
         .unwrap_or_default();
     let answer = js_string(content.get("text"));
     let annotations = items(content.get("annotations"));
-    let citations = items(response.get("dunlin_citations"));
+    let citations = items(response.get("knowledge_nest_citations"));
     let results = search
         .map(|search| items(search.get("results")))
         .unwrap_or_default();
@@ -489,7 +489,7 @@ fn push_markers(out: &mut String, markers: &[(usize, usize)], position: usize) {
 
 fn status_text(data: &ConfigValue) -> String {
     if !truthy(data.get("build_id")) {
-        return "No build yet. Add documents and run dunlin build.".into();
+        return "No build yet. Add documents and run nest build.".into();
     }
     let mut rows = vec![
         row("Build", field(data, "build_id")),
@@ -527,7 +527,7 @@ fn status_text(data: &ConfigValue) -> String {
         rows.push(row(
             "Changed",
             format!(
-                "{} in Dunlinfile.yaml since this build. Run dunlin build to apply.",
+                "{} in KnowledgeNestfile.yaml since this build. Run nest build to apply.",
                 changed.join(", ")
             ),
         ));
@@ -564,7 +564,7 @@ fn status_text(data: &ConfigValue) -> String {
 
 fn validate_text(data: &ConfigValue) -> String {
     let mut lines = vec![format!(
-        "Dunlinfile.yaml is valid ({} project).",
+        "KnowledgeNestfile.yaml is valid ({} project).",
         field(data, "type")
     )];
     if let Some(ConfigValue::Object(stages)) = data.get("stages") {
@@ -604,7 +604,7 @@ fn modules_text(data: &ConfigValue) -> String {
                 ));
             }
             lines.push(String::new());
-            lines.push("Run dunlin modules describe <name> for the arguments of a module.".into());
+            lines.push("Run nest modules describe <name> for the arguments of a module.".into());
             lines.join("\n")
         }
         module => {
@@ -689,7 +689,7 @@ fn tools_text(data: &ConfigValue) -> String {
         })
         .collect();
     lines.insert(0, "Tools you can add:".into());
-    lines.push("Run dunlin add <tool> to install one.".into());
+    lines.push("Run nest add <tool> to install one.".into());
     lines.join("\n")
 }
 
@@ -784,7 +784,7 @@ fn report_text(data: &ConfigValue, evaluated: bool) -> String {
         }
     }
     if evaluated {
-        lines.push(format!("Next: dunlin report show {name}"));
+        lines.push(format!("Next: nest report show {name}"));
     }
     lines.join("\n")
 }
@@ -792,7 +792,7 @@ fn report_text(data: &ConfigValue, evaluated: bool) -> String {
 fn report_list_text(data: &ConfigValue) -> String {
     let groups = items(Some(data));
     if groups.is_empty() {
-        return "No reports yet. Run dunlin eval.".into();
+        return "No reports yet. Run nest eval.".into();
     }
     let mut lines = Vec::new();
     for group in groups {
@@ -960,7 +960,7 @@ fn eval_data_text(action: &str, data: &ConfigValue) -> String {
         "list" => {
             let datasets = items(data.get("datasets"));
             if datasets.is_empty() {
-                return "No evaluation data yet. Add a case with dunlin eval-data add --question <text> --doc <file> --quote <text>.".into();
+                return "No evaluation data yet. Add a case with nest eval-data add --question <text> --doc <file> --quote <text>.".into();
             }
             let selected = field(data, "selected");
             let mut rows = vec![vec![
@@ -983,15 +983,19 @@ fn eval_data_text(action: &str, data: &ConfigValue) -> String {
                 ]);
             }
             let mut lines = grid(&rows, "");
-            lines.push("* the evaluation data that dunlin eval uses".into());
+            lines.push("* the evaluation data that nest eval uses".into());
             lines.join("\n")
         }
         "show" if present(data.get("cases")).is_some() => {
             let mut lines = vec![format!("Evaluation data {}", field(data, "id"))];
             for case in items(data.get("cases")) {
                 lines.push(String::new());
+                let kind = match present(case.get("kind")) {
+                    Some(_) => format!(", {}", field(case, "kind")),
+                    None => String::new(),
+                };
                 lines.push(format!(
-                    "{}  [{}, {}]",
+                    "{}  [{}, {}{kind}]",
                     field(case, "id"),
                     field(case, "split"),
                     field(case, "state")
@@ -1016,7 +1020,7 @@ fn evidence_map_text(action: &str, data: &ConfigValue) -> String {
         "list" => {
             let maps = items(Some(data));
             if maps.is_empty() {
-                return "No evidence maps yet. Run dunlin evidence-map create.".into();
+                return "No evidence maps yet. Run nest evidence-map create.".into();
             }
             maps.iter()
                 .map(|map| field(map, "id"))
@@ -1090,9 +1094,9 @@ fn mcp_config_text(data: &ConfigValue, context: Option<&ConfigValue>) -> String 
         })
         .collect();
     let name = if name.trim_matches('-').is_empty() {
-        "dunlin".to_owned()
+        "knowledge-nest".to_owned()
     } else {
-        format!("dunlin-{}", name.trim_matches('-'))
+        format!("knowledge-nest-{}", name.trim_matches('-'))
     };
     let server = match data.get("url") {
         Some(url) => crate::index_stage::object(vec![
@@ -1158,7 +1162,7 @@ pub fn text_output(
         "status" => status_text(data),
         "validate" if present(data.get("stages")).is_some() => validate_text(data),
         "validate" => format!(
-            "Dunlinfile.yaml is valid ({} project).",
+            "KnowledgeNestfile.yaml is valid ({} project).",
             field(data, "type")
         ),
         "modules" => modules_text(data),
@@ -1205,7 +1209,7 @@ pub fn text_output(
         "evidence-map" => evidence_map_text(kind, data),
         "serve" => mcp_config_text(data, context),
         "query" if string_field(data, "status") == Some("insufficient_evidence") => {
-            "The wiki pages do not answer this question. Add sources with dunlin ingress, or ask another way.".into()
+            "The wiki pages do not answer this question. Add sources with nest ingress, or ask another way.".into()
         }
         "query" if data.get("answer").is_some() => {
             let mut lines = vec![field(data, "answer")];
@@ -1219,7 +1223,7 @@ pub fn text_output(
             }
             if let Some(id) = string_field(data, "id").filter(|id| !id.is_empty()) {
                 lines.push(String::new());
-                lines.push(format!("Save it as a page: dunlin save-answer {id} <page> <title>"));
+                lines.push(format!("Save it as a page: nest save-answer {id} <page> <title>"));
             }
             lines.join("\n")
         }
@@ -1257,7 +1261,7 @@ mod tests {
         let response = json(
             r#"{"output":[{"content":[{"text":"点検は毎月。\n停止する。","annotations":[
             {"file_id":"docs:a.md","index":6},{"file_id":"docs:a.md","index":6},{"file_id":"docs:b.md","index":12}]}]}],
-            "dunlin_citations":[{"annotation_index":0,"source_range":[0,10]},{"annotation_index":1,"source_range":[0,10]},
+            "knowledge_nest_citations":[{"annotation_index":0,"source_range":[0,10]},{"annotation_index":1,"source_range":[0,10]},
             {"annotation_index":2,"source_range":[0,5]}]}"#,
         );
         let search = json(
@@ -1298,7 +1302,7 @@ mod tests {
             json(r#"{"command":"node","args":["cli.mjs","serve","--project","C:\\work\\my kb"]}"#);
         let expected = r#"{
   "mcpServers": {
-    "dunlin-my-kb": {
+    "knowledge-nest-my-kb": {
       "command": "node",
       "args": [
         "cli.mjs",

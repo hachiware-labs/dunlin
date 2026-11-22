@@ -2,9 +2,9 @@ import { addAbortListener } from 'node:events';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 
-import { DunlinError } from './types.js';
+import { KnowledgeNestError } from './types.js';
 import type {
-  ChunkDocument, ChunkOptions, CliRunOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, WikiCommandRequest, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvalDataRequest, EvalDataOutcome, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, DunlinErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
+  ChunkDocument, ChunkOptions, CliRunOptions, ConfigIssue, LoadCorpusFile, LoadCorpusHost, LoadCorpusRequest, LoadedCorpus, WikiCommandRequest, ParserRoute, SourceStageOutcome, SourceStageRequest, TransformStageOutcome, TransformStageRequest, IndexStageHost, IndexStageOutcome, IndexStageRequest, BuildCommandHost, BuildCommandOutcome, BuildCommandRequest, TagBuildHost, TagBuildOutcome, TagBuildRequest, ProjectSearchHost, ProjectSearchOutcome, ProjectSearchRequest, EvaluateProjectOutcome, EvaluateProjectRequest, EvidenceMapOutcome, EvidenceMapRequest, EvaluationReportsRequest, EvalDataRequest, EvalDataOutcome, AdoptBuildHost, AdoptBuildRequest, EvaluationStatusRequest, DictionaryEvaluationRequest, DictionaryMissesRequest, ReportOutcome, McpHost, McpSearchArguments, ServeProjectHost, ServeProjectRequest, AnswerRequest, AnswerOutcome, ConfigValidation, CorpusBackend, CorpusDocument, DeltaSyncOutcome, DocumentRef, DocumentSnapshot, KnowledgeNestErrorCode, EvaluationOptions, EvaluationReport, Evidence, EvidenceExcerpt, ExploreOptions, ExploreOutcome, FilesystemSource, IndexStatus, McpHandle,
   McpOptions, ModuleArgResult, ModuleDescription, OpenOptions, OperationOptions, OptimizationReport, ParsedConfig, OptimizeOptions, ReadOutcome, RetrievalMethod,
   RetrievalPlan, SearchOptions, SearchOutcome, SourceDocument, SourceFileRead, SyncOutcome, TextChunk,
 } from './types.js';
@@ -105,9 +105,9 @@ function native(): NativeBinding {
   try {
     return binding ??= require('./native.cjs') as NativeBinding;
   } catch {
-    throw new DunlinError(
+    throw new KnowledgeNestError(
       'NATIVE_UNAVAILABLE',
-      `Could not load the Dunlin addon for ${process.platform}/${process.arch}, Node ${process.versions.node}. Install a package built for this platform.`,
+      `Could not load the Knowledge-Nest addon for ${process.platform}/${process.arch}, Node ${process.versions.node}. Install a package built for this platform.`,
     );
   }
 }
@@ -154,7 +154,7 @@ async function cancellable<T>(
   returnPartial = false,
 ): Promise<T> {
   if (signal?.aborted && !returnPartial) {
-    throw new DunlinError('ABORTED', 'Operation aborted');
+    throw new KnowledgeNestError('ABORTED', 'Operation aborted');
   }
   const cancel = new (native().NativeCancellation)();
   if (signal?.aborted) {
@@ -170,22 +170,22 @@ async function cancellable<T>(
   }
 }
 
-function translateNativeError(error: unknown): DunlinError {
-  if (error instanceof DunlinError) return error;
+function translateNativeError(error: unknown): KnowledgeNestError {
+  if (error instanceof KnowledgeNestError) return error;
   const match = error instanceof Error && /^(LOAD_FAILED|INVALID_ARGUMENT|IO_ERROR|BUSY|ABORTED|TIMEOUT|NOT_FOUND|STALE_EVIDENCE|INDEX_ERROR|PLAN_NOT_FOUND|PLAN_ERROR)\|(.+)$/u.exec(error.message);
-  return match ? new DunlinError(match[1] as DunlinErrorCode, match[2]) : new DunlinError('INDEX_ERROR', 'The native operation failed');
+  return match ? new KnowledgeNestError(match[1] as KnowledgeNestErrorCode, match[2]) : new KnowledgeNestError('INDEX_ERROR', 'The native operation failed');
 }
 
 /** JSON for configuration values. NaN and infinities, which JSON lacks, travel as markers. */
 function configJson(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) =>
-    typeof item === 'number' && !Number.isFinite(item) ? { $dunlin_nonfinite: String(item) } : item) ?? 'null';
+    typeof item === 'number' && !Number.isFinite(item) ? { $knowledge_nest_nonfinite: String(item) } : item) ?? 'null';
 }
 
 function nativeJson(run: () => string): unknown {
   try {
     return JSON.parse(run(), (_key, value: unknown) =>
-      value && typeof value === 'object' && '$dunlin_nonfinite' in value ? Number((value as { $dunlin_nonfinite: string }).$dunlin_nonfinite) : value);
+      value && typeof value === 'object' && '$knowledge_nest_nonfinite' in value ? Number((value as { $knowledge_nest_nonfinite: string }).$knowledge_nest_nonfinite) : value);
   } catch (error) {
     throw translateNativeError(error);
   }
@@ -193,28 +193,28 @@ function nativeJson(run: () => string): unknown {
 
 function absolutePath(path: string): string {
   if (typeof path !== 'string' || path.length === 0 || path.includes('\0')) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected a nonempty filesystem path');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected a nonempty filesystem path');
   }
   return resolve(path);
 }
 
 function filesystemPath(source: FilesystemSource): string {
   if (source?.kind !== 'filesystem' || typeof source.id !== 'string') {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected a filesystem source with a source ID');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected a filesystem source with a source ID');
   }
   return absolutePath(source.path);
 }
 
 function documentsRequest(sourceId: string, documents: readonly SourceDocument[]): string {
   if (typeof sourceId !== 'string' || !Array.isArray(documents)) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected a source ID and an array of documents');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected a source ID and an array of documents');
   }
   return JSON.stringify(Array.from(documents, (document: SourceDocument) => {
     const input: Partial<SourceDocument> = document ?? {};
     const { objectId, url, format, content } = input;
     if (typeof objectId !== 'string' || typeof url !== 'string'
       || typeof format !== 'string' || typeof content !== 'string') {
-      throw new DunlinError('INVALID_ARGUMENT', 'Expected document objectId, url, format, and content strings');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected document objectId, url, format, and content strings');
     }
     return { objectId, url, format, content, corpus: input.corpus, modifiedAtMs: input.modifiedAtMs, chunks: input.chunks };
   }));
@@ -222,20 +222,20 @@ function documentsRequest(sourceId: string, documents: readonly SourceDocument[]
 
 function integer(value: number, min: number, max: number, name: string): void {
   if (!Number.isSafeInteger(value) || value < min || value > max) {
-    throw new DunlinError('INVALID_ARGUMENT', `${name} must be an integer between ${min} and ${max}`);
+    throw new KnowledgeNestError('INVALID_ARGUMENT', `${name} must be an integer between ${min} and ${max}`);
   }
 }
 
 function validateQuery(query: string): void {
   if (typeof query !== 'string' || Buffer.byteLength(query) > 4096) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected a query of at most 4096 UTF-8 bytes');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected a query of at most 4096 UTF-8 bytes');
   }
 }
 
 function validateScope(ids: readonly string[] | undefined): void {
   if (ids !== undefined && (!Array.isArray(ids) || ids.length < 1 || ids.length > 100
     || Array.from(ids).some((id) => typeof id !== 'string' || !/^[a-zA-Z0-9_.-]{1,64}$/u.test(id)))) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected 1–100 valid source IDs');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected 1–100 valid source IDs');
   }
 }
 
@@ -245,20 +245,20 @@ function evaluationRequest(options: EvaluationOptions, p95LatencyBudgetMs?: numb
   integer(repetitions, 1, 20, 'repetitions');
   if (shortEvidenceChars !== undefined) integer(shortEvidenceChars, 0, 10_000, 'shortEvidenceChars');
   if (minCoverage !== undefined && !(typeof minCoverage === 'number' && minCoverage > 0 && minCoverage <= 1)) {
-    throw new DunlinError('INVALID_ARGUMENT', 'minCoverage must be above 0 and at most 1');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'minCoverage must be above 0 and at most 1');
   }
   const input = typeof evaluationSet === 'string' ? absolutePath(evaluationSet) : evaluationSet;
   if (typeof input !== 'string' && (!Array.isArray(input) || input.length < 1 || input.length > 1000)) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected a JSONL path or 1–1000 evaluation cases');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected a JSONL path or 1–1000 evaluation cases');
   }
   let serialized: string;
   try {
     serialized = JSON.stringify({ evaluationSet: input, limit, repetitions, shortEvidenceChars, minCoverage, p95LatencyBudgetMs });
   } catch {
-    throw new DunlinError('INVALID_ARGUMENT', 'Evaluation options must be JSON serializable');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Evaluation options must be JSON serializable');
   }
   if (Buffer.byteLength(serialized) > 4 * 1024 * 1024) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Evaluation options exceed 4 MiB');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Evaluation options exceed 4 MiB');
   }
   return serialized;
 }
@@ -270,7 +270,7 @@ function evidenceInput(evidence: Evidence): Evidence {
     || typeof source.sourceId !== 'string' || typeof source.objectId !== 'string'
     || typeof source.url !== 'string' || typeof source.version !== 'string'
     || !(source.modifiedAtMs === null || Number.isSafeInteger(source.modifiedAtMs))) {
-    throw new DunlinError('INVALID_ARGUMENT', 'Expected source evidence from search');
+    throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected source evidence from search');
   }
   integer(range.startLine, 1, 2 ** 20, 'startLine');
   integer(range.endLine, range.startLine, 2 ** 20, 'endLine');
@@ -291,7 +291,7 @@ function evidenceInput(evidence: Evidence): Evidence {
   };
 }
 
-export class Dunlin {
+export class KnowledgeNest {
   #database: NativeDatabase | undefined;
   #lifetime = new AbortController();
   #pending = new Set<Promise<unknown>>();
@@ -303,17 +303,17 @@ export class Dunlin {
 
   static async open(path: string, {
     signal, corpusBackend, corpusDirectory, keywordNgrams, keywordBigrams, keywordJapanese,
-  }: OpenOptions = {}): Promise<Dunlin> {
+  }: OpenOptions = {}): Promise<KnowledgeNest> {
     const directory = absolutePath(path);
     if (corpusBackend !== undefined && corpusBackend !== 'sqlite' && corpusBackend !== 'json') {
-      throw new DunlinError('INVALID_ARGUMENT', 'Expected corpus backend sqlite or json');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected corpus backend sqlite or json');
     }
     const corpusPath = corpusDirectory === undefined ? undefined : absolutePath(corpusDirectory);
     const dictionary = keywordJapanese?.userDictionary;
     const japanese = keywordJapanese === undefined ? undefined : dictionary === undefined ? {} : { userDictionary: absolutePath(dictionary) };
     const database = await cancellable(signal, (cancel) =>
       native().openNative(directory, cancel, corpusBackend, keywordNgrams, keywordBigrams, corpusPath, japanese));
-    return new Dunlin(database);
+    return new KnowledgeNest(database);
   }
 
   /** Inspects an existing keyword index without creating it. */
@@ -343,14 +343,14 @@ export class Dunlin {
   }
 
   /**
-   * Read Dunlinfile.yaml text with the YAML 1.2 core schema. Returns the configuration and the
+   * Read KnowledgeNestfile.yaml text with the YAML 1.2 core schema. Returns the configuration and the
    * start line of every value, or the line and message of a syntax error. Aliases, duplicate keys
    * and more than one document are errors. NaN and infinities are returned as numbers.
    */
   static parseConfig(text: string): ParsedConfig {
     try {
       return JSON.parse(native().parseConfig(text), (_key, value: unknown) =>
-        value && typeof value === 'object' && '$dunlin_nonfinite' in value ? Number((value as { $dunlin_nonfinite: string }).$dunlin_nonfinite) : value) as ParsedConfig;
+        value && typeof value === 'object' && '$knowledge_nest_nonfinite' in value ? Number((value as { $knowledge_nest_nonfinite: string }).$knowledge_nest_nonfinite) : value) as ParsedConfig;
     } catch (error) {
       throw translateNativeError(error);
     }
@@ -358,7 +358,7 @@ export class Dunlin {
 
   /**
    * Validate an MCP or RAG configuration with the module registry (spec 26.8). `lines` lists the
-   * line of each value as Dunlin.parseConfig returns them; `tools` lists the bundled tool versions.
+   * line of each value as KnowledgeNest.parseConfig returns them; `tools` lists the bundled tool versions.
    */
   static validateConfig(config: unknown, options: { file: string; lines?: [(string | number)[], number][]; tools?: [string, string][]; cwd?: string }): ConfigValidation {
     return nativeJson(() => native().validateConfig(configJson(config), JSON.stringify({ cwd: process.cwd(), ...options }))) as ConfigValidation;
@@ -573,7 +573,7 @@ export class Dunlin {
   }
 
   /**
-   * Runs the `dunlin` CLI in Rust with `process.argv.slice(2)` (spec 28.13 step 6c). It prints the
+   * Runs the `nest` CLI in Rust with `process.argv.slice(2)` (spec 28.13 step 6c). It prints the
    * result and resolves to the exit code. `serving` hears when a server starts and stops, and
    * `opened` each index a server opens. Aborting `signal` stops a running server.
    */
@@ -618,10 +618,10 @@ export class Dunlin {
    */
   static readModuleArgs(name: string, args: Record<string, unknown>): ModuleArgResult[] {
     const text = JSON.stringify(args, (_key, value: unknown) =>
-      typeof value === 'number' && !Number.isFinite(value) ? { $dunlin_nonfinite: String(value) } : value);
+      typeof value === 'number' && !Number.isFinite(value) ? { $knowledge_nest_nonfinite: String(value) } : value);
     try {
       return JSON.parse(native().readModuleArgs(name, text), (_key, value: unknown) =>
-        value && typeof value === 'object' && '$dunlin_nonfinite' in value ? Number((value as { $dunlin_nonfinite: string }).$dunlin_nonfinite) : value) as ModuleArgResult[];
+        value && typeof value === 'object' && '$knowledge_nest_nonfinite' in value ? Number((value as { $knowledge_nest_nonfinite: string }).$knowledge_nest_nonfinite) : value) as ModuleArgResult[];
     } catch (error) {
       throw translateNativeError(error);
     }
@@ -701,7 +701,7 @@ export class Dunlin {
 
   async removeSource(id: string, { signal }: OperationOptions = {}): Promise<void> {
     if (typeof id !== 'string') {
-      throw new DunlinError('INVALID_ARGUMENT', 'Expected a source ID');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected a source ID');
     }
     return this.#run(signal, (database, cancel) => database.removeSource(id, cancel));
   }
@@ -711,7 +711,7 @@ export class Dunlin {
     validateQuery(query);
     validateScope(sourceIds);
     if (mode !== 'auto' && mode !== 'keyword' && mode !== 'coverage') {
-      throw new DunlinError('INVALID_ARGUMENT', 'Unknown retrieval mode');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'Unknown retrieval mode');
     }
     if (limit !== undefined) {
       integer(limit, 1, 100, 'limit');
@@ -750,10 +750,10 @@ export class Dunlin {
   async optimize(options: OptimizeOptions): Promise<OptimizationReport> {
     const { objective, p95LatencyBudgetMs } = options;
     if (objective !== undefined && objective !== 'maximize-relevance') {
-      throw new DunlinError('INVALID_ARGUMENT', 'Unknown optimization objective');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'Unknown optimization objective');
     }
     if (!Number.isFinite(p95LatencyBudgetMs) || p95LatencyBudgetMs <= 0) {
-      throw new DunlinError('INVALID_ARGUMENT', 'P95 latency budget must be finite and positive');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'P95 latency budget must be finite and positive');
     }
     const request = evaluationRequest(options, p95LatencyBudgetMs);
     return this.#run(options.signal, (database, cancel) => database.optimize(request, cancel));
@@ -766,7 +766,7 @@ export class Dunlin {
   /** Persists the plan ID and switches subsequent default searches on this handle. */
   async activatePlan(id: string, { signal }: OperationOptions = {}): Promise<RetrievalPlan> {
     if (typeof id !== 'string' || id.length === 0 || id.length > 100) {
-      throw new DunlinError('INVALID_ARGUMENT', 'Expected a retrieval plan ID');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected a retrieval plan ID');
     }
     return this.#run(signal, (database, cancel) => database.activatePlan(id, cancel));
   }
@@ -782,7 +782,7 @@ export class Dunlin {
 
   async getDocument(document: DocumentRef, { signal }: OperationOptions = {}): Promise<ReadOutcome | null> {
     if (typeof document?.sourceId !== 'string' || typeof document.objectId !== 'string' || !document.objectId) {
-      throw new DunlinError('INVALID_ARGUMENT', 'Expected source and object IDs');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected source and object IDs');
     }
     return this.#run(signal, (database, cancel) => database.getDocument(document.sourceId, document.objectId, cancel));
   }
@@ -795,7 +795,7 @@ export class Dunlin {
   ): Promise<CorpusDocument | null> {
     if (typeof document?.sourceId !== 'string' || typeof document.objectId !== 'string' || !document.objectId
       || typeof version !== 'string' || !/^[a-f0-9]{64}$/u.test(version)) {
-      throw new DunlinError('INVALID_ARGUMENT', 'Expected source and object IDs and a document version');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'Expected source and object IDs and a document version');
     }
     return this.#run(signal, (database, cancel) => database.getCorpusDocument(document.sourceId, document.objectId, version, cancel));
   }
@@ -860,7 +860,7 @@ export class Dunlin {
   async serveMcp({ transport, search, read, searchOnly }: McpOptions = { transport: 'stdio' }): Promise<McpHandle> {
     const database = this.#requireDatabase();
     if (transport !== 'stdio') {
-      throw new DunlinError('INVALID_ARGUMENT', 'The supported MCP transport is stdio');
+      throw new KnowledgeNestError('INVALID_ARGUMENT', 'The supported MCP transport is stdio');
     }
     const cancel = new (native().NativeCancellation)();
     const host: McpHost = {
@@ -890,7 +890,7 @@ export class Dunlin {
 
   #requireDatabase(): NativeDatabase {
     if (!this.#database) {
-      throw new DunlinError('CLOSED', 'Dunlin is closed');
+      throw new KnowledgeNestError('CLOSED', 'Knowledge-Nest is closed');
     }
     return this.#database;
   }

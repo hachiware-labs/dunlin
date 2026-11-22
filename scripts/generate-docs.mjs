@@ -5,10 +5,10 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
-const projectCommands = Dunlin.cliCommands();
-const describeModules = () => Dunlin.describeModules();
+const projectCommands = KnowledgeNest.cliCommands();
+const describeModules = () => KnowledgeNest.describeModules();
 
 const docs = new URL('../docs/', import.meta.url);
 const cli = fileURLToPath(new URL('../tools/rag/cli.mjs', import.meta.url));
@@ -18,8 +18,8 @@ const section = (...parts) => parts.join('\n\n');
 const types = ['mcp', 'rag', 'wiki', 'para'];
 const commandGroups = [
   ['初期化と設定', 'init config validate defaults modules add remove'],
-  ['構築と提供', 'source transform index build search ask serve status use tag'],
-  ['評価と辞書', 'eval-data eval report dictionary evidence-map'],
+  ['構築と提供', 'source transform index build search ask serve status use tag list release'],
+  ['評価と辞書', 'eval-data eval report dictionary evidence-map optimize results'],
   ['Wiki・PARA の操作', 'ingress query verify issue rules progress cite instruct save-answer archive undo'],
 ];
 
@@ -28,7 +28,7 @@ function cliGuide() {
   if (new Set(covered).size !== covered.length || Object.keys(projectCommands).length !== covered.length
     || covered.some((name) => !Object.hasOwn(projectCommands, name))) throw new Error('Update the CLI command groups.');
   return section('# CLI リファレンス', generated,
-    'コマンドはプロジェクト内で実行します。別の場所からは `dunlin --project <directory> <command>` で対象を指定できます。`<…>` は入力する値、`[…]` は省略可能な指定です。各コマンドの使用法は `dunlin <command> --help` でも確認できます。`dunlin --help` はコマンドの一覧と説明を、`dunlin --version` は版を表示します。`--json` を付けないときは、結果を人が読む短い文で表示します。すべての項目が必要なときは `--json` を付けます。打ち間違えたコマンド、オプション、動作には、近い候補を示します。',
+    'コマンドはプロジェクト内で実行します。別の場所からは `nest --project <directory> <command>` で対象を指定できます。`<…>` は入力する値、`[…]` は省略可能な指定です。各コマンドの使用法は `nest <command> --help` でも確認できます。`nest --help` はコマンドの一覧と説明を、`nest --version` は版を表示します。`--json` を付けないときは、結果を人が読む短い文で表示します。すべての項目が必要なときは `--json` を付けます。打ち間違えたコマンド、オプション、動作には、近い候補を示します。',
     ...commandGroups.map(([title, names]) => section('## ' + title, block('text', names.split(' ').map((name) => projectCommands[name])))),
     '## 主な引数',
     [
@@ -44,41 +44,41 @@ function cliGuide() {
     ].join('\n'),
     '## 評価のサブコマンドと引数',
     block('text', [
-      'dunlin eval-data add --question <text> --doc <document> --quote <text> [--prefix <text>] [--suffix <text>] [--page <n>] [--heading <text>]',
-      'dunlin eval-data add --question <text> --from-search <file> --hit <n>',
-      'dunlin eval-data import <file>',
-      'dunlin eval-data export <dataset> --output <file>',
-      'dunlin eval-data list',
-      'dunlin eval-data show <dataset>',
-      'dunlin eval-data split --test-ratio <ratio> --seed <integer>',
-      'dunlin eval-data generate [--model <alias>] [--doc <document>] [--count <n>]',
-      'dunlin eval-data review <dataset> [--case <id>... --state reviewed|rejected --reviewer <name> --reviewer-type human|agent]',
-      'dunlin eval-data sync <dataset>',
-      'dunlin eval-data diff <dataset-a> <dataset-b>',
-      'dunlin eval-data tag <name> <dataset>',
-      'dunlin eval-data use <dataset>',
+      'nest eval-data add --question <text> --doc <document> --quote <text> [--prefix <text>] [--suffix <text>] [--page <n>] [--heading <text>]',
+      'nest eval-data add --question <text> --from-search <file> --hit <n>',
+      'nest eval-data import <file>',
+      'nest eval-data export <dataset> --output <file>',
+      'nest eval-data list',
+      'nest eval-data show <dataset>',
+      'nest eval-data split --test-ratio <ratio> --seed <integer>',
+      'nest eval-data generate [--model <alias>] [--doc <document>] [--count <n>] [--kind <lexical|paraphrase|identifier>]',
+      'nest eval-data review <dataset> [--case <id>... --state reviewed|rejected --reviewer <name> --reviewer-type human|agent]',
+      'nest eval-data sync <dataset>',
+      'nest eval-data diff <dataset-a> <dataset-b>',
+      'nest eval-data tag <name> <dataset>',
+      'nest eval-data use <dataset>',
       '',
-      'dunlin report show <report>',
-      'dunlin report list [--split dev|test]',
-      'dunlin report compare <report-a> <report-b>',
+      'nest report show <report>',
+      'nest report list [--split dev|test]',
+      'nest report compare <report-a> <report-b>',
       '',
-      'dunlin evidence-map create [--build <build>]',
-      'dunlin evidence-map list',
-      'dunlin evidence-map show <map-id>',
-      'dunlin evidence-map export <map-id> --output <file>',
-      'dunlin evidence-map import <file> [--build <build>]',
-      'dunlin evidence-map confirm <map-id> --key <position-id> --start <byte> --end <byte> --reviewer <name> [--build <build>]',
+      'nest evidence-map create [--build <build>]',
+      'nest evidence-map list',
+      'nest evidence-map show <map-id>',
+      'nest evidence-map export <map-id> --output <file>',
+      'nest evidence-map import <file> [--build <build>]',
+      'nest evidence-map confirm <map-id> --key <position-id> --start <byte> --end <byte> --reviewer <name> [--build <build>]',
     ]),
     '## サブコマンドの例',
     block('sh', [
-      'dunlin modules describe index.keyword --json',
-      'dunlin build --dry-run --json',
-      'dunlin eval-data add --question "点検はいつですか" --doc "docs:maintenance.md" --quote "ポンプの点検は毎月最初の営業日に行う。"',
-      'dunlin eval --tag baseline',
-      'dunlin report show baseline',
-      'dunlin report compare baseline trial-eval',
-      'dunlin evidence-map export MAP_ID --output evidence.json',
-      'dunlin verify --content',
+      'nest modules describe index.keyword --json',
+      'nest build --dry-run --json',
+      'nest eval-data add --question "点検はいつですか" --doc "docs:maintenance.md" --quote "ポンプの点検は毎月最初の営業日に行う。"',
+      'nest eval --tag baseline',
+      'nest report show baseline',
+      'nest report compare baseline trial-eval',
+      'nest evidence-map export MAP_ID --output evidence.json',
+      'nest verify --content',
     ]),
     '`report compare` に渡すのは評価レポートの2つのタグまたは ID です。`search --build` と `eval --build` にはビルドのタグまたは ID を渡します。`serve --print-config` は接続情報を表示する操作です。 [評価の手順](evaluation.md) · [MCP・RAG の起動](mcp.md) · [Wiki・PARA の操作](wiki.md)',
     '## 終了コードと JSON',
@@ -133,7 +133,7 @@ function moduleGuide() {
     chapters.push(section('## ' + stage, ...tables));
   }
   return section('# モジュールリファレンス', generated,
-    '`Dunlinfile.yaml` の各区切りに `modules` を並べ、`use` に名前、`with` に引数を書きます。`source` から `ask` までは MCP・RAG で使えるモジュールです。説明の原文は英語で、プロジェクト内では `dunlin modules list --json` で利用できる名前を、`dunlin modules describe <name> --json` で詳細を確認できます。',
+    '`KnowledgeNestfile.yaml` の各区切りに `modules` を並べ、`use` に名前、`with` に引数を書きます。`source` から `ask` までは MCP・RAG で使えるモジュールです。説明の原文は英語で、プロジェクト内では `nest modules list --json` で利用できる名前を、`nest modules describe <name> --json` で詳細を確認できます。',
     '`index.keyword` の `user_dictionary` は Lindera で使います。`short_query` は `trigram` を選んだときに既定で `bigram` になります。`chunk.length` の `overlap` は `size` より小さくします。 [設定と既定値](config.md)',
     ...chapters,
     '## 評価のモジュール',
@@ -159,20 +159,20 @@ function moduleGuide() {
 
 async function configGuide() {
   const temp = await realpath(tmpdir());
-  const directory = await realpath(await mkdtemp(join(temp, 'dunlin-docs-')));
-  if (dirname(directory) !== temp || !basename(directory).startsWith('dunlin-docs-')) throw new Error('Unexpected scratch path.');
+  const directory = await realpath(await mkdtemp(join(temp, 'knowledge-nest-docs-')));
+  if (dirname(directory) !== temp || !basename(directory).startsWith('knowledge-nest-docs-')) throw new Error('Unexpected scratch path.');
   const exec = promisify(execFile);
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(directory, 'unused-global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(directory, 'unused-global.yaml') };
   try {
     const examples = [];
     for (const type of types) {
       await exec(process.execPath, [cli, 'init', type, type], { cwd: directory, env });
-      const yaml = await readFile(join(directory, type, 'Dunlinfile.yaml'), 'utf8');
+      const yaml = await readFile(join(directory, type, 'KnowledgeNestfile.yaml'), 'utf8');
       examples.push(section('## ' + type, block('yaml', [yaml.trimEnd()])));
     }
-    return section('# Dunlinfile の設定と既定値', generated,
-      '`dunlin init` が4種別それぞれに書き出す `Dunlinfile.yaml` の全文です。グローバル設定にモデルと OCR を登録していない状態で生成しています。各区切りの説明は、`init` が英語のコメントとして書き出します。RAG、Wiki、PARA の初期化はグローバル設定のモデルを引き継ぎます。MCP の埋め込みと OCR は、初期化時に指定した場合だけ有効になります。 [モデルの設定](mcp.md#初期化時にモデルを選ぶ)',
-      '`use` にモジュール名、`with` にその引数を書きます。ソースや辞書の相対パスは設定ファイルの場所を基準にします。モデルやパスなど、対応する項目では `${ENV_NAME}` を使えます。API キーは `api_key_env` に環境変数の名前を指定します。設定を編集したら `dunlin validate --json` で確認できます。 [モジュールと引数](modules.md)',
+    return section('# KnowledgeNestfile の設定と既定値', generated,
+      '`nest init` が4種別それぞれに書き出す `KnowledgeNestfile.yaml` の全文です。グローバル設定にモデルと OCR を登録していない状態で生成しています。各区切りの説明は、`init` が英語のコメントとして書き出します。RAG、Wiki、PARA の初期化はグローバル設定のモデルを引き継ぎます。MCP の埋め込みと OCR は、初期化時に指定した場合だけ有効になります。 [モデルの設定](mcp.md#初期化時にモデルを選ぶ)',
+      '`use` にモジュール名、`with` にその引数を書きます。ソースや辞書の相対パスは設定ファイルの場所を基準にします。モデルやパスなど、対応する項目では `${ENV_NAME}` を使えます。API キーは `api_key_env` に環境変数の名前を指定します。設定を編集したら `nest validate --json` で確認できます。 [モジュールと引数](modules.md)',
       ...examples);
   } finally {
     if (await realpath(directory) === directory) await rm(directory, { recursive: true, force: true, maxRetries: 5 });

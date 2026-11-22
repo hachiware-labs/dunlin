@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-explore-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-explore-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const docs = {
     notes: {
@@ -24,17 +24,17 @@ async function fixture(t) {
       'local.md': '# Local decision\n[Start](./start.md)',
     },
     architecture: {
-      '認証 仕様.md': '# Authentication\n[Policy](dunlin://Operations/rules.txt)\n[Start](dunlin://notes/start.md)',
+      '認証 仕様.md': '# Authentication\n[Policy](knowledge-nest://Operations/rules.txt)\n[Start](knowledge-nest://notes/start.md)',
     },
     Operations: {
       'rules.txt': 'Policy evidence\n' + 'Detail\n'.repeat(40),
     },
     tickets: {
-      'ticket.md': '# root_marker\n[Missing](../outside.md)\n[Empty](dunlin://tickets/empty.txt)',
+      'ticket.md': '# root_marker\n[Missing](../outside.md)\n[Empty](knowledge-nest://tickets/empty.txt)',
       'empty.txt': '',
     },
   };
-  const database = await Dunlin.open(join(root, 'index'));
+  const database = await KnowledgeNest.open(join(root, 'index'));
   try {
     await writeFile(join(root, 'outside.md'), 'Unregistered private file');
     for (const [id, files] of Object.entries(docs)) {
@@ -75,7 +75,7 @@ test('searches registered sources and follows cross-source Markdown links throug
     assert.equal(architecture.via.line, 2);
     const policy = result.evidence.find(({ evidence }) => evidence.source.sourceId === 'Operations');
     assert.equal(policy.via.from.sourceId, 'architecture');
-    assert.equal(policy.via.destination, 'dunlin://Operations/rules.txt');
+    assert.equal(policy.via.destination, 'knowledge-nest://Operations/rules.txt');
     assert.deepEqual(policy.evidence.range, { startLine: 1, endLine: 32 });
     assert.equal((await database.read(policy.evidence)).content, 'Policy evidence\n' + 'Detail\n'.repeat(31));
     assert.equal(result.evidence.filter(({ evidence }) => evidence.source.objectId === 'start.md').length, 1);

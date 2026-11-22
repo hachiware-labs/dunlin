@@ -140,7 +140,7 @@ impl KeywordIndex {
         let mut schema = Schema::builder();
         let terms = TextOptions::default().set_indexing_options(
             TextFieldIndexing::default()
-                .set_tokenizer("dunlin-words")
+                .set_tokenizer("knowledge-nest-words")
                 .set_index_option(IndexRecordOption::WithFreqsAndPositions),
         );
         let source_id = schema.add_text_field("source_id", STRING);
@@ -157,7 +157,7 @@ impl KeywordIndex {
             Some(
                 directory
                     .acquire_lock(&Lock {
-                        filepath: ".dunlin-init.lock".into(),
+                        filepath: ".knowledge-nest-init.lock".into(),
                         is_blocking: true,
                     })
                     .map_err(|_| Error::Busy)?,
@@ -166,7 +166,7 @@ impl KeywordIndex {
         let index = Index::open_or_create(directory, schema.build())?;
         index
             .tokenizers()
-            .register("dunlin-words", WhitespaceTokenizer::default());
+            .register("knowledge-nest-words", WhitespaceTokenizer::default());
         // No watcher on `meta.json`: this handle reloads after its own commits, a CLI build writes
         // a new folder that `serve` opens, and another handle sees changes when it opens again.
         // On Windows the watcher's reads made commits fail while it held the file open.

@@ -1,4 +1,4 @@
-// Values in Dunlinfile.yaml that refer to environment variables, such as `${OPENAI_BASE_URL}` and
+// Values in KnowledgeNestfile.yaml that refer to environment variables, such as `${OPENAI_BASE_URL}` and
 // `api_key_env`.
 
 const envReference = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/gu;

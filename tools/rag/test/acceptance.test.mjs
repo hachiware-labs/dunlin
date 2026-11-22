@@ -23,9 +23,9 @@ test('keeps the chunk.length compatibility fixture stable', () => {
 });
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-acceptance-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-acceptance-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const run = (...args) => exec(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => exec(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const invoke = (...args) => run('--project', 'kb', ...args, '--json').then(({ stdout }) => JSON.parse(stdout));
   const json = async (...args) => {
     const result = await invoke(...args);
@@ -44,7 +44,7 @@ async function fixture(t) {
     });
   };
   await run('init', 'mcp', 'kb');
-  return { root, run, json, failure, docs: join(root, 'kb', 'docs'), path: join(root, 'kb', 'Dunlinfile.yaml') };
+  return { root, run, json, failure, docs: join(root, 'kb', 'docs'), path: join(root, 'kb', 'KnowledgeNestfile.yaml') };
 }
 
 test('rejects unavailable and ambiguous evidence, preserves confirmed mappings, and isolates held-out cases', { timeout: 40_000 }, async (t) => {

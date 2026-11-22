@@ -1,4 +1,4 @@
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 // Trial runs, their limits and the counting of model requests run in Rust (spec 28.11 step 4c).
 // JavaScript checks and combines the configured limits.
@@ -7,7 +7,7 @@ const fields = ['max_runs', 'max_elapsed_ms', 'max_api_requests', 'max_api_input
 export function checkTrialLimits(config, issue) {
   const limits = config.trial_limits;
   if (limits === undefined) return;
-  if (!Dunlin.trialLimitsValid(limits)) issue('ARG_TYPE', ['trial_limits'], fields, 'Set nonnegative integer limits for experimental runs.');
+  if (!KnowledgeNest.trialLimitsValid(limits)) issue('ARG_TYPE', ['trial_limits'], fields, 'Set nonnegative integer limits for experimental runs.');
 }
 
 /** The stricter of the adopted and candidate limits. */

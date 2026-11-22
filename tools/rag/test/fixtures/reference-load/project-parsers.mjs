@@ -85,7 +85,7 @@ export async function parseWithCommand(route, bytes, name, { root, version, sign
     const extension = extname(name).toLowerCase();
     let input;
     if (route.args.input === 'file') {
-      directory = await mkdtemp(join(tmpdir(), 'dunlin-parse-'));
+      directory = await mkdtemp(join(tmpdir(), 'knowledge-nest-parse-'));
       input = join(directory, 'source' + (/^\.[\p{L}\p{N}_-]{1,16}$/u.test(extension) ? extension : ''));
       await writeFile(input, bytes, { flag: 'wx' });
     }

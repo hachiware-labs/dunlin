@@ -225,8 +225,8 @@ async function project(root) {
   }
 }
 
-const files = ['kb/Dunlinfile.yaml', 'r2/Dunlinfile.yaml', 'r4/Dunlinfile.yaml', 'r5/Dunlinfile.yaml', 'm/Dunlinfile.yaml',
-  'w/Dunlinfile.yaml', 'w/rules.md', 'p/Dunlinfile.yaml', 'kb/.gitignore', 'global.yaml'];
+const files = ['kb/KnowledgeNestfile.yaml', 'r2/KnowledgeNestfile.yaml', 'r4/KnowledgeNestfile.yaml', 'r5/KnowledgeNestfile.yaml', 'm/KnowledgeNestfile.yaml',
+  'w/KnowledgeNestfile.yaml', 'w/rules.md', 'p/KnowledgeNestfile.yaml', 'kb/.gitignore', 'global.yaml'];
 
 /**
  * Runs every step with one CLI in `root`. Both CLIs run in the same folder, one after the other,
@@ -235,7 +235,7 @@ const files = ['kb/Dunlinfile.yaml', 'r2/Dunlinfile.yaml', 'r4/Dunlinfile.yaml',
 async function scenario(cli, root) {
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });
-  const env = { DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml'), DUNLIN_OCR_HOME: join(root, 'ocr-home', 'ocr') };
+  const env = { KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml'), KNOWLEDGE_NEST_OCR_HOME: join(root, 'ocr-home', 'ocr') };
   const results = [];
   const labels = new Map();
   for (const args of steps) {
@@ -244,7 +244,7 @@ async function scenario(cli, root) {
       for (const [path, content] of Object.entries(candidates)) await writeFile(join(root, path), content);
     }
     if (args.includes('kb/invalid.yaml') || args.includes('kb/candidate.yaml')) {
-      const current = await readFile(join(root, 'kb', 'Dunlinfile.yaml'), 'utf8');
+      const current = await readFile(join(root, 'kb', 'KnowledgeNestfile.yaml'), 'utf8');
       await writeFile(join(root, 'kb', 'invalid.yaml'), current.replace('use: retrieval.keyword', 'use: retrieval.keywords')
         .replace('top_k: 10', 'top_k: 0'));
       await writeFile(join(root, 'kb', 'candidate.yaml'), current.replace('top_k: 10', 'top_k: 5'));
@@ -258,7 +258,7 @@ async function scenario(cli, root) {
 }
 
 test('runs the CLI like the former JavaScript CLI', { timeout: 600_000 }, async () => {
-  const base = await mkdtemp(join(tmpdir(), 'dunlin-cli-parity-'));
+  const base = await mkdtemp(join(tmpdir(), 'knowledge-nest-cli-parity-'));
   try {
     const root = join(base, 'work');
     const reference = await scenario(clis.reference, root);
@@ -286,12 +286,12 @@ test('runs the CLI like the former JavaScript CLI', { timeout: 600_000 }, async 
       }
     }
     const text = (args) => rust.results[steps.findIndex((step) => JSON.stringify(step) === JSON.stringify(args))];
-    assert.match(text(['--help']).stdout, /^Dunlin \d+\.\d+\.\d+ — /u);
+    assert.match(text(['--help']).stdout, /^Knowledge-Nest \d+\.\d+\.\d+ — /u);
     assert.match(text(['--project', 'kb', 'status']).stdout, /^Build +bld-\S+\nSearch +search-\S+\nEvaluation +evaluated: evidence_recall/u);
     assert.match(text(['--project', 'kb', 'build', '--skip-unsupported']).stdout, /^(Built|Reused build) bld-\S+ from 3 of 4 files in \d+ ms\./u);
     assert.match(text(['--project', 'kb', 'search', 'ポンプ']).stdout, /^a\.md — ポンプ\n[\s\S]*\n\n1 result; \d+ of 4000 characters\.\n$/u);
-    assert.match(text(['--project', 'kb', 'search', 'q', '--bogus']).stderr, /^Unknown option --bogus for dunlin search\./u);
-    assert.match(text(['--project', 'kb', 'eval-data', 'bogus']).stderr, /^Unknown action for dunlin eval-data: bogus\. Use add, /u);
+    assert.match(text(['--project', 'kb', 'search', 'q', '--bogus']).stderr, /^Unknown option --bogus for nest search\./u);
+    assert.match(text(['--project', 'kb', 'eval-data', 'bogus']).stderr, /^Unknown action for nest eval-data: bogus\. Use add, /u);
     assert.match(text(['--project', 'kb', 'tag', 'v1']).stdout, /^Tagged bld-\S+ as v1\.\n$/u);
     assert.equal(text(['--project', 'w', 'rules']).stdout, '# 運用の決まり\n');
     for (const file of files) assert.equal(rust.saved[file], reference.saved[file], file);

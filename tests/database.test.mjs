@@ -9,10 +9,10 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-import { Dunlin, DunlinError } from 'dunlin';
+import { KnowledgeNest, KnowledgeNestError } from 'knowledge-nest';
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const docs = join(root, 'docs');
   await mkdir(docs);
@@ -20,7 +20,7 @@ async function fixture(t) {
 }
 
 function errorCode(code) {
-  return (error) => error instanceof DunlinError && error.code === code;
+  return (error) => error instanceof KnowledgeNestError && error.code === code;
 }
 
 test('keeps full corpus revisions when location metadata or the original changes', async (t) => {
@@ -29,7 +29,7 @@ test('keeps full corpus revisions when location metadata or the original changes
   const input = { objectId: ref.objectId, url: 'https://example.com/manual.pdf', format: 'text', content: 'Overview\r\nRetention\r\n' };
   const location = { page: 2, range: { startLine: 2, endLine: 2 }, bbox: [10, 20, 300, 100] };
   const parser = { tool: 'ocr', model: 'fixture', module: 'loader.command', version: '2.1' };
-  const database = await Dunlin.open(store);
+  const database = await KnowledgeNest.open(store);
   let versions;
   try {
     const revisions = [];
@@ -45,7 +45,7 @@ test('keeps full corpus revisions when location metadata or the original changes
   } finally {
     await database.close();
   }
-  const reopened = await Dunlin.open(store);
+  const reopened = await KnowledgeNest.open(store);
   try {
     const [first, second, third] = await Promise.all(versions.map((version) => reopened.getCorpusDocument(ref, version)));
     assert.equal(first.content, input.content);
@@ -62,7 +62,7 @@ test('keeps full corpus revisions when location metadata or the original changes
 
 test('migrates legacy JSON revisions atomically and reads history across corpus backends', async (t) => {
   const { store } = await fixture(t);
-  const folder = join(store, '.dunlin-corpus-v1');
+  const folder = join(store, '.knowledge-nest-corpus-v1');
   const sqliteFile = join(folder, 'corpus.sqlite');
   const ref = { sourceId: 'parsed', objectId: 'manual.pdf' };
   async function save(database, page) {
@@ -75,7 +75,7 @@ test('migrates legacy JSON revisions atomically and reads history across corpus 
     return database.getCorpusDocument(ref, evidence.source.version);
   }
 
-  const legacy = await Dunlin.open(store, { corpusBackend: 'json' });
+  const legacy = await KnowledgeNest.open(store, { corpusBackend: 'json' });
   const old = [];
   try {
     old.push(await save(legacy, 2), await save(legacy, 3));
@@ -88,7 +88,7 @@ test('migrates legacy JSON revisions atomically and reads history across corpus 
   const broken = join(folder, files[1]);
   const original = await readFile(broken);
   await writeFile(broken, '{');
-  await assert.rejects(Dunlin.open(store), (error) => errorCode('IO_ERROR')(error) && /Invalid legacy corpus revision/u.test(error.message));
+  await assert.rejects(KnowledgeNest.open(store), (error) => errorCode('IO_ERROR')(error) && /Invalid legacy corpus revision/u.test(error.message));
   const unfinished = new DatabaseSync(sqliteFile, { readOnly: true });
   try {
     assert.equal(unfinished.prepare('PRAGMA user_version').get().user_version, 0);
@@ -98,7 +98,7 @@ test('migrates legacy JSON revisions atomically and reads history across corpus 
   }
   await writeFile(broken, original);
 
-  const migrated = await Dunlin.open(store);
+  const migrated = await KnowledgeNest.open(store);
   let latest;
   try {
     const sql = new DatabaseSync(sqliteFile, { readOnly: true });
@@ -118,7 +118,7 @@ test('migrates legacy JSON revisions atomically and reads history across corpus 
     await migrated.close();
   }
   assert.deepEqual(await readFile(broken), original);
-  const json = await Dunlin.open(store, { corpusBackend: 'json' });
+  const json = await KnowledgeNest.open(store, { corpusBackend: 'json' });
   let jsonRevision;
   try {
     assert.deepEqual(await json.getCorpusDocument(ref, latest.evidence.source.version), latest);
@@ -127,7 +127,7 @@ test('migrates legacy JSON revisions atomically and reads history across corpus 
     await json.close();
   }
   assert.equal((await readdir(folder)).filter((file) => /^[a-f0-9]{64}\.json$/u.test(file)).length, 3);
-  const reopened = await Dunlin.open(store);
+  const reopened = await KnowledgeNest.open(store);
   try {
     assert.deepEqual(await reopened.getCorpusDocument(ref, jsonRevision.evidence.source.version), jsonRevision);
   } finally {
@@ -144,7 +144,7 @@ test('indexes Markdown, Unicode and code identifiers with verifiable line eviden
   await mkdir(join(docs, 'node_modules'));
   await writeFile(join(docs, 'node_modules', 'skip.js'), 'private_marker');
 
-  const database = await Dunlin.open(store);
+  const database = await KnowledgeNest.open(store);
   try {
     assert.deepEqual(await database.addSource(source), { files: 2, units: 4 });
     const result = await database.search('認証方式');
@@ -173,12 +173,12 @@ test('persists snapshots, rolls back failed replacements and rejects stale evide
   const { docs, store, source } = await fixture(t);
   const path = join(docs, 'main.txt');
   await writeFile(path, 'original marker');
-  let database = await Dunlin.open(store);
+  let database = await KnowledgeNest.open(store);
   try {
     await database.addSource(source);
     const old = (await database.search('original')).hits[0].evidence;
     await database.close();
-    database = await Dunlin.open(store);
+    database = await KnowledgeNest.open(store);
     await writeFile(path, 'replacement marker');
     const invalid = join(docs, 'broken.txt');
     await writeFile(invalid, Buffer.from([0xff]));
@@ -212,11 +212,11 @@ test('replaces imported documents atomically and reads exact lines with their or
     objectId: 'policy.txt', url: 's3://example-bucket/docs/policy.txt', format: 'text',
     content: 'retention policy',
   };
-  let database = await Dunlin.open(store);
+  let database = await KnowledgeNest.open(store);
   try {
     assert.deepEqual(await database.replaceDocuments('imported', [web, object]), { files: 2, units: 4 });
     await database.close();
-    database = await Dunlin.open(store);
+    database = await KnowledgeNest.open(store);
 
     const { hits } = await database.search('検証済み', { sourceIds: ['imported'] });
     assert.equal(hits.length, 1);
@@ -260,8 +260,8 @@ test('replaces imported documents atomically and reads exact lines with their or
 
 test('rejects invalid inputs and propagates abort and close to native work', async (t) => {
   const { docs, store, source } = await fixture(t);
-  await assert.rejects(Dunlin.open(store, { signal: AbortSignal.abort() }), errorCode('ABORTED'));
-  const database = await Dunlin.open(store);
+  await assert.rejects(KnowledgeNest.open(store, { signal: AbortSignal.abort() }), errorCode('ABORTED'));
+  const database = await KnowledgeNest.open(store);
   try {
     await assert.rejects(database.search('%%%'), errorCode('INVALID_ARGUMENT'));
     await assert.rejects(database.search('word', { limit: 1.5 }), errorCode('INVALID_ARGUMENT'));
@@ -303,18 +303,18 @@ test('preserves vector scores and row ordering across f32 rounding and overflow'
   const gap = 2 ** -25;
   await writeVectors([[1, ...tail, 0], [1, ...tail, gap], [1, ...tail, gap], [0.5, ...tail, 0]]);
   const request = { needle: [1, ...tail, 1], rows: 4, limit: 2 };
-  assert.deepEqual(await Dunlin.rankVectors(path, request), [{ i: 1, score: 1 + gap }, { i: 2, score: 1 + gap }]);
-  assert.deepEqual(await Dunlin.rankVectors(path, { ...request, positions: [2, 0, 1] }),
+  assert.deepEqual(await KnowledgeNest.rankVectors(path, request), [{ i: 1, score: 1 + gap }, { i: 2, score: 1 + gap }]);
+  assert.deepEqual(await KnowledgeNest.rankVectors(path, { ...request, positions: [2, 0, 1] }),
     [{ i: 1, score: 1 + gap }, { i: 2, score: 1 + gap }]);
 
   const max = Buffer.from('ffff7f7f', 'hex').readFloatLE();
   await writeVectors([[max, max], [max, -max], [1, 0]]);
   for (const value of [2, 1e100, 2 ** -153]) {
-    assert.deepEqual(await Dunlin.rankVectors(path, { needle: [value, value], rows: 3, limit: 2 }),
+    assert.deepEqual(await KnowledgeNest.rankVectors(path, { needle: [value, value], rows: 3, limit: 2 }),
       [{ i: 0, score: 2 * (max * value) }, { i: 2, score: value }]);
   }
   await writeVectors([[1, 0], [Infinity, 1]]);
-  await assert.rejects(Dunlin.rankVectors(path, { needle: [1, 1], rows: 2, limit: 1 }), errorCode('INVALID_ARGUMENT'));
+  await assert.rejects(KnowledgeNest.rankVectors(path, { needle: [1, 1], rows: 2, limit: 1 }), errorCode('INVALID_ARGUMENT'));
 });
 
 test('interrupts an in-flight vector scan and accepts new searches afterward', async (t) => {
@@ -327,13 +327,13 @@ test('interrupts an in-flight vector scan and accepts new searches afterward', a
   finally { await file.close(); }
 
   const request = { needle, rows, limit: 1 };
-  await assert.rejects(Dunlin.rankVectors(path, request, { signal: AbortSignal.abort() }), errorCode('ABORTED'));
+  await assert.rejects(KnowledgeNest.rankVectors(path, request, { signal: AbortSignal.abort() }), errorCode('ABORTED'));
   const controller = new AbortController();
-  const rejected = assert.rejects(Dunlin.rankVectors(path, request, { signal: controller.signal }), errorCode('ABORTED'));
+  const rejected = assert.rejects(KnowledgeNest.rankVectors(path, request, { signal: controller.signal }), errorCode('ABORTED'));
   await setImmediate();
   controller.abort();
   await rejected;
-  assert.deepEqual(await Dunlin.rankVectors(path, { ...request, positions: [2, 1] }), [{ i: 1, score: 0 }]);
+  assert.deepEqual(await KnowledgeNest.rankVectors(path, { ...request, positions: [2, 1] }), [{ i: 1, score: 0 }]);
 });
 
 test('search deadline includes time spent in the native work queue', async (t) => {

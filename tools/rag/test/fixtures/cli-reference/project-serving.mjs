@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 // Serving runs in Rust (spec 28.10 step 3c and 28.12 step 5b). JavaScript checks the serve section,
 // applies the command line overrides and reads the access token.
@@ -22,7 +22,7 @@ export function serveTemplate(type) {
 
 /** Validates a serve section in Rust and reports each problem through `issue`. */
 export function validateServe(type, input, issue) {
-  const { settings, issues } = Dunlin.validateServe(type, input);
+  const { settings, issues } = KnowledgeNest.validateServe(type, input);
   for (const { code, path, expected, hint } of issues) issue(code, path, expected, hint);
   return settings;
 }

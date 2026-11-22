@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { stringify } from 'yaml';
 
 const fixed = [
@@ -49,6 +49,6 @@ function* generated(count) {
 }
 
 test('writes YAML like the yaml package', () => {
-  for (const value of fixed) assert.equal(Dunlin.stringifyYaml(value), stringify(value), JSON.stringify(value));
-  for (const value of generated(5000)) assert.equal(Dunlin.stringifyYaml(value), stringify(value), JSON.stringify(value));
+  for (const value of fixed) assert.equal(KnowledgeNest.stringifyYaml(value), stringify(value), JSON.stringify(value));
+  for (const value of generated(5000)) assert.equal(KnowledgeNest.stringifyYaml(value), stringify(value), JSON.stringify(value));
 });

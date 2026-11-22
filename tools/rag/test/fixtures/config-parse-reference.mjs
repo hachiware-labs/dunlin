@@ -1,4 +1,4 @@
-// The JavaScript Dunlinfile reader that Dunlin.parseConfig replaced. Tests compare the two.
+// The JavaScript KnowledgeNestfile reader that KnowledgeNest.parseConfig replaced. Tests compare the two.
 import { LineCounter, parseDocument } from 'yaml';
 
 export function referenceParseConfig(text) {

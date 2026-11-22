@@ -23,6 +23,10 @@ use crate::source_stage::iso_now;
 use crate::transform_stage::StageError;
 use crate::{Cancellation, DocumentRef, KnowledgeBase, SourceLocation};
 
+/// What a question asks with: the words of its quotes, other words, or a code, number or name
+/// written in the document. A case may have no kind.
+pub(crate) const KINDS: [&str; 3] = ["lexical", "paraphrase", "identifier"];
+
 const STATUSES: [&str; 6] = [
     "generated",
     "provided",
@@ -365,6 +369,11 @@ pub(crate) fn make_case(
     if !group_ok || !split_ok || !state_ok {
         return Err(invalid("Invalid case group, split, or state."));
     }
+    match input.get("kind") {
+        None | Some(ConfigValue::Null) => {}
+        Some(ConfigValue::String(kind)) if KINDS.contains(&kind.as_str()) => {}
+        Some(_) => return Err(invalid("Invalid case kind.")),
+    }
     let id = match input.get("id") {
         None => {
             let keyed: Vec<ConfigValue> = references
@@ -418,7 +427,7 @@ pub(crate) fn make_case(
                 .unwrap_or_else(|| text(&iso_now())),
         ),
     ];
-    for name in ["reviewed_by", "generation", "reason"] {
+    for name in ["reviewed_by", "generation", "reason", "kind"] {
         if truthy(input.get(name)) {
             case.push((
                 name.to_owned(),
@@ -976,7 +985,7 @@ fn add(
 
 /// `add --from-search <file> --hit <n>`: the quote is the text of a saved search hit.
 fn from_search(values: ConfigValue, documents: &[Document]) -> Result<ConfigValue, StageError> {
-    let unreadable = || invalid("Provide JSON saved from dunlin search --json.");
+    let unreadable = || invalid("Provide JSON saved from nest search --json.");
     let path = js_string(values.get("from-search"));
     let record: ConfigValue = std::fs::read_to_string(&path)
         .ok()

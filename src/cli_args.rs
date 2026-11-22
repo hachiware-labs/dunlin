@@ -1,4 +1,4 @@
-//! The command line of the `dunlin` CLI (spec 28.13 step 6c): the commands with their usage, and
+//! The command line of the `nest` CLI (spec 28.13 step 6c): the commands with their usage, and
 //! the options of each, read as Node.js `util.parseArgs` read them in strict mode.
 
 // Only the CLI uses this outside its tests.
@@ -6,129 +6,145 @@
 
 use crate::config_value::ConfigValue;
 
-pub const COMMANDS: [(&str, &str); 33] = [
+pub const COMMANDS: [(&str, &str); 37] = [
     (
         "init",
-        "dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]",
+        "nest init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]",
     ),
     (
         "config",
-        "dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config set ocr [--tool oar-ocr|lightonocr] | dunlin config unset <embedding|llm|ocr> [--json]",
+        "nest config list | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config unset <embedding|llm|ocr> [--json]",
     ),
     (
         "build",
-        "dunlin build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]",
+        "nest build [<config>] [--release] [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]",
     ),
     (
         "source",
-        "dunlin source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]",
+        "nest source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]",
     ),
     (
         "transform",
-        "dunlin transform [--project <directory>] [--config <file>] [--dry-run] [--json]",
+        "nest transform [--project <directory>] [--config <file>] [--dry-run] [--json]",
     ),
     (
         "index",
-        "dunlin index [--project <directory>] [--config <file>] [--dry-run] [--json]",
+        "nest index [--project <directory>] [--config <file>] [--dry-run] [--json]",
     ),
     (
         "search",
-        "dunlin search <query> [--project <directory>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]",
+        "nest search <query> [--project <directory>] [--index <name>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]",
     ),
     (
         "ask",
-        "dunlin ask <question> [--project <directory>] [--build <ref>] [--config <file>] [--json]",
+        "nest ask <question> [--project <directory>] [--build <ref>] [--config <file>] [--json]",
     ),
     (
         "serve",
-        "dunlin serve [--project <directory>] [--transport <http|stdio>] [--host <address>] [--port <port>] [--print-config [--json]]",
+        "nest serve [--project <directory>] [--transport <http|stdio>] [--host <address>] [--port <port>] [--print-config [--json]]",
     ),
-    ("status", "dunlin status [--project <directory>] [--json]"),
+    ("status", "nest status [--project <directory>] [--json]"),
     (
         "validate",
-        "dunlin validate [--project <directory>] [--config <file>] [--json]",
+        "nest validate [--project <directory>] [--config <file>] [--json]",
     ),
     (
         "defaults",
-        "dunlin defaults [--apply <section>] [--project <directory>] [--json]",
+        "nest defaults [--apply <section>] [--project <directory>] [--json]",
     ),
     (
         "modules",
-        "dunlin modules <list|describe <name>> [--project <directory>] [--json]",
+        "nest modules <list|describe <name>> [--project <directory>] [--json]",
     ),
     (
         "add",
-        "dunlin add <tool> | dunlin add --list [--project <directory>] [--json]",
+        "nest add <tool> | nest add --list [--project <directory>] [--json]",
     ),
     (
         "remove",
-        "dunlin remove <tool> [--project <directory>] [--json]",
+        "nest remove <tool> [--project <directory>] [--json]",
     ),
-    ("use", "dunlin use <build> [--project <directory>] [--json]"),
+    ("use", "nest use <build> [--project <directory>] [--json]"),
     (
         "tag",
-        "dunlin tag <name> [build] [--move] [--project <directory>] [--json]",
+        "nest tag <name> [build] [--move] [--project <directory>] [--json]",
     ),
     (
         "eval-data",
-        "dunlin eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]",
+        "nest eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--tag <name>] [--project <directory>] [--json]",
     ),
     (
         "eval",
-        "dunlin eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]",
+        "nest eval [<config>] [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]",
     ),
     (
         "report",
-        "dunlin report <show|list|compare> [--project <directory>] [--json]",
+        "nest report <show|list|compare> [--project <directory>] [--json]",
     ),
     (
         "dictionary",
-        "dunlin dictionary suggest [--report <ref>] | dunlin dictionary add <file> --config <candidate> [--project <directory>] [--json]",
+        "nest dictionary suggest [--report <ref>] | nest dictionary add <file> --config <candidate> [--project <directory>] [--json]",
     ),
     (
         "evidence-map",
-        "dunlin evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]",
+        "nest evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]",
     ),
     (
         "ingress",
-        "dunlin ingress <path...> | dunlin ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]",
+        "nest ingress <path...> | nest ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]",
     ),
     (
         "query",
-        "dunlin query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]",
+        "nest query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]",
     ),
     (
         "verify",
-        "dunlin verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]",
+        "nest verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]",
     ),
     (
         "issue",
-        "dunlin issue <id> <open|resolved|dismissed> [--project <directory>] [--json]",
+        "nest issue <id> <open|resolved|dismissed> [--project <directory>] [--json]",
     ),
-    ("rules", "dunlin rules [--project <directory>] [--json]"),
+    ("rules", "nest rules [--project <directory>] [--json]"),
     (
         "progress",
-        "dunlin progress <work-id> [--project <directory>] [--json]",
+        "nest progress <work-id> [--project <directory>] [--json]",
     ),
     (
         "cite",
-        "dunlin cite <page> <number> [--project <directory>] [--json]",
+        "nest cite <page> <number> [--project <directory>] [--json]",
     ),
     (
         "instruct",
-        "dunlin instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | dunlin instruct --persistent <rule> [--project <directory>] [--json]",
+        "nest instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | nest instruct --persistent <rule> [--project <directory>] [--json]",
     ),
     (
         "save-answer",
-        "dunlin save-answer <query-run> <page> <title> [--project <directory>] [--json]",
+        "nest save-answer <query-run> <page> <title> [--project <directory>] [--json]",
     ),
     (
         "archive",
-        "dunlin archive <page> [--project <directory>] [--restore] [--json]",
+        "nest archive <page> [--project <directory>] [--restore] [--json]",
     ),
     (
         "undo",
-        "dunlin undo <work-id> [--project <directory>] [--json]",
+        "nest undo <work-id> [--project <directory>] [--json]",
+    ),
+    (
+        "list",
+        "nest list [documents|chunks|indexes|eval-data|results] [--project <directory>] [--json]",
+    ),
+    (
+        "release",
+        "nest release <index> [--name <served-name>] [--project <directory>] [--json]",
+    ),
+    (
+        "optimize",
+        "nest optimize <instruction> [--name <name>] [--project <directory>] [--json]",
+    ),
+    (
+        "results",
+        "nest results [<name>] [--project <directory>] [--json]",
     ),
 ];
 
@@ -139,7 +155,7 @@ pub fn usage(command: &str) -> Option<&'static str> {
         .map(|(_, usage)| *usage)
 }
 
-/// The commands of `dunlin --help` in groups, each with what it does.
+/// The commands of `nest --help` in groups, each with what it does.
 pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
     (
         "Start",
@@ -172,6 +188,11 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
             ),
             ("use", "Serve another build"),
             ("tag", "Name a build"),
+            (
+                "list",
+                "List the named versions of documents, indexes and results",
+            ),
+            ("release", "Serve an index that is there, or go back to one"),
         ],
     ),
     (
@@ -188,6 +209,14 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
             ("eval", "Evaluate a build with the evaluation data"),
             ("report", "Show and compare evaluation reports"),
             ("dictionary", "Suggest and add user dictionary words"),
+            (
+                "optimize",
+                "Try the settings of an instruction and compare them",
+            ),
+            (
+                "results",
+                "Show evaluation results, or the trials of an optimization",
+            ),
         ],
     ),
     (
@@ -212,17 +241,17 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
     (
         "Configuration",
         &[
-            ("validate", "Check Dunlinfile.yaml"),
+            ("validate", "Check KnowledgeNestfile.yaml"),
             (
                 "defaults",
-                "Compare Dunlinfile.yaml with the current defaults",
+                "Compare KnowledgeNestfile.yaml with the current defaults",
             ),
             ("modules", "List the modules and their arguments"),
         ],
     ),
 ];
 
-/// What a command does, as `dunlin --help` lists it.
+/// What a command does, as `nest --help` lists it.
 pub fn description(command: &str) -> Option<&'static str> {
     GROUPS
         .iter()
@@ -280,19 +309,56 @@ pub fn wrapped_usage(command: &str) -> Option<String> {
     )
 }
 
-/// The help of one command: what it does and its usage.
-pub fn command_help(command: &str) -> Option<String> {
-    Some(format!(
-        "dunlin {command} — {}\n\nUsage:\n{}",
-        description(command).unwrap_or_default(),
-        wrapped_usage(command)?
-    ))
+/// What the help of a command adds for a configuration file written as lists of modules.
+/// That form is not in `nest init`, so the help is where it can be learned.
+fn staged_help(command: &str) -> Option<&'static str> {
+    Some(match command {
+        "build" => {
+            "A configuration file can list the modules of each stage in order. Such a file is taken\nas the argument, or read from KnowledgeNestfile.yaml, and only --release applies:\n\n  extract:\n    - source.filesystem: { path: ./docs }\n    - loader.text: {}\n    - tag: docs\n  transform:\n    - chunk.length: { unit: characters, size: 400, overlap: 40 }\n  index:\n    - index.keyword: { tokenizer: lindera }\n  search:\n    - retrieval.keyword: { top_k: 10 }\n  eval:\n    - eval.evidence: { data: default, split: dev }\n  serve:\n    tag: release\n\nA section can end with `- tag: <name>` to name what it makes, or hold only\n`- from: <name>` to start from what is there. Modules of this form:\n  source.filesystem  path, id, apply (a list of add, update, delete)\n  loader.text\n  text.normalize     unicode: nfkc\n  chunk.length       size, overlap, context\n  chunk.structure    max_chars, context\n  index.keyword      tokenizer: lindera\n  retrieval.keyword  top_k\n  eval.evidence      data, split (dev or test)\n`context` is { headings, document, prepend }, each true or false.\nSee also: nest eval, eval-data, list, search, release, optimize, results."
+        }
+        "eval" => {
+            "With a configuration file written as lists of modules (see nest build --help), eval\ntakes the file as its argument, builds what is missing and measures as its eval section\nsays:\n\n  eval:\n    - eval.evidence: { data: default, split: dev }\n    - tag: <a name for the result>      # optional\n\n`data` is the name of evaluation data saved with nest eval-data import. The result is\nread with nest results."
+        }
+        "eval-data" => {
+            "With a configuration file written as lists of modules (see nest build --help):\n\n  nest eval-data import <file> [--tag <name>]\n\nsaves a JSON file of cases under a name (default: default):\n\n  [{ \"id\": \"pump-check\", \"question\": \"...\", \"source\": \"docs\",\n     \"document\": \"manuals/pump.md\", \"quote\": \"text copied from the document\",\n     \"split\": \"dev\" }]\n\n`source` is the id of source.filesystem (default: the name of its folder), `document` the\npath below that folder with /, and `split` dev or test."
+        }
+        "search" => {
+            "With a configuration file written as lists of modules, --index takes the name of an\nindex, its version number, or a name an index is served under (default: default, the\nlatest), and only --limit applies besides."
+        }
+        "optimize" => {
+            "The instruction names a base configuration and what to vary. Every combination of one\noption for each axis is a trial, and the base is trial 000:\n\n  optimize:\n    base: KnowledgeNestfile.yaml\n    vary:\n      - name: chunking\n        options:\n          as-is: {}                       # the base as it is\n          length:\n            transform:\n              - chunk.length: { unit: characters, size: [200, 800], overlap: 40 }\n      - name: search\n        options:\n          top10: {}\n          top5:\n            search:\n              - retrieval.keyword: { top_k: 5 }\n    eval: { data: default, split: dev, metric: recall }\n    limit: { candidates: 20 }\n\nAn option replaces the sections it names: transform, index or search. A list as the\nvalue of an argument is one trial for each value. The base is built first with nest\nbuild. The trials are named <name>/<number>; see them with nest results <name>."
+        }
+        "results" => {
+            "Without a name: every evaluation result, the best first. With the name or version of a\nresult: its cases, the missed ones first. With the name of an optimization: its trials."
+        }
+        "validate" => {
+            "A configuration file written as lists of modules (see nest build --help) is checked\nthe same way a build checks it, and nothing is built."
+        }
+        "status" => {
+            "With a configuration file written as lists of modules, status shows what nest list\nshows: the named versions and what is served."
+        }
+        _ => return None,
+    })
 }
 
-/// The overall help of `dunlin --help`.
+/// The help of one command: what it does and its usage.
+pub fn command_help(command: &str) -> Option<String> {
+    let mut help = format!(
+        "nest {command} — {}\n\nUsage:\n{}",
+        description(command).unwrap_or_default(),
+        wrapped_usage(command)?
+    );
+    if let Some(staged) = staged_help(command) {
+        help.push_str("\n\n");
+        help.push_str(staged);
+    }
+    Some(help)
+}
+
+/// The overall help of `nest --help`.
 pub fn help_text() -> String {
     let mut out = format!(
-        "Dunlin {} — search your documents, or keep a wiki written from them.\n\nUsage: dunlin [--project <directory>] <command> [options]\n",
+        "Knowledge-Nest {} — search your documents, or keep a wiki written from them.\n\nUsage: nest [--project <directory>] <command> [options]\n",
         env!("CARGO_PKG_VERSION")
     );
     for (group, commands) in GROUPS {
@@ -304,7 +370,7 @@ pub fn help_text() -> String {
         }
     }
     out.push_str(
-        "\nOptions for every command\n  --project <directory>  The project folder (default: the nearest Dunlinfile.yaml)\n  --json                 Print one JSON object with schema_version 1\n  --help                 Show the options of a command\n  --version              Print the version\n\nRun dunlin <command> --help for the options of a command.",
+        "\nOptions for every command\n  --project <directory>  The project folder (default: the nearest KnowledgeNestfile.yaml)\n  --json                 Print one JSON object with schema_version 1\n  --help                 Show the options of a command\n  --version              Print the version\n\nRun nest <command> --help for the options of a command.",
     );
     out
 }
@@ -445,6 +511,7 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
             "output",
             "model",
             "count",
+            "kind",
             "state",
             "reviewer",
             "reviewer-type",
@@ -456,6 +523,18 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
             options.push((name, String));
         }
         options.push(("case", Strings));
+    }
+    if command == "build" {
+        options.push(("release", Boolean));
+    }
+    if command == "search" {
+        options.push(("index", String));
+    }
+    if command == "eval-data" {
+        options.push(("tag", String));
+    }
+    if command == "release" || command == "optimize" {
+        options.push(("name", String));
     }
     if command == "serve" {
         options.push(("print-config", Boolean));
@@ -544,7 +623,7 @@ fn unknown(command: &str, option: &str, declared: &[(&'static str, Kind)]) -> St
     let hint = closest(name, declared.iter().map(|(key, _)| *key))
         .map_or(String::new(), |key| format!(" Did you mean --{key}?"));
     format!(
-        "Unknown option {option} for dunlin {command}.{hint} Run dunlin {command} --help for its options; to pass a value that starts with '-', put it after --."
+        "Unknown option {option} for nest {command}.{hint} Run nest {command} --help for its options; to pass a value that starts with '-', put it after --."
     )
 }
 
@@ -663,7 +742,7 @@ mod tests {
             parse("status", &args(&["-x"]))
                 .err()
                 .unwrap()
-                .starts_with("Unknown option -x for dunlin status.")
+                .starts_with("Unknown option -x for nest status.")
         );
         assert_eq!(
             parse("status", &args(&["--", "--json"]))

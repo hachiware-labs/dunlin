@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { parserHost } from './fixtures/cli-reference/project-content.mjs';
 
 const office = fileURLToPath(new URL('./fixtures/office/', import.meta.url));
@@ -27,7 +27,7 @@ const pages = {
 };
 
 test('reads HTML and Office documents like the former JavaScript parsers', { timeout: 120_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-parser-parity-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-parser-parity-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const files = join(root, 'files');
   await cp(office, files, { recursive: true });
@@ -48,7 +48,7 @@ test('reads HTML and Office documents like the former JavaScript parsers', { tim
     }
     let actual;
     try {
-      const { documents: [document] } = await Dunlin.loadCorpus({
+      const { documents: [document] } = await KnowledgeNest.loadCorpus({
         state: join(root, 'state.sqlite'), corpus: join(root, 'corpus'), originals: join(root, 'originals'), force: true,
         ocrVersion: 'none', root, files: [{ id: 'docs', file: join(files, name), objectId: name, kind, route: 'loader.auto' }],
       });

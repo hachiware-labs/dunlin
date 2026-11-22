@@ -20,7 +20,7 @@ export const hannoy = {
 };
 
 function binaryName(tool) {
-  return 'dunlin-' + tool.name + '-' + platform + suffix;
+  return 'knowledge-nest-' + tool.name + '-' + platform + suffix;
 }
 
 async function manifestAt(directory, tool) {
@@ -37,7 +37,7 @@ async function shippedTool(tool) {
   const abi = { win32: '-msvc', linux: '-gnu', darwin: '' }[process.platform];
   let native;
   if (abi !== undefined) {
-    try { native = require.resolve('dunlin-' + platform + abi); }
+    try { native = require.resolve('knowledge-nest-' + platform + abi); }
     catch (error) { if (error.code !== 'MODULE_NOT_FOUND') throw error; }
   }
   if (!native) throw toolError('TOOL_REQUIRED', 'The package has no ' + tool.name + ' for this platform.', 3);
@@ -58,7 +58,7 @@ async function verified(directory, tool, packaged = false) {
     return { path, manifest, bytes };
   } catch (error) {
     if (error.exitCode) throw error;
-    if (error.code === 'ENOENT') throw toolError('TOOL_REQUIRED', 'The ' + tool.name + ' binary is missing. Run dunlin add ' + tool.name + '.', 3);
+    if (error.code === 'ENOENT') throw toolError('TOOL_REQUIRED', 'The ' + tool.name + ' binary is missing. Run nest add ' + tool.name + '.', 3);
     throw toolError('TOOL_INTEGRITY', 'The ' + tool.name + ' binary failed its version or integrity check.');
   }
 }

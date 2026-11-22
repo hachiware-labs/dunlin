@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { parse, stringify } from 'yaml';
 
 import { ragTemplate, validateRag } from './fixtures/cli-reference/project-modules.mjs';
@@ -59,7 +59,7 @@ test('checks loader.command placeholders, executables and versions', async (t) =
   const check = (values) => {
     const config = ragTemplate('mcp', './docs');
     config.source.modules.push({ use: 'loader.command', with: { match: ['*.x'], input: 'file', env: {}, ...values } });
-    const result = validateRag(config, join(tmpdir(), 'Dunlinfile.yaml'), () => null);
+    const result = validateRag(config, join(tmpdir(), 'KnowledgeNestfile.yaml'), () => null);
     const ours = (list) => list.filter(({ module, code }) => module === 'loader.command' && code !== 'ARG_DEFAULT');
     return { errors: ours(result.errors), warnings: ours(result.warnings), entry: result.plan.source.at(-1) };
   };
@@ -75,14 +75,14 @@ test('checks loader.command placeholders, executables and versions', async (t) =
     ['version_command: Either version or version_command']);
   assert.deepEqual(summary(check({ command: [process.execPath, '{input}'], version_command: [process.execPath, '{input}'] })),
     ['version_command: No placeholders']);
-  const missing = check({ command: ['dunlin-no-such-parser', '{input}'], version: '1' });
+  const missing = check({ command: ['knowledge-nest-no-such-parser', '{input}'], version: '1' });
   assert.deepEqual(summary(missing), ['command: An executable file']);
-  assert.match(missing.errors[0].hint, /dunlin-no-such-parser on PATH was not found/u);
+  assert.match(missing.errors[0].hint, /knowledge-nest-no-such-parser on PATH was not found/u);
   const unversioned = check({ command: [process.execPath, '{input}'] });
   assert.deepEqual(unversioned.warnings.map(({ code, arg }) => code + ' ' + arg), ['ARG_RECOMMENDED version']);
 
   if (process.platform === 'win32') {
-    const root = await mkdtemp(join(tmpdir(), 'dunlin-batch-'));
+    const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-batch-'));
     t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
     await writeFile(join(root, 'tool.cmd'), '@echo off\r\n');
     const batch = check({ command: [join(root, 'tool.cmd'), '{input}'], version: '1' });
@@ -91,8 +91,8 @@ test('checks loader.command placeholders, executables and versions', async (t) =
 });
 
 test('runs external parsers and validates their output', async (t) => {
-  // loader.command runs in Rust; load one file through Dunlin.loadCorpus and read the document back.
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-command-'));
+  // loader.command runs in Rust; load one file through KnowledgeNest.loadCorpus and read the document back.
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-command-'));
   const state = join(root, 'state.sqlite');
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const bytes = Buffer.from('ポンプの点検箇所\n');
@@ -103,7 +103,7 @@ test('runs external parsers and validates their output', async (t) => {
     const request = { state, corpus: join(root, 'corpus'), originals: join(root, 'originals'), force: true, ocrVersion: 'v', root,
       files: [{ id: 'docs', file: join(root, 'pump.vsdx'), objectId: 'pump.vsdx', kind: 'command', route: route.name + run++,
         command: { module: route.name, args: route.args } }] };
-    const { documents } = await Dunlin.loadCorpus(request, { parse: () => { throw new Error('unexpected host parse'); } }, options);
+    const { documents } = await KnowledgeNest.loadCorpus(request, { parse: () => { throw new Error('unexpected host parse'); } }, options);
     return documents[0];
   };
   const json = await parse({ output: 'json', env: { PARSER_MODE: 'json' }, version: '1' });
@@ -133,7 +133,7 @@ test('runs external parsers and validates their output', async (t) => {
 });
 
 test('builds with loader.command, reuses its output and reports parser assignments', { timeout: 60_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-command-parser-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-command-parser-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const manuals = join(root, 'manuals');
   const project = join(root, 'kb');
@@ -143,12 +143,12 @@ test('builds with loader.command, reuses its output and reports parser assignmen
   await writeFile(join(manuals, 'drawings', 'pump.vsdx'), 'ポンプ図面の点検箇所はシール部です。\n');
   await writeFile(join(manuals, 'notes.bin'), 'not a supported standard file');
   const run = (...args) => runNode(process.execPath, [cli, '--project', project, ...args],
-    { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, timeout: 20_000, encoding: 'utf8' });
+    { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, timeout: 20_000, encoding: 'utf8' });
   const json = async (...args) => JSON.parse((await run(...args, '--json')).stdout);
   const calls = async () => (await readFile(counter, 'utf8').catch(() => '')).split('\n').filter(Boolean).length;
   await runNode(process.execPath, [cli, 'init', 'mcp', './kb', '--source', './manuals'],
-    { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8' });
-  const configPath = join(project, 'Dunlinfile.yaml');
+    { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8' });
+  const configPath = join(project, 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   const command = {
     use: 'loader.command',
@@ -174,11 +174,11 @@ test('builds with loader.command, reuses its output and reports parser assignmen
   assert.equal(result.results[0].evidence.source.objectId, 'drawings/pump.vsdx');
   assert.match(result.context.text, /シール部/u);
 
-  const state = new DatabaseSync(join(project, '.dunlin', 'state.sqlite'), { readOnly: true });
+  const state = new DatabaseSync(join(project, '.knowledge-nest', 'state.sqlite'), { readOnly: true });
   const loaded = state.prepare("SELECT source_id, object_id, version FROM extractions WHERE key LIKE '[\"loader.command-v1\"%'").all();
   state.close();
   assert.equal(loaded.length, 1);
-  const corpus = new DatabaseSync(join(project, '.dunlin', 'corpus', 'corpus.sqlite'), { readOnly: true });
+  const corpus = new DatabaseSync(join(project, '.knowledge-nest', 'corpus', 'corpus.sqlite'), { readOnly: true });
   const { source_id, object_id, version } = loaded[0];
   const record = corpus.prepare('SELECT record FROM revisions WHERE source_id = ? AND object_id = ? AND version = ?').get(source_id, object_id, version);
   corpus.close();

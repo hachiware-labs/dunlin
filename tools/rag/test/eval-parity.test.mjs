@@ -51,12 +51,12 @@ const cases = [
 
 /** A built project and a copy of it, with evaluation data in both. */
 async function projects(t) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-eval-parity-'));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-eval-parity-'));
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   await runNode(process.execPath, [cli, 'init', 'rag', 'kb', '--no-embedding'], { cwd: root, env });
   const base = join(root, 'kb');
   for (const [name, content] of Object.entries(documents)) await writeFile(join(base, 'docs', name), content);
-  const configPath = join(base, 'Dunlinfile.yaml');
+  const configPath = join(base, 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   config.transform.modules[1].with = { ...config.transform.modules[1].with, size: 80, overlap: 0 };
   config.search.modules.find(({ use }) => use === 'context.assemble').with.budget_chars = 200;
@@ -67,7 +67,7 @@ async function projects(t) {
   ] };
   await writeFile(configPath, stringify(config));
   await runNode(process.execPath, [cli, '--project', 'kb', 'build'], { cwd: root, env });
-  const state = new DatabaseSync(join(base, '.dunlin', 'state.sqlite'));
+  const state = new DatabaseSync(join(base, '.knowledge-nest', 'state.sqlite'));
   state.exec('CREATE TABLE IF NOT EXISTS evaluation_datasets (id TEXT PRIMARY KEY, data TEXT NOT NULL);'
     + 'CREATE TABLE IF NOT EXISTS evaluation_reports (id TEXT PRIMARY KEY, tag TEXT UNIQUE, data TEXT NOT NULL);'
     + 'CREATE TABLE IF NOT EXISTS evaluation_dataset_tags (name TEXT PRIMARY KEY, dataset_id TEXT NOT NULL);'
@@ -83,7 +83,7 @@ async function projects(t) {
     .then(({ stdout }) => JSON.parse(stdout), (error) => ({ exitCode: error.code, ...JSON.parse(error.stdout) }));
 
   const refBase = join(root, 'ref');
-  const paths = { state: join(refBase, '.dunlin', 'state.sqlite'), artifacts: join(refBase, '.dunlin', 'artifacts'), corpus: join(refBase, '.dunlin', 'corpus') };
+  const paths = { state: join(refBase, '.knowledge-nest', 'state.sqlite'), artifacts: join(refBase, '.knowledge-nest', 'artifacts'), corpus: join(refBase, '.knowledge-nest', 'corpus') };
   const db = new DatabaseSync(paths.state);
   db.exec('PRAGMA busy_timeout = 500');
   t.after(() => db.close());
@@ -105,7 +105,7 @@ async function projects(t) {
     evaluate: (values) => referenceEvaluate(db, project, build, settings, values, 'run-reference', database, search),
     maps: (action, ref, values = {}) => referenceEvidenceMaps(db, project, action, ref, values, database, build),
   };
-  const actual = new DatabaseSync(join(base, '.dunlin', 'state.sqlite'), { readOnly: true });
+  const actual = new DatabaseSync(join(base, '.knowledge-nest', 'state.sqlite'), { readOnly: true });
   t.after(() => actual.close());
   return { root, run, reference, db, actual };
 }

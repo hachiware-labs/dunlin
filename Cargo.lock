@@ -1227,57 +1227,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
-name = "dunlin"
-version = "0.5.0"
-dependencies = [
- "base64 0.23.1",
- "blake3",
- "csv",
- "docling",
- "docling-core",
- "dunce",
- "ego-tree",
- "http-body-util",
- "hyper",
- "hyper-util",
- "icu_collator",
- "icu_normalizer",
- "icu_properties",
- "icu_segmenter",
- "idna",
- "image",
- "libc",
- "lindera",
- "memmap2",
- "napi",
- "napi-build",
- "napi-derive",
- "oar-ocr",
- "ort",
- "pdf_oxide",
- "percent-encoding",
- "pulldown-cmark",
- "rayon",
- "regex",
- "rmcp",
- "rusqlite",
- "scraper",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "tantivy",
- "tempfile",
- "tokio",
- "unicode-segmentation",
- "ureq",
- "url",
- "uuid",
- "walkdir",
- "windows-sys 0.61.2",
- "yaml-rust2",
-]
-
-[[package]]
 name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2378,6 +2327,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8772c92c0f41c4a672cbdee6728253e5ae8fcc1c5eb5c6c676579565684bbf68"
 dependencies = [
  "mutate_once",
+]
+
+[[package]]
+name = "knowledge-nest"
+version = "0.5.0"
+dependencies = [
+ "base64 0.23.1",
+ "blake3",
+ "csv",
+ "docling",
+ "docling-core",
+ "dunce",
+ "ego-tree",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "icu_collator",
+ "icu_normalizer",
+ "icu_properties",
+ "icu_segmenter",
+ "idna",
+ "image",
+ "libc",
+ "lindera",
+ "memmap2",
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "oar-ocr",
+ "ort",
+ "pdf_oxide",
+ "percent-encoding",
+ "pulldown-cmark",
+ "rayon",
+ "regex",
+ "rmcp",
+ "rusqlite",
+ "scraper",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tantivy",
+ "tempfile",
+ "tokio",
+ "unicode-segmentation",
+ "ureq",
+ "url",
+ "uuid",
+ "walkdir",
+ "windows-sys 0.61.2",
+ "yaml-rust2",
 ]
 
 [[package]]

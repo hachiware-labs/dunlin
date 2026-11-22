@@ -47,7 +47,7 @@ async function run(load, root, name, sources, routes, rounds = 2) {
 }
 
 async function compare(t, files, routes = defaultRoutes(), options = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-load-parity-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-load-parity-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const docs = join(root, 'docs');
   await mkdir(join(docs, 'sub'), { recursive: true });

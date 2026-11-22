@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { z } from 'zod';
 
 import { resolveApiKey, resolveConfigValue } from './cli-reference/config.mjs';
@@ -82,7 +82,7 @@ function releaseVectorMetadata(database) {
 }
 
 async function vectorSearch(directory, build, embedder, query, { database, max, sourceIds, signal, backend }) {
-  if (!build.vector) throw error('VECTOR_REQUIRED', 'The selected build has no vector index. Run dunlin build with index.vector configured.');
+  if (!build.vector) throw error('VECTOR_REQUIRED', 'The selected build has no vector index. Run nest build with index.vector configured.');
   if (build.vector.identity !== revision(JSON.stringify(embedder.identity))) {
     throw error('VECTOR_MODEL_MISMATCH', 'The query embedding model differs from the model used for the selected build.');
   }
@@ -113,7 +113,7 @@ function vectorBackend(name, paths, { settings, signal } = {}) {
   if (name === 'exact') return {
     name, engine: 'vector-exact', file: 'vectors.f32',
     search(directory, { needle, entries, positions, max, signal }) {
-      return Dunlin.rankVectors(join(directory, 'vectors.f32'), { needle, positions, rows: entries.length, limit: max }, { signal });
+      return KnowledgeNest.rankVectors(join(directory, 'vectors.f32'), { needle, positions, rows: entries.length, limit: max }, { signal });
     },
   };
   if (name !== 'hannoy') throw error('VECTOR_BACKEND_MISMATCH', 'Unknown vector index backend.');
@@ -358,9 +358,9 @@ function keywordOptions(args, paths) {
 }
 export async function referenceOpen(paths, build) {
   const index = join(paths.artifacts, build.index);
-  if (!await Dunlin.inspectIndex(index)) {
-    throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run dunlin build first.');
+  if (!await KnowledgeNest.inspectIndex(index)) {
+    throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run nest build first.');
   }
-  return Dunlin.open(index, { corpusBackend: 'sqlite', corpusDirectory: build.shared_corpus ? paths.corpus : undefined,
+  return KnowledgeNest.open(index, { corpusBackend: 'sqlite', corpusDirectory: build.shared_corpus ? paths.corpus : undefined,
     ...keywordOptions(build.keyword, paths) });
 }

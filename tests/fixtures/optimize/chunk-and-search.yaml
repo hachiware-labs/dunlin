@@ -1,0 +1,30 @@
+optimize:
+  base: KnowledgeNestfile.yaml
+  vary:
+    - name: chunking                 # How the text is split.
+      options:
+        as-is: {}                    # The base as it is.
+        length:
+          transform:
+            - chunk.length: { unit: characters, size: [20, 80], overlap: 0 }
+        structure:                   # Another module.
+          transform:
+            - chunk.structure: { max_chars: 200 }
+    - name: search                   # How it is searched.
+      options:
+        top10: {}
+        top1:
+          search:
+            - retrieval.keyword: { top_k: 1 }
+        vector:                      # Two sections that change together.
+          index:
+            - index.keyword: { tokenizer: lindera }
+            - index.vector: { model: local-embed }
+          search:
+            - retrieval.keyword: { top_k: 10 }
+            - retrieval.vector: { model: local-embed, top_k: 10 }
+  eval:
+    data: default
+    metric: recall
+  limit:
+    candidates: 20

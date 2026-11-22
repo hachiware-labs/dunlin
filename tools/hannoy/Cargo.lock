@@ -152,7 +152,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dunlin-hannoy"
+name = "knowledge-nest-hannoy"
 version = "0.2.0"
 dependencies = [
  "hannoy",

@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { atomicWrite, categories, revision, withWriteLock } from './authoring/files.mjs';
 import { resolveApiKey, resolveConfigValue } from './config.mjs';
@@ -27,43 +27,43 @@ import { isSearchProject, serveAddress, serveCredential, withServeOverrides } fr
 import { constructionStages as stages, describeModules, moduleSettings, parseConfig, ragTemplate, restoreModules,
   runModules, validateRag, wikiTemplate, writeTemplate } from './project-modules.mjs';
 
-const configName = 'Dunlinfile.yaml';
+const configName = 'KnowledgeNestfile.yaml';
 let DatabaseSync;
 const projectTypes = ['mcp', 'rag', 'wiki', 'para'];
 export const projectCommands = {
-  init: 'dunlin init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]',
-  config: 'dunlin config list | dunlin config set <embedding|llm> --model <name> [--provider <name>] | dunlin config set ocr [--tool oar-ocr|lightonocr] | dunlin config unset <embedding|llm|ocr> [--json]',
-  build: 'dunlin build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]',
-  source: 'dunlin source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]',
-  transform: 'dunlin transform [--project <directory>] [--config <file>] [--dry-run] [--json]',
-  index: 'dunlin index [--project <directory>] [--config <file>] [--dry-run] [--json]',
-  search: 'dunlin search <query> [--project <directory>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]',
-  ask: 'dunlin ask <question> [--project <directory>] [--build <ref>] [--config <file>] [--json]',
-  serve: 'dunlin serve [--project <directory>] [--transport <http|stdio>] [--host <address>] [--port <port>] [--print-config [--json]]',
-  status: 'dunlin status [--project <directory>] [--json]',
-  validate: 'dunlin validate [--project <directory>] [--config <file>] [--json]',
-  defaults: 'dunlin defaults [--apply <section>] [--project <directory>] [--json]',
-  modules: 'dunlin modules <list|describe <name>> [--project <directory>] [--json]',
-  add: 'dunlin add <tool> | dunlin add --list [--project <directory>] [--json]',
-  remove: 'dunlin remove <tool> [--project <directory>] [--json]',
-  use: 'dunlin use <build> [--project <directory>] [--json]',
-  tag: 'dunlin tag <name> [build] [--move] [--project <directory>] [--json]',
-  'eval-data': 'dunlin eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]',
-  eval: 'dunlin eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]',
-  report: 'dunlin report <show|list|compare> [--project <directory>] [--json]',
-  dictionary: 'dunlin dictionary suggest [--report <ref>] | dunlin dictionary add <file> --config <candidate> [--project <directory>] [--json]',
-  'evidence-map': 'dunlin evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]',
-  ingress: 'dunlin ingress <path...> | dunlin ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]',
-  query: 'dunlin query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]',
-  verify: 'dunlin verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]',
-  issue: 'dunlin issue <id> <open|resolved|dismissed> [--project <directory>] [--json]',
-  rules: 'dunlin rules [--project <directory>] [--json]',
-  progress: 'dunlin progress <work-id> [--project <directory>] [--json]',
-  cite: 'dunlin cite <page> <number> [--project <directory>] [--json]',
-  instruct: 'dunlin instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | dunlin instruct --persistent <rule> [--project <directory>] [--json]',
-  'save-answer': 'dunlin save-answer <query-run> <page> <title> [--project <directory>] [--json]',
-  archive: 'dunlin archive <page> [--project <directory>] [--restore] [--json]',
-  undo: 'dunlin undo <work-id> [--project <directory>] [--json]',
+  init: 'nest init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]',
+  config: 'nest config list | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config unset <embedding|llm|ocr> [--json]',
+  build: 'nest build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]',
+  source: 'nest source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]',
+  transform: 'nest transform [--project <directory>] [--config <file>] [--dry-run] [--json]',
+  index: 'nest index [--project <directory>] [--config <file>] [--dry-run] [--json]',
+  search: 'nest search <query> [--project <directory>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]',
+  ask: 'nest ask <question> [--project <directory>] [--build <ref>] [--config <file>] [--json]',
+  serve: 'nest serve [--project <directory>] [--transport <http|stdio>] [--host <address>] [--port <port>] [--print-config [--json]]',
+  status: 'nest status [--project <directory>] [--json]',
+  validate: 'nest validate [--project <directory>] [--config <file>] [--json]',
+  defaults: 'nest defaults [--apply <section>] [--project <directory>] [--json]',
+  modules: 'nest modules <list|describe <name>> [--project <directory>] [--json]',
+  add: 'nest add <tool> | nest add --list [--project <directory>] [--json]',
+  remove: 'nest remove <tool> [--project <directory>] [--json]',
+  use: 'nest use <build> [--project <directory>] [--json]',
+  tag: 'nest tag <name> [build] [--move] [--project <directory>] [--json]',
+  'eval-data': 'nest eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]',
+  eval: 'nest eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]',
+  report: 'nest report <show|list|compare> [--project <directory>] [--json]',
+  dictionary: 'nest dictionary suggest [--report <ref>] | nest dictionary add <file> --config <candidate> [--project <directory>] [--json]',
+  'evidence-map': 'nest evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]',
+  ingress: 'nest ingress <path...> | nest ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]',
+  query: 'nest query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]',
+  verify: 'nest verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]',
+  issue: 'nest issue <id> <open|resolved|dismissed> [--project <directory>] [--json]',
+  rules: 'nest rules [--project <directory>] [--json]',
+  progress: 'nest progress <work-id> [--project <directory>] [--json]',
+  cite: 'nest cite <page> <number> [--project <directory>] [--json]',
+  instruct: 'nest instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | nest instruct --persistent <rule> [--project <directory>] [--json]',
+  'save-answer': 'nest save-answer <query-run> <page> <title> [--project <directory>] [--json]',
+  archive: 'nest archive <page> [--project <directory>] [--restore] [--json]',
+  undo: 'nest undo <work-id> [--project <directory>] [--json]',
 };
 
 class ProjectError extends Error {
@@ -95,7 +95,7 @@ export async function findProject(directory) {
 }
 
 function projectPaths(root) {
-  const data = join(root, '.dunlin');
+  const data = join(root, '.knowledge-nest');
   return { data, state: join(data, 'state.sqlite'), artifacts: join(data, 'artifacts'), corpus: join(data, 'corpus') };
 }
 
@@ -152,7 +152,7 @@ async function initialize(type, directory, values) {
   const root = resolve(directory);
   const paths = projectPaths(root);
   const configPath = join(root, configName);
-  const legacyPath = join(root, 'dunlin.json');
+  const legacyPath = join(root, 'knowledge-nest.json');
   if (await exists(configPath) || await exists(legacyPath) || await exists(paths.data)) {
     throw new ProjectError(2, 'PROJECT_EXISTS', `A project already exists at ${root}`);
   }
@@ -190,19 +190,19 @@ async function initialize(type, directory, values) {
   } finally {
     db.close();
   }
-  if (!isSearchProject(type)) Dunlin.ensureWiki(paths.state);
-  await writeFile(join(root, '.gitignore'), '.dunlin/\n.env\n.env.*\n', { flag: 'wx' }).catch((error) => {
+  if (!isSearchProject(type)) KnowledgeNest.ensureWiki(paths.state);
+  await writeFile(join(root, '.gitignore'), '.knowledge-nest/\n.env\n.env.*\n', { flag: 'wx' }).catch((error) => {
     if (error.code !== 'EEXIST') throw error;
   });
   let next;
-  if (type === 'mcp') next = 'Add documents, then run dunlin build and dunlin serve --print-config.';
-  else if (type === 'rag') next = 'Add documents and run dunlin build. ' + (models.llm?.model
-    ? 'Run dunlin ask or dunlin serve.' : 'Set models.answerer.model before using ask or the responses endpoint.');
+  if (type === 'mcp') next = 'Add documents, then run nest build and nest serve --print-config.';
+  else if (type === 'rag') next = 'Add documents and run nest build. ' + (models.llm?.model
+    ? 'Run nest ask or nest serve.' : 'Set models.answerer.model before using ask or the responses endpoint.');
   else {
     const missing = [!models.llm?.model && 'models.writer.model', !purpose && 'about.purpose'].filter(Boolean);
-    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run dunlin ingress.' : 'Run dunlin ingress <path>.';
+    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run nest ingress.' : 'Run nest ingress <path>.';
   }
-  return { config: configPath, type, next: ocr ? next + ' To prepare ' + ocr + ', run dunlin add ocr.' : next };
+  return { config: configPath, type, next: ocr ? next + ' To prepare ' + ocr + ', run nest add ocr.' : next };
 }
 
 function normalizeProjectType(config, warnings) {
@@ -214,7 +214,7 @@ function normalizeProjectType(config, warnings) {
 
 async function loadProject(configPath, command, candidate, warnings) {
   if (!configPath || !await exists(configPath)) {
-    throw new ProjectError(3, 'PROJECT_REQUIRED', 'No Dunlinfile.yaml found. Run dunlin init <mcp|rag|wiki|para> <directory>.');
+    throw new ProjectError(3, 'PROJECT_REQUIRED', 'No KnowledgeNestfile.yaml found. Run nest init <mcp|rag|wiki|para> <directory>.');
   }
   const root = dirname(configPath);
   const file = candidate === undefined ? configPath : resolve(candidate);
@@ -224,7 +224,7 @@ async function loadProject(configPath, command, candidate, warnings) {
     input = await readFile(file, 'utf8');
     parsed = parseConfig(input);
   } catch {
-    throw new ProjectError(2, 'INVALID_CONFIG', 'Could not read a valid Dunlinfile.yaml');
+    throw new ProjectError(2, 'INVALID_CONFIG', 'Could not read a valid KnowledgeNestfile.yaml');
   }
   if (parsed.syntaxError) {
     const error = new ProjectError(2, 'INVALID_CONFIG', parsed.syntaxError.message);
@@ -237,7 +237,7 @@ async function loadProject(configPath, command, candidate, warnings) {
   const type = config?.init?.type;
   const authoring = ['ingress', 'query', 'verify', 'archive', 'undo', 'issue', 'rules', 'cite', 'instruct', 'save-answer', 'progress'].includes(command);
   if (!projectTypes.includes(type)) {
-    const error = new ProjectError(2, 'SECTION_MISSING', 'Expected init.type in the Dunlinfile. Generate a new standard file with dunlin init.');
+    const error = new ProjectError(2, 'SECTION_MISSING', 'Expected init.type in the KnowledgeNestfile. Generate a new standard file with nest init.');
     error.diagnostics = [{ code: error.code, file, line: line(['init', 'type']), section: 'init', module: null,
       arg: 'type', received: null, expected: projectTypes, suggestions: [], hint: error.message }];
     throw error;
@@ -245,7 +245,7 @@ async function loadProject(configPath, command, candidate, warnings) {
   const active = candidate === undefined ? config : normalizeProjectType(parseConfig(await readFile(configPath, 'utf8')).config);
   if (candidate !== undefined) {
     if (active?.init?.type !== type) throw new ProjectError(2, 'WRONG_PROJECT_TYPE', 'Candidate and project must use the same init.type.');
-    checkTrialLimits(active, () => { throw new ProjectError(2, 'INVALID_CONFIG', 'Fix trial_limits in the project Dunlinfile.'); });
+    checkTrialLimits(active, () => { throw new ProjectError(2, 'INVALID_CONFIG', 'Fix trial_limits in the project KnowledgeNestfile.'); });
   }
   if (command === 'ask' && type !== 'rag') throw new ProjectError(2, 'WRONG_PROJECT_TYPE', 'ask requires a RAG project.');
   if (!isSearchProject(type) && !authoring && !['serve', 'validate', 'defaults', 'add', 'remove'].includes(command)) {
@@ -255,7 +255,7 @@ async function loadProject(configPath, command, candidate, warnings) {
   const effective = candidate !== undefined && command === 'eval'
     ? { ...config, ...Object.fromEntries(['eval-data', 'eval'].map((key) => [key, active[key]])) } : config;
   if (effective !== config && ['eval-data', 'eval'].some((key) => config[key] !== undefined && JSON.stringify(config[key]) !== JSON.stringify(active[key]))) {
-    warnings.push({ code: 'EVAL_CONDITIONS_PINNED', message: 'This evaluation uses the dataset and method from the project Dunlinfile.' });
+    warnings.push({ code: 'EVAL_CONDITIONS_PINNED', message: 'This evaluation uses the dataset and method from the project KnowledgeNestfile.' });
   }
   const checked = isSearchProject(type) ? validateRag(effective, file, line) : validateWiki(effective, file, line);
   warnings.push(...(checked.warnings ?? []));
@@ -266,7 +266,7 @@ async function loadProject(configPath, command, candidate, warnings) {
   }
   const paths = projectPaths(root);
   if (!await exists(paths.state)) {
-    throw new ProjectError(3, 'STATE_REQUIRED', 'Project state is missing. Initialize a project with dunlin init ' + type + '.');
+    throw new ProjectError(3, 'STATE_REQUIRED', 'Project state is missing. Initialize a project with nest init ' + type + '.');
   }
   const hannoyModule = isSearchProject(type) && ['build', 'index', 'eval', 'search', 'ask', 'serve', 'validate'].includes(command)
     && ['index', 'search'].flatMap((stage) => checked.plan[stage] ?? []).find(({ module }) => module.tool === 'hannoy');
@@ -310,8 +310,8 @@ function currentBuild(paths, required = true, reference) {
     db.close();
   }
   // An unknown reference names itself, as the Rust CLI reports it since the usability review.
-  if (required && reference !== undefined) throw new ProjectError(3, 'BUILD_NOT_FOUND', `Unknown build: ${reference}. Pass a build tag or ID; dunlin status shows the current build.`);
-  if (required) throw new ProjectError(3, 'BUILD_REQUIRED', 'No searchable build. Run dunlin build first.');
+  if (required && reference !== undefined) throw new ProjectError(3, 'BUILD_NOT_FOUND', `Unknown build: ${reference}. Pass a build tag or ID; nest status shows the current build.`);
+  if (required) throw new ProjectError(3, 'BUILD_REQUIRED', 'No searchable build. Run nest build first.');
   return null;
 }
 
@@ -426,7 +426,7 @@ async function adoptBuild(project, reference) {
       // Rust records the adoption in one transaction and asks for the file in the middle of it.
       let refused;
       let replaced = false;
-      const result = await Dunlin.adoptBuild({ state: project.paths.state, buildId: build.build_id, searchId,
+      const result = await KnowledgeNest.adoptBuild({ state: project.paths.state, buildId: build.build_id, searchId,
         previous: JSON.stringify(safeConfig(project.config)), adopted: JSON.stringify(safeConfig(config)),
         dataset: config['eval-data']?.use, settings: adopted.evalSettings ?? null }, {
         async writeConfig() {
@@ -455,7 +455,7 @@ async function tagBuild(project, name, ref, move) {
   const db = openState(project.paths);
   try { ensureStages(db); } finally { db.close(); }
   let refused;
-  const result = await Dunlin.tagBuild({ state: project.paths.state, name, reference: ref, move: Boolean(move),
+  const result = await KnowledgeNest.tagBuild({ state: project.paths.state, name, reference: ref, move: Boolean(move),
     search: moduleSettings(project.plan.search), configSearch: project.config.search, configModels: project.config.models }, {
     searchConfigId(build) {
       try {
@@ -556,7 +556,7 @@ async function buildProject(project, command, runId, values, warnings) {
       configChanged: answer(async () => buildConfigChanged(project, await readFile(project.configPath, 'utf8'))),
       indexTool: answer(() => indexToolPath(paths, hannoy)),
     };
-    const result = await Dunlin.runBuild(request, host);
+    const result = await KnowledgeNest.runBuild(request, host);
     if (result.status === 'failed') throw stageFailure(result.error, refused);
     warnings.push(...result.warnings);
     return result.output;
@@ -583,7 +583,7 @@ function buildConfigChanged(project, input) {
 
 async function withExecutionLock(paths, run) {
   let lock;
-  try { lock = Dunlin.acquireExecutionLock(join(paths.data, 'execution.lock')); }
+  try { lock = KnowledgeNest.acquireExecutionLock(join(paths.data, 'execution.lock')); }
   catch (error) {
     if (error.code === 'BUSY') throw new ProjectError(4, 'BUILD_BUSY', 'Another project operation is running. Retry after it finishes.');
     throw error;
@@ -611,7 +611,7 @@ function modelSetting(project, build, name) {
 /** The search configuration ID (spec 28.10), computed in Rust from the plan, the overrides and the models. */
 function searchConfigId(plan, options = {}, build, project) {
   const { limit, sourceIds, budgetChars } = options;
-  return Dunlin.searchConfigId({ plan: moduleSettings(plan), limit, budgetChars, sourceIds, build: build ?? {},
+  return KnowledgeNest.searchConfigId({ plan: moduleSettings(plan), limit, budgetChars, sourceIds, build: build ?? {},
     rerankModels: plan.filter(({ module }) => module.role === 'rerank').map(({ args }) => modelSetting(project, build, args.model)) });
 }
 
@@ -724,7 +724,7 @@ async function evalDataCommand(project, action, [positional, other], values) {
       await database.close();
     }
   };
-  let result = ['add', 'import', 'sync', 'generate'].includes(action) ? await withBuild() : await Dunlin.evalData(request);
+  let result = ['add', 'import', 'sync', 'generate'].includes(action) ? await withBuild() : await KnowledgeNest.evalData(request);
   if (result.status === 'failed' && result.error.code === 'BUILD_NEEDED') result = await withBuild();
   if (result.status === 'failed') throw stageFailure(result.error);
   if (result.select) await selectDataset(project, result.select);
@@ -764,8 +764,8 @@ async function serveWiki(project, settings) {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
-    const result = await Dunlin.wikiServe({ base: await wikiRequest(project, 'serve', [], {}), settings, token }, {
-      ...parserHost(), listening: ({ port }) => console.error('Dunlin ' + type + ': ' + serveAddress(settings.host, port) + '/'),
+    const result = await KnowledgeNest.wikiServe({ base: await wikiRequest(project, 'serve', [], {}), settings, token }, {
+      ...parserHost(), listening: ({ port }) => console.error('Knowledge-Nest ' + type + ': ' + serveAddress(settings.host, port) + '/'),
     }, { signal: controller.signal });
     if (result.status === 'failed') throw stageFailure(result.error);
   } finally {
@@ -805,7 +805,7 @@ async function wikiRequest(project, command, args, values, runId, { track = fals
 }
 
 async function wikiCommand(project, command, args, values, runId, options = {}, warnings = []) {
-  const result = await Dunlin.wiki(await wikiRequest(project, command, args, values, runId, options), parserHost());
+  const result = await KnowledgeNest.wiki(await wikiRequest(project, command, args, values, runId, options), parserHost());
   if (result.status === 'failed') throw stageFailure(result.error);
   warnings.push(...result.warnings);
   return result.output;
@@ -826,7 +826,7 @@ async function evidenceMapCommand(project, action, reference, values) {
       await database.close();
     }
   } else {
-    result = await Dunlin.evidenceMaps(request);
+    result = await KnowledgeNest.evidenceMaps(request);
   }
   if (result.status === 'failed') throw stageFailure(result.error);
   if (action !== 'export') return result.output;
@@ -842,13 +842,13 @@ function reportOutput(result) {
 
 /** Whether the latest development report is for this build and search configuration. */
 function evaluationState(paths, config, evalSettings, buildId, searchId) {
-  return reportOutput(Dunlin.evaluationStatus({ state: paths.state, buildId, searchId, dataset: config['eval-data']?.use,
+  return reportOutput(KnowledgeNest.evaluationStatus({ state: paths.state, buildId, searchId, dataset: config['eval-data']?.use,
     settings: evalSettings ?? null }));
 }
 
 /** `dictionary suggest`: the missed evidence of a development report on a Lindera build. */
 async function suggestFromReport(project, reference) {
-  const { report, data } = reportOutput(Dunlin.dictionaryEvaluation({ state: project.paths.state, report: reference,
+  const { report, data } = reportOutput(KnowledgeNest.dictionaryEvaluation({ state: project.paths.state, report: reference,
     dataset: project.config['eval-data']?.use, includeGenerated: Boolean(project.evalSettings?.includeGenerated) }));
   const build = currentBuild(project.paths, true, report.build_id);
   if (build.keyword?.tokenizer !== 'lindera') {
@@ -880,14 +880,14 @@ function keywordOptions(args, paths) {
 
 async function openBuild(paths, build) {
   const index = join(paths.artifacts, build.index);
-  if (!await Dunlin.inspectIndex(index)) {
-    throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run dunlin build first.');
+  if (!await KnowledgeNest.inspectIndex(index)) {
+    throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run nest build first.');
   }
-  return Dunlin.open(index, { corpusBackend: 'sqlite', corpusDirectory: build.shared_corpus ? paths.corpus : undefined,
+  return KnowledgeNest.open(index, { corpusBackend: 'sqlite', corpusDirectory: build.shared_corpus ? paths.corpus : undefined,
     ...keywordOptions(build.keyword, paths) });
 }
 
-const indexOpens = channel('dunlin:index-open');
+const indexOpens = channel('knowledge-nest:index-open');
 
 /**
  * Serves a project in Rust (spec 28.10 step 3c): HTTP with /v1/search, /v1/responses and /mcp, or MCP
@@ -904,7 +904,7 @@ async function serveProject(project, settings) {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   try {
-    const result = await Dunlin.serveProject({
+    const result = await KnowledgeNest.serveProject({
       projectType: type, settings, token, paths: project.paths, search: moduleSettings(project.plan.search),
       ask: project.plan.ask ? moduleSettings(project.plan.ask) : [], model: model?.settings ?? null,
     }, {
@@ -916,8 +916,8 @@ async function serveProject(project, settings) {
           return { error: { code: error.code, message: error.message, exitCode: error.exitCode } };
         }
       },
-      listening: ({ port, buildId }) => console.error(port === undefined ? 'Dunlin MCP stdio (' + buildId + ')'
-        : 'Dunlin ' + type + ': ' + serveAddress(settings.host, port) + '/'),
+      listening: ({ port, buildId }) => console.error(port === undefined ? 'Knowledge-Nest MCP stdio (' + buildId + ')'
+        : 'Knowledge-Nest ' + type + ': ' + serveAddress(settings.host, port) + '/'),
       // For tracing, as diagnostics_channel subscribers see it: `{ path }` of each index opened.
       opened: (path) => indexOpens.publish({ path }),
     }, { signal: controller.signal });
@@ -951,7 +951,7 @@ async function compareDefaults(project, section) {
     throw error;
   }
   await withWriteLock(paths.data, async () => {
-    if (revision(await readFile(configPath, 'utf8')) !== configDigest) throw new ProjectError(4, 'CONFIG_CHANGED', 'The Dunlinfile changed. Retry defaults.');
+    if (revision(await readFile(configPath, 'utf8')) !== configDigest) throw new ProjectError(4, 'CONFIG_CHANGED', 'The KnowledgeNestfile changed. Retry defaults.');
     await atomicWrite(configPath, writeTemplate(next));
   });
   return { applied: section, differences: differences.filter((change) => change.section === section) };
@@ -996,7 +996,7 @@ export async function runProjectCommand(command, args, explicitProject) {
     if (command === 'eval') options.tag = { type: 'string' };
     if (command === 'eval-data') {
       for (const name of ['question', 'doc', 'quote', 'prefix', 'suffix', 'test-ratio', 'seed', 'output',
-        'model', 'count', 'state', 'reviewer', 'reviewer-type', 'from-search', 'hit', 'page', 'heading']) options[name] = { type: 'string' };
+        'model', 'count', 'kind', 'state', 'reviewer', 'reviewer-type', 'from-search', 'hit', 'page', 'heading']) options[name] = { type: 'string' };
       options.case = { type: 'string', multiple: true };
     }
     if (command === 'serve') {
@@ -1160,7 +1160,7 @@ export async function runProjectCommand(command, args, explicitProject) {
           const db = openState(project.paths, command === 'report' || (command === 'eval-data' && readOnly));
           try {
             if (command === 'report') {
-              return reportOutput(Dunlin.evaluationReports({ state: project.paths.state, action: type, refs: positionals.slice(1), split: values.split }));
+              return reportOutput(KnowledgeNest.evaluationReports({ state: project.paths.state, action: type, refs: positionals.slice(1), split: values.split }));
             }
             if (command === 'eval-data') {
               if (!readOnly) {
@@ -1201,7 +1201,7 @@ export async function runProjectCommand(command, args, explicitProject) {
         try {
           const searchId = searchConfigId(project.plan.search, {}, build, project);
           const evaluation = build && evaluationState(project.paths, project.config, project.evalSettings, build.build_id, searchId);
-          const trials = { limits: project.trialLimits, usage: Dunlin.trialUsage(project.paths.state) };
+          const trials = { limits: project.trialLimits, usage: KnowledgeNest.trialUsage(project.paths.state) };
           data = build ? { build_id: build.build_id, search_config_id: searchId,
             evaluation_status: evaluation.state, evaluation_report: evaluation.report, documents: build.documents, skipped: build.skipped,
             trials, ...await statusDetails(state, project, build, evaluation, warnings) } : { build_id: null, trials };
@@ -1251,7 +1251,7 @@ export async function runProjectCommand(command, args, explicitProject) {
       console.log(`${data.build_id} ${data.search_config_id} ${data.evaluation_status}${data.evaluation_report ? ' ' + JSON.stringify(data.evaluation_report.scores) : ''}\n${JSON.stringify(data, null, 2)}`);
     }
     else if (command === 'build' && data.build_id) {
-      console.log(`${data.build_id} ${data.config_id}\nDocuments: ${data.documents}/${data.files}; skipped: ${data.skipped.length}; index ${data.reused ? 'reused' : 'built'} (${data.elapsed_ms} ms).\nServing changed: ${data.serving_changed}\nNext: dunlin search "手順"`);
+      console.log(`${data.build_id} ${data.config_id}\nDocuments: ${data.documents}/${data.files}; skipped: ${data.skipped.length}; index ${data.reused ? 'reused' : 'built'} (${data.elapsed_ms} ms).\nServing changed: ${data.serving_changed}\nNext: nest search "手順"`);
       for (const file of data.skipped) console.log(`${file.source_id}:${file.path} — ${file.reason}`);
       for (const [stage, result] of Object.entries(data.stages)) console.log(`${stage}: ${result.reused ? 'reused' : 'executed'} (${result.id})`);
     } else console.log(JSON.stringify(data, null, 2));

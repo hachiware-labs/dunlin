@@ -3,7 +3,7 @@ import { stringify } from 'yaml';
 import { z } from 'zod';
 import { resolve, dirname } from 'node:path';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { resolveConfigValue } from '../cli-reference/config.mjs';
 import { checkTools } from './project-tools.mjs';
@@ -39,7 +39,7 @@ const runners = {
   'context.assemble': (input, args, ctx) => ctx.assemble(input, args),
   'answer.generate': (input, args, ctx) => ctx.answer(input, args),
 };
-const descriptions = Dunlin.describeModules();
+const descriptions = KnowledgeNest.describeModules();
 const modules = new Map(descriptions.map((info) => [info.name, { ...info, run: runners[info.name] }]));
 
 export const constructionStages = ['source', 'transform', 'index'];
@@ -74,7 +74,7 @@ const sectionComments = {
 
 function defaultEntry(name, overrides = {}) {
   const values = {};
-  for (const { key, value, code } of Dunlin.readModuleArgs(name, overrides)) {
+  for (const { key, value, code } of KnowledgeNest.readModuleArgs(name, overrides)) {
     if (code) throw new Error(`Invalid default ${key} for ${name}`);
     if (value !== undefined) values[key] = value;
   }
@@ -124,7 +124,7 @@ export function writeTemplate(config) {
   let yaml = stringify(config);
   if (isSearchProject(config.init.type)) {
     for (const [stage, example] of Object.entries({
-      source: 'Additional parser: loader.ocr (requires dunlin add ocr).',
+      source: 'Additional parser: loader.ocr (requires nest add ocr).',
       transform: 'Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.',
       index: 'Additional index: use: index.vector, with: { model: local-embed }.',
       search: 'For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.',
@@ -138,9 +138,9 @@ export function writeTemplate(config) {
     '# ' + sectionComments[section] + '\n' + text);
 }
 
-/** Reads Dunlinfile.yaml in Rust. `line(path)` gives the line of the longest existing prefix of path. */
+/** Reads KnowledgeNestfile.yaml in Rust. `line(path)` gives the line of the longest existing prefix of path. */
 export function parseConfig(text) {
-  const parsed = Dunlin.parseConfig(text);
+  const parsed = KnowledgeNest.parseConfig(text);
   if (parsed.syntaxError) return { syntaxError: parsed.syntaxError };
   // Array positions and keys share one form, so ['modules', 0] and ['modules', '0'] find the same line.
   const key = (path) => JSON.stringify(path.map(String));
@@ -202,7 +202,7 @@ export function validateRag(config, file, line) {
   const configuredStages = Object.entries(sequences).filter(([stage]) => stage !== 'ask' || config.init.type === 'rag');
   for (const key of Object.keys(config)) {
     if (!['init', ...configuredStages.map(([stage]) => stage), 'serve', 'models', 'tools', 'eval-data', 'eval', 'trial_limits'].includes(key)) {
-      issue('ARG_UNKNOWN', [key], 'A supported top-level section', 'See the Dunlinfile example in section 5.5.', { received: key });
+      issue('ARG_UNKNOWN', [key], 'A supported top-level section', 'See the KnowledgeNestfile example in section 5.5.', { received: key });
     }
   }
   checkTools(config, issue);
@@ -225,11 +225,11 @@ export function validateRag(config, file, line) {
       }
     }
   }
-  if (config.init.version !== 1) issue('VERSION_UNSUPPORTED', ['init', 'version'], 1, 'Generate a version 1 configuration with dunlin init.', { received: config.init.version });
+  if (config.init.version !== 1) issue('VERSION_UNSUPPORTED', ['init', 'version'], 1, 'Generate a version 1 configuration with nest init.', { received: config.init.version });
   for (const [stage, names] of configuredStages) {
     const section = config[stage];
     if (section === undefined) {
-      issue('SECTION_MISSING', [stage], stage, 'Generate the standard section with dunlin init ' + config.init.type + ' <directory>.');
+      issue('SECTION_MISSING', [stage], stage, 'Generate the standard section with nest init ' + config.init.type + ' <directory>.');
       continue;
     }
     if (!isMapping(section) || !Array.isArray(section.modules)) {
@@ -256,7 +256,7 @@ export function validateRag(config, file, line) {
       const module = modules.get(name);
       const details = { module: name };
       if (!module) {
-        issue('MODULE_UNKNOWN', [...path, 'use'], 'A registered module name', 'Run dunlin modules list.', {
+        issue('MODULE_UNKNOWN', [...path, 'use'], 'A registered module name', 'Run nest modules list.', {
           ...details, received: name, suggestions: nearby(name, [...modules.keys()]),
         });
         chainValid = false;
@@ -293,10 +293,10 @@ export function validateRag(config, file, line) {
       }
       for (const key of Object.keys(args)) {
         if (!Object.hasOwn(module.args, key)) issue('ARG_UNKNOWN', [...path, 'with', key], Object.keys(module.args),
-          'Use an argument listed by dunlin modules describe ' + name + '.', { ...details, received: key, suggestions: nearby(key, Object.keys(module.args)) });
+          'Use an argument listed by nest modules describe ' + name + '.', { ...details, received: key, suggestions: nearby(key, Object.keys(module.args)) });
       }
       const values = {};
-      for (const { key, value, defaulted, code, expected } of Dunlin.readModuleArgs(name, args)) {
+      for (const { key, value, defaulted, code, expected } of KnowledgeNest.readModuleArgs(name, args)) {
         const argPath = [...path, 'with', key];
         if (code) {
           issue(code, argPath, expected, 'Use a value allowed by the module argument definition.', { ...details, received: args[key] });
@@ -314,7 +314,7 @@ export function validateRag(config, file, line) {
         issue('ARG_CONFLICT', [...path, 'with', 'overlap'], 'overlap less than size', 'Reduce overlap or increase size.', { ...details, received: values.overlap });
       }
       if ((name === 'loader.ocr' || values.ocr === 'loader.ocr') && !config.tools?.some?.((tool) => tool?.name === 'ocr')) {
-        issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ocr tool', 'Run dunlin add ocr.', details);
+        issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ocr tool', 'Run nest add ocr.', details);
       }
       if (name === 'loader.command' && values.command) {
         const { issues, warning } = checkCommand(values, file);
@@ -322,7 +322,7 @@ export function validateRag(config, file, line) {
         if (warning) diagnostic(warnings, 'ARG_RECOMMENDED', [...path, 'with', ...warning.field], warning.expected, warning.hint, details);
       }
       if (module.tool && !config.tools?.some?.((tool) => tool?.name === module.tool)) {
-        issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ' + module.tool + ' tool', 'Run dunlin add ' + module.tool + '.', details);
+        issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ' + module.tool + ' tool', 'Run nest add ' + module.tool + '.', details);
       }
       if (name === 'index.keyword') {
         if (values.tokenizer === 'trigram') values.short_query ??= 'bigram';
@@ -414,7 +414,7 @@ const latencyArgs = z.strictObject({ percentiles: z.array(z.number().int().min(1
 function validateEvaluation(config, issue) {
   if (config['eval-data'] !== undefined && (!isMapping(config['eval-data'])
     || Object.keys(config['eval-data']).some((key) => key !== 'use') || typeof config['eval-data'].use !== 'string')) {
-    issue('ARG_TYPE', ['eval-data'], 'A mapping with a dataset reference in use', 'Select data with dunlin eval-data use.');
+    issue('ARG_TYPE', ['eval-data'], 'A mapping with a dataset reference in use', 'Select data with nest eval-data use.');
   }
   if (config.eval === undefined) return null;
   const settings = config.eval;

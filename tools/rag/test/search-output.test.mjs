@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { chunkCorpus } from './fixtures/cli-reference/project-content.mjs';
 import { sourceRange } from './fixtures/source-range-reference.mjs';
@@ -15,13 +15,13 @@ const content = [
 ].join('\n');
 
 test('describes evidence like the JavaScript offsets it replaced', async (t) => {
-  const store = await mkdtemp(join(tmpdir(), 'dunlin-describe-'));
+  const store = await mkdtemp(join(tmpdir(), 'knowledge-nest-describe-'));
   t.after(() => rm(store, { recursive: true, force: true, maxRetries: 5 }));
   const locations = [{ page: 1, range: { startLine: 1, endLine: 3 } }, { page: 2, range: { startLine: 4, endLine: 8 } },
     { symbol: 'Seal', range: { startLine: 4, endLine: 5 } }];
   const document = { objectId: 'manual.md', url: 'file:///manual.md', format: 'markdown', content, corpus: { locations } };
   const chunks = chunkCorpus({ groups: [['docs', [document]]], unicode: 'nfkc' }, { size: 12, overlap: 3 })[0][0];
-  const database = await Dunlin.open(store);
+  const database = await KnowledgeNest.open(store);
   try {
     await database.replaceDocuments('docs', [{ ...document, chunks }]);
     const { evidence: whole } = await database.getDocument({ sourceId: 'docs', objectId: 'manual.md' });

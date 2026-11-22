@@ -21,7 +21,7 @@ export function serveStdioMcp(database, search, read, searchOnly = false) {
     return serveStdio(() => knowledgeServer(database, search, read, searchOnly));
 }
 export function knowledgeServer(database, search, read, searchOnly = false) {
-    const server = new McpServer({ name: 'dunlin', version: '0.5.0' });
+    const server = new McpServer({ name: 'knowledge-nest', version: '0.5.0' });
     server.registerTool('knowledge.search', {
         description: search ? 'Retrieve indexed evidence and assemble source context using the project search settings.'
             : 'Find indexed source ranges using keyword search.',

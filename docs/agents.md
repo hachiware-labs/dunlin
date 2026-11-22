@@ -4,15 +4,15 @@
 
 ## 調整用データで試す
 
-`BASELINE_BUILD` は基準ビルドのタグまたは ID、`baseline` は調整用レポートのタグです。例ではチャンク化の引数を試します。`candidate.yaml` を `Dunlinfile.yaml` と同じ場所に作成し、変更する引数を記録します。
+`BASELINE_BUILD` は基準ビルドのタグまたは ID、`baseline` は調整用レポートのタグです。例ではチャンク化の引数を試します。`candidate.yaml` を `KnowledgeNestfile.yaml` と同じ場所に作成し、変更する引数を記録します。
 
 ```sh
-dunlin status --json
-dunlin report show baseline --json
-dunlin validate --config candidate.yaml --json
-dunlin build --from transform --input BASELINE_BUILD --config candidate.yaml --tag trial --json
-dunlin eval --build trial --tag trial-eval --json
-dunlin report compare baseline trial-eval --json
+nest status --json
+nest report show baseline --json
+nest validate --config candidate.yaml --json
+nest build --from transform --input BASELINE_BUILD --config candidate.yaml --tag trial --json
+nest eval --build trial --tag trial-eval --json
+nest report compare baseline trial-eval --json
 ```
 
 検索設定だけを試す場合は `search --build BASELINE_BUILD --config candidate.yaml --json` で確認し、同じ設定を `eval --build BASELINE_BUILD --config candidate.yaml --tag trial-eval` に渡します。辞書を変える場合は `dictionary suggest` で候補を調べ、`dictionary add` と `build --from index` を使います。 [辞書の試行例](evaluation.md)

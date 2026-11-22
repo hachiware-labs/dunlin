@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { load } from 'cheerio';
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { prepareDocument } from './originals.mjs';
 
 const documentLimit = 1024 * 1024;
@@ -16,7 +16,7 @@ const extensions = new Map([
 
 export async function importDocuments(indexPath, sourceId, locations, s3Endpoint, { corpusBackend, keepOriginal, decode, supports } = {}) {
   const documents = new Map();
-  const uploadRoot = resolve(indexPath, '.dunlin-uploads-v1');
+  const uploadRoot = resolve(indexPath, '.knowledge-nest-uploads-v1');
   const decodeDocument = decode ?? ((body, type, name) => readDocument(body, type, name, { keepOriginal }));
   let batchBytes = 0;
   let s3;
@@ -63,7 +63,7 @@ export async function importDocuments(indexPath, sourceId, locations, s3Endpoint
   }
 
   if (documents.size === 0) throw new Error('No supported documents found');
-  const database = await Dunlin.open(indexPath, { corpusBackend });
+  const database = await KnowledgeNest.open(indexPath, { corpusBackend });
   try {
     return await database.replaceDocuments(sourceId, [...documents.values()]);
   } finally {

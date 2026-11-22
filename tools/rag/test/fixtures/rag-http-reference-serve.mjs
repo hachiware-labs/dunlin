@@ -15,9 +15,9 @@ import { referenceServeRagHttp } from './rag-http-reference.mjs';
 import { referenceOpen, referenceSearchJson } from './search-reference.mjs';
 
 const [directory] = process.argv.slice(2);
-const data = join(directory, '.dunlin');
+const data = join(directory, '.knowledge-nest');
 const paths = { data, state: join(data, 'state.sqlite'), artifacts: join(data, 'artifacts'), corpus: join(data, 'corpus') };
-const configPath = join(directory, 'Dunlinfile.yaml');
+const configPath = join(directory, 'KnowledgeNestfile.yaml');
 const { config } = parseConfig(await readFile(configPath, 'utf8'));
 const { plan, serveSettings } = validateRag(config, configPath, null);
 const settings = { ...serveSettings, port: 0 };
@@ -33,4 +33,4 @@ const mcp = settings.endpoints.includes('mcp') ? createMcpHandler(() => knowledg
 }) : null;
 const server = await referenceServeRagHttp(settings, { search, model: model?.model, mcp,
   answer: async (query, signal) => referenceAnswer(project, await search(query, { signal }), query, model, signal) });
-console.error('Dunlin rag: ' + serveAddress(settings.host, server.address().port) + '/');
+console.error('Knowledge-Nest rag: ' + serveAddress(settings.host, server.address().port) + '/');

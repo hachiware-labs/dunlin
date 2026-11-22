@@ -19,20 +19,20 @@ const query = '交換周期はどのくらいですか';
 const content = '🧰 点検の案内です。\n交換周期は6か月です。\n';
 
 async function project(t) {
-  const cwd = await mkdtemp(join(tmpdir(), 'dunlin-responses-'));
+  const cwd = await mkdtemp(join(tmpdir(), 'knowledge-nest-responses-'));
   const cleanup = [];
   t.after(async () => {
     for (const close of cleanup.reverse()) await close();
     await rm(cwd, { recursive: true, force: true, maxRetries: 5 });
   });
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(cwd, 'global.yaml'), DUNLIN_TEST_TOKEN: '' };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(cwd, 'global.yaml'), KNOWLEDGE_NEST_TEST_TOKEN: '' };
   const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd, env, encoding: 'utf8', timeout: 15_000 });
   const json = async (...args) => JSON.parse((await run(...args, '--json')).stdout);
   await run('init', 'rag', '.');
   const document = join(cwd, 'docs', 'guide.txt');
   await writeFile(document, content);
   const build = (await json('build')).data;
-  const configFile = join(cwd, 'Dunlinfile.yaml');
+  const configFile = join(cwd, 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configFile, 'utf8'));
   const save = () => writeFile(configFile, stringify(config));
   return { cwd, env, run, json, document, config, configFile, save, build, cleanup };
@@ -49,7 +49,7 @@ async function start({ cwd, env, cleanup, nodeArgs = [] }, ...args) {
     let log = '';
     child.stderr.setEncoding('utf8').on('data', (chunk) => {
       log += chunk;
-      const address = /^Dunlin rag: (http:\/\/[^\s]+)$/mu.exec(log)?.[1];
+      const address = /^Knowledge-Nest rag: (http:\/\/[^\s]+)$/mu.exec(log)?.[1];
       if (address) resolve(new URL(address));
     });
     exited.then(([code]) => reject(new Error('serve exited with code ' + code + '\n' + log)), reject);
@@ -119,13 +119,13 @@ function checkAnswer(response, search) {
   assert.equal(response.object, 'response');
   assert.equal(response.status, 'completed');
   assert.equal(response.model, 'local-test');
-  assert.deepEqual(response.metadata, { dunlin_build_id: search.build_id, dunlin_search_config_id: search.search_config_id });
+  assert.deepEqual(response.metadata, { knowledge_nest_build_id: search.build_id, knowledge_nest_search_config_id: search.search_config_id });
   const [answer] = response.output[0].content;
   assert.match(answer.text, /交換周期/u);
   assert.equal(response.usage.total_tokens, 35);
   assert.equal(answer.annotations[0].file_id, 'docs:guide.txt');
   const source = search.context.segments.find(({ kind }) => kind === 'body');
-  assert.deepEqual(response.dunlin_citations[0], { annotation_index: 0, document_id: source.document_id,
+  assert.deepEqual(response.knowledge_nest_citations[0], { annotation_index: 0, document_id: source.document_id,
     document_version: source.document_version, source_range: source.source_range });
 }
 
@@ -149,7 +149,7 @@ test('shares one RAG search payload, grounded answers and live index across CLI,
   await writeFile(traceOpens, `
     import { subscribe } from 'node:diagnostics_channel';
     import { appendFileSync } from 'node:fs';
-    subscribe('dunlin:index-open', ({ path }) => appendFileSync(${JSON.stringify(openLog)}, path + '\\n'));
+    subscribe('knowledge-nest:index-open', ({ path }) => appendFileSync(${JSON.stringify(openLog)}, path + '\\n'));
   `);
   const base = await start({ ...kb, nodeArgs: ['--import', pathToFileURL(traceOpens).href] }, '--port', '0');
   const mcp = new Client({ name: 'http-test', version: '1.0.0' });
@@ -230,14 +230,14 @@ test('enforces host, origin, token, endpoint, size, time and concurrency limits 
   kb.config.serve.host = '127.0.0.1';
   const allowed = 'https://reader.example';
   kb.config.serve.access.allowed_origins = [allowed];
-  kb.config.serve.access.auth = { type: 'token', token_env: 'DUNLIN_TEST_TOKEN' };
+  kb.config.serve.access.auth = { type: 'token', token_env: 'KNOWLEDGE_NEST_TEST_TOKEN' };
   kb.config.serve.limits = { max_request_bytes: 450, request_timeout_seconds: 2, max_concurrent: 1 };
   kb.config.serve.endpoints = ['search', 'responses'];
   await kb.save();
   await assert.rejects(kb.run('serve', '--port', '0'), { code: 2, stderr: /environment variable/u });
   await assert.rejects(kb.run('serve', '--transport', 'stdio', '--port', '0'), { code: 2 });
   await assert.rejects(kb.run('serve', '--print-config'), { code: 2 });
-  kb.env.DUNLIN_TEST_TOKEN = 'local-test-token';
+  kb.env.KNOWLEDGE_NEST_TEST_TOKEN = 'local-test-token';
   const base = await start(kb, '--host', '0.0.0.0', '--port', '0');
   assert.equal(base.hostname, '0.0.0.0');
   base.hostname = '127.0.0.1';

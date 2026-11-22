@@ -50,7 +50,7 @@ pub fn scan(request: &ScanRequest, cancel: &Cancellation) -> Result<Scanned, Str
     let skipped = request
         .project_root
         .as_deref()
-        .map(|project| crate::node_path::resolve(project, "Dunlinfile.yaml"));
+        .map(|project| crate::node_path::resolve(project, "KnowledgeNestfile.yaml"));
     let mut found = Vec::new();
     walk(&root, &mut found, cancel)?;
     let root_text = root.to_string_lossy().into_owned();

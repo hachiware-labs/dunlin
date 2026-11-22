@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { originalForDigest, readOriginal } from '../originals.mjs';
 
 const runNode = promisify(execFile);
@@ -17,7 +17,7 @@ const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const guideKey = 'docs/guide #1.md';
 const guideUrl = 's3://test-bucket/docs/guide%20%231.md';
 
-test('imports HTTP and paginated S3 documents and reads their evidence through Dunlin', { timeout: 40_000 }, async (t) => {
+test('imports HTTP and paginated S3 documents and reads their evidence through Knowledge-Nest', { timeout: 40_000 }, async (t) => {
   const requests = [];
   const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://localhost');
@@ -53,7 +53,7 @@ test('imports HTTP and paginated S3 documents and reads their evidence through D
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-import-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-import-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const index = join(root, 'index');
   const webUrl = `${origin}/redirect?edition=1`;
@@ -79,7 +79,7 @@ test('imports HTTP and paginated S3 documents and reads their evidence through D
   assert.equal(requests[1].ifMatch, '"fixture-etag"');
 
   async function withIndex(check) {
-    const database = await Dunlin.open(index);
+    const database = await KnowledgeNest.open(index);
     try {
       await check(database);
     } finally {
@@ -122,7 +122,7 @@ test('imports HTTP and paginated S3 documents and reads their evidence through D
     const corpus = await database.getCorpusDocument(source, source.version);
     const original = originalForDigest(source, corpus.originalSha256);
     const archiveId = new URL(original.uri).pathname.split('/')[1];
-    const bytes = await readOriginal(join(index, '.dunlin-uploads-v1'), archiveId, original.sha256);
+    const bytes = await readOriginal(join(index, '.knowledge-nest-uploads-v1'), archiveId, original.sha256);
     assert.equal(bytes.toString('utf8'), '# Intro\r\nOverview\r\n## Details\r\nS3Needle の根拠\r\n## End\r\nOther');
     assert.equal((await database.getCorpusDocument(webEvidence.source, webEvidence.source.version)).content, 'WebNeedle\n東京 & 大阪\n本文の根拠');
   });

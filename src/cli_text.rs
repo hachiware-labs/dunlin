@@ -990,8 +990,12 @@ fn eval_data_text(action: &str, data: &ConfigValue) -> String {
             let mut lines = vec![format!("Evaluation data {}", field(data, "id"))];
             for case in items(data.get("cases")) {
                 lines.push(String::new());
+                let kind = match present(case.get("kind")) {
+                    Some(_) => format!(", {}", field(case, "kind")),
+                    None => String::new(),
+                };
                 lines.push(format!(
-                    "{}  [{}, {}]",
+                    "{}  [{}, {}{kind}]",
                     field(case, "id"),
                     field(case, "split"),
                     field(case, "state")

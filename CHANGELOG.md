@@ -8,6 +8,7 @@
 - 稼働中の検索で更新後の索引を使い回し、差分構築で変更のない Tantivy セグメントを共有するようにしました。文書取り込みは上限付きで並行処理し、厳密ベクトル検索は `f32` で計算します。
 - `dictionary suggest` と `dictionary add` を追加しました。調整用の評価から辞書候補と確認用の質問を出し、候補設定で試せます。
 - `eval-data generate` が評価ケースのない文書から順に読み、`--count` で指定した件数まで候補を作るようにしました。引用を検証できない候補だけを除き、理由ごとの件数を表示します。`eval-data review` は `--case` を繰り返して複数件を確認できます。
+- `eval-data generate` が作る候補に、質問の種類（`lexical`、`paraphrase`、`identifier`）を付けるようにしました。`--kind` で種類を1つに絞れ、結果の `kinds` に種類ごとの件数が出ます。1つの質問が3つまでの引用を持てるようにし、引用は300文字までにしました。長い文書は先頭からではなく、ケースの引用が少ない部分から、文書の中に散らばる順に読みます。モデルへの指示と返させる形が変わったので、`generation.prompt_version` は3です。
 - リリース用の npm パッケージを組み立てる `npm run release:prepare` と、手動実行のワークフロー **Release Dunlin**、MCP Registry 用の `server.json` を追加しました。
 - Node.js API から、直接開いた索引の資料を抜粋してページを作る `kb.wiki`、同期の結果の `wiki`、MCP の道具 `knowledge.wiki_get` をなくしました。Wiki と PARA は、CLI と同じ実装を `Dunlin.wiki` と `Dunlin.wikiServe` で呼べます。
 - CLI のコマンドを Rust で実行するようにしました。`--json` の出力、エラーの番号、終了コード、書き出す設定ファイルは以前と同じです。HTML の本文の取り出しと Office 文書の変換も Rust で行い、npm の依存から `cheerio`、`yaml`、`zod`、`docling.rs` をなくしました。`dunlin dictionary add` は候補設定の `user_dictionary` の行だけを書き換え、他の行の書式とコメントをそのまま残します。

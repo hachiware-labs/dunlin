@@ -445,6 +445,7 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
             "output",
             "model",
             "count",
+            "kind",
             "state",
             "reviewer",
             "reviewer-type",

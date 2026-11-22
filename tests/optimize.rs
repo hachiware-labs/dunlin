@@ -36,8 +36,12 @@ fn copy_into(from: &Path, to: &Path) {
     }
 }
 
+/// A file of the fixtures, with the line ends it has in the repository whatever the checkout
+/// made of them: the tests edit it as text.
 fn instruction(name: &str) -> String {
-    fs::read_to_string(fixtures("optimize").join(name)).unwrap()
+    fs::read_to_string(fixtures("optimize").join(name))
+        .unwrap()
+        .replace("\r\n", "\n")
 }
 
 struct Project {
@@ -447,16 +451,19 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     let lines: Vec<String> = table(&made.record).lines().map(str::to_owned).collect();
     assert_eq!(
         lines[0],
-        "Optimization chunk-and-search (recall on default, dev)"
+        "Optimization chunk-and-search (recall, then MRR, on default, dev)"
     );
-    assert!(lines[1].starts_with("Trial  Recall  To base  Ran"));
-    assert!(lines[2].starts_with("000    1.000   -        eval"));
+    assert!(lines[1].starts_with("Trial  Recall  MRR    To base  Ran"));
+    // The same recall is ordered by MRR: the base and the trials that are the base again
+    // first, then the chunks of 80 characters, whose evidence comes lower.
+    assert!(lines[2].starts_with("000    1.000   0.767  -        eval"));
     assert!(lines[2].ends_with("base"));
-    assert!(lines[3].starts_with("001    1.000   +0.000   nothing"));
+    assert!(lines[3].starts_with("001    1.000   0.767  +0.000   nothing"));
+    assert!(lines[5].starts_with("007    1.000   0.667  +0.000"));
     assert!(
         lines
             .iter()
-            .any(|line| line.starts_with("005    0.000   -1.000   eval"))
+            .any(|line| line.starts_with("005    0.000   0.000  -1.000   eval"))
     );
     assert!(lines[14].ends_with(
         "chunking=structure,search=vector (invalid: index.vector is not on the new store yet.)"
@@ -743,5 +750,125 @@ fn says_what_a_scan_found_and_checks_the_evaluation_before_it_builds() {
     )
     .unwrap_err();
     assert_eq!(error.to_string(), "There is no evaluation data absent.");
+    assert_eq!(project.store.runs().unwrap().len(), runs);
+}
+
+/// An instruction that chooses its trials: a range of chunk sizes, a choice of modules, and a
+/// choice of how many chunks a search returns.
+const CHOSEN: &str = "optimize:
+  base: KnowledgeNestfile.yaml
+  search: tpe
+  seed: 3
+  vary:
+    - name: chunking
+      options:
+        length:
+          transform:
+            - chunk.length: { unit: characters, size: { int: [40, 400], log: true }, overlap: 0 }
+        structure:
+          transform:
+            - chunk.structure: { max_chars: { int: [100, 400] } }
+    - name: search
+      options:
+        keyword:
+          search:
+            - retrieval.keyword: { top_k: [1, 3, 10] }
+  eval:
+    data: default
+  limit:
+    candidates: 8
+";
+
+#[test]
+fn chooses_the_trials_from_a_range_and_the_results_so_far() {
+    let project = Project::new();
+    let made = project.optimize(CHOSEN);
+
+    // The base and as many trials as the limit says, each with values from what was given.
+    assert_eq!(made.candidates.len(), 9);
+    assert_eq!(made.record["search"], "tpe");
+    assert_eq!(made.record["seed"], 3);
+    for candidate in &made.candidates[1..] {
+        let size = |name: &str| -> i64 {
+            let at = candidate.name.find(&format!("{name}=")).unwrap() + name.len() + 1;
+            candidate.name[at..]
+                .split(|c: char| !c.is_ascii_digit())
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap()
+        };
+        if candidate.name.starts_with("chunking=length(size=") {
+            assert!((40..=400).contains(&size("size")), "{}", candidate.name);
+        } else {
+            assert!(candidate.name.starts_with("chunking=structure(max_chars="));
+            assert!(
+                (100..=400).contains(&size("max_chars")),
+                "{}",
+                candidate.name
+            );
+        }
+        assert!([1, 3, 10].contains(&size("top_k")), "{}", candidate.name);
+        assert_eq!(candidate.state, State::Evaluated, "{}", candidate.name);
+        assert!(candidate.recall.is_some() && candidate.mrr.is_some());
+        assert!(project.file(candidate).contains("tag: \"chunk-and-search/"));
+    }
+    // No trial is tried twice while there are others to try.
+    let mut names: Vec<&str> = made.candidates.iter().map(|c| c.name.as_str()).collect();
+    names.dedup();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 9);
+    let lines: Vec<String> = table(&made.record).lines().map(str::to_owned).collect();
+    assert_eq!(
+        lines[0],
+        "Optimization chunk-and-search (recall, then MRR, on default, dev; tpe, seed 3)"
+    );
+
+    // The same instruction gives the same trials, and nothing runs again.
+    let again = project.optimize(CHOSEN);
+    let names_of = |made: &Optimization| {
+        made.candidates
+            .iter()
+            .map(|candidate| candidate.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names_of(&again), names_of(&made));
+    assert!(
+        again
+            .candidates
+            .iter()
+            .all(|candidate| candidate.ran.is_empty())
+    );
+
+    // Another seed gives other trials; random search chooses without looking at the results.
+    let other = project.optimize(&CHOSEN.replace("seed: 3", "seed: 4"));
+    assert_ne!(names_of(&other), names_of(&made));
+    let random = project.optimize(&CHOSEN.replace("search: tpe", "search: random"));
+    assert_eq!(random.candidates.len(), 9);
+    assert_eq!(random.record["search"], "random");
+
+    // What cannot be chosen is refused before anything runs.
+    let runs = project.store.runs().unwrap().len();
+    assert_eq!(
+        project.refused(&CHOSEN.replace("  search: tpe\n  seed: 3\n", "")),
+        "Option length gives size a range. A range is tried with search: random or tpe."
+    );
+    assert_eq!(
+        project.refused(&CHOSEN.replace("  limit:\n    candidates: 8\n", "")),
+        "search: tpe tries as many trials as limit.candidates says. Give the limit."
+    );
+    assert_eq!(
+        project.refused(&CHOSEN.replace("search: tpe", "search: grid")),
+        "seed is for search: random or tpe. search: grid tries every combination in order."
+    );
+    assert_eq!(
+        project.refused(&CHOSEN.replace("int: [40, 400], log: true", "int: [0, 400], log: true")),
+        "The range of size in option length is on a logarithmic scale, so it starts at 1 or above."
+    );
+    assert_eq!(
+        project.refused(&CHOSEN.replace("search: tpe", "search: bayes")),
+        "search is grid, random or tpe."
+    );
     assert_eq!(project.store.runs().unwrap().len(), runs);
 }

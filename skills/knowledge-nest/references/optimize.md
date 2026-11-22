@@ -62,6 +62,50 @@ How it reads:
 - **`limit.candidates`** runs only the first N trials in the order written (the base is not
   counted). The rest are listed as skipped and run the next time.
 
+### Letting the trials be chosen
+
+Every combination is the default (`search: grid`). When there are too many to try, or a
+number should be searched over a range, let Knowledge-Nest choose the trials:
+
+```yaml
+optimize:
+  base: KnowledgeNestfile.yaml
+  search: tpe          # or random
+  seed: 1
+  vary:
+    - name: chunking
+      options:
+        length:
+          transform:
+            - chunk.length: { unit: characters, size: { int: [100, 1600], log: true }, overlap: 40 }
+        structure:
+          transform:
+            - chunk.structure: { max_chars: { int: [200, 1600] } }
+    - name: search
+      options:
+        keyword:
+          search:
+            - retrieval.keyword: { top_k: [3, 5, 10] }
+  limit:
+    candidates: 30
+```
+
+- **`{ int: [low, high] }`** is any whole number in the range. `log: true` spreads the tries
+  evenly on a logarithmic scale, which suits sizes: 100 to 200 counts as much as 800 to 1600.
+  A range is only for `random` and `tpe`.
+- **A list** is a choice among its values, and the options of an axis are a choice among
+  them. A range inside an option is only tried when that option is.
+- **`random`** draws every trial at random. **`tpe`** draws the first few at random, then
+  chooses each next trial from the results so far: values that did well are tried more.
+- **`limit.candidates` is required** and is the number of trials, besides the base.
+- **`seed`** fixes the draws. The same instruction and seed give the same trials, so running
+  it again does no work. Change the seed to explore other trials.
+- A trial that was tried already is drawn again, so the budget is not spent twice.
+
+Use `grid` while there are a dozen combinations or fewer: it is complete and easy to read.
+Use `tpe` with ranges and 20 or more trials. With fewer, `tpe` is no better than `random`,
+because it needs results to learn from.
+
 Rules that are checked before anything runs:
 
 - An option can replace `transform`, `index` and `search`. Not `extract` (the documents are
@@ -93,18 +137,22 @@ Progress goes to standard error, one block per trial. The name of the optimizati
 file's name without its extension (`tune`), or `--name <name>`.
 
 ```text
-Optimization tune (recall on default, dev)
-Trial  Recall  To base  Ran                   Time  What
-000    0.720   -        eval                  0.1s  base
-007    0.860   +0.140   transform+index+eval  0.4s  chunking=structure,search=top10
-003    0.800   +0.080   transform+index+eval  0.3s  chunking=length(size=400),search=top10
-002    0.640   -0.080   eval                  0.1s  chunking=as-is,search=top5
-009    -       -        -                     -     chunking=..., (invalid: index.vector is not on the new store yet.)
+Optimization tune (recall, then MRR, on default, dev)
+Trial  Recall  MRR    To base  Ran                   Time  What
+000    0.720   0.610  -        eval                  0.1s  base
+007    0.860   0.700  +0.140   transform+index+eval  0.4s  chunking=structure,search=top10
+003    0.800   0.640  +0.080   transform+index+eval  0.3s  chunking=length(size=400),search=top10
+002    0.640   0.640  -0.080   eval                  0.1s  chunking=as-is,search=top5
+009    -       -      -        -                     -     chunking=..., (invalid: index.vector is not on the new store yet.)
 The files of the trials are in .knowledge-nest/trials/tune.
 Every trial used the documents docs, version 6 (6 documents).
 ```
 
-- Sorted best first. `To base` is the difference to trial 000.
+- Sorted best first: by recall, and by MRR when the recall is the same. `To base` is the
+  recall's difference to trial 000.
+- **MRR** (mean reciprocal rank) counts 1 for evidence returned first, 0.5 for second, 0.33
+  for third, and nothing for a miss. Two settings with the same recall differ in MRR when one
+  puts the evidence higher. When every trial has the same recall, MRR is what separates them.
 - `Ran` says what the trial had to do. `nothing` means everything was there already.
 - A trial that failed has no recall and says `failed:` with the reason. After three
   failures in a row the rest are not tried.
@@ -129,7 +177,8 @@ A trial that only changed `search` has no index of its own: it used the base's.
 
 Do not pick on the first decimal. Before recommending a trial:
 
-- **Is the difference more than a case or two?** With 25 cases, one case is 0.04.
+- **Is the difference more than a case or two?** With 25 cases, one case is 0.04 of recall.
+  A difference only in MRR is weaker evidence than one in recall: say which it is.
 - **Which cases changed?** Compare `nest results tune/000` with the candidate. A trial
   that fixes three cases and breaks two is a different thing from one that fixes one.
 - **What does it cost?** Smaller chunks mean more chunks and a larger index; a larger
@@ -159,7 +208,7 @@ and the numbers before you do it, unless they already asked you to apply the win
 
 ## Not there yet
 
-- Choosing values automatically (Bayesian optimization and the like). Every combination
-  written in the instruction is tried.
-- Metrics other than recall, and limits by time or cost.
+- Optimizing several measures at once (recall against index size or time), and stopping a
+  trial early when it is going badly.
+- Measures other than recall and MRR, and limits by time or cost.
 - Options that change `extract`.

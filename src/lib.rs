@@ -29,6 +29,7 @@ mod source;
 mod storage;
 pub mod store;
 mod sync;
+pub mod tpe;
 pub mod transform;
 pub mod yaml_config;
 #[cfg(any(feature = "node", test))]

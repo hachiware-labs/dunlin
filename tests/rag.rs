@@ -24,6 +24,9 @@ fn fixtures(name: &str) -> PathBuf {
 }
 
 /// Copies a folder into another and gives every copied file a time `age` before now.
+///
+/// The documents get the line ends they have in the repository, whatever the checkout made of
+/// them: the tests read lines and chunk texts that end in `\n`.
 fn copy_into(from: &Path, to: &Path, age: Duration) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
@@ -32,7 +35,11 @@ fn copy_into(from: &Path, to: &Path, age: Duration) {
         if entry.file_type().unwrap().is_dir() {
             copy_into(&entry.path(), &target, age);
         } else {
-            fs::copy(entry.path(), &target).unwrap();
+            let bytes = fs::read(entry.path()).unwrap();
+            match String::from_utf8(bytes) {
+                Ok(text) => fs::write(&target, text.replace("\r\n", "\n")).unwrap(),
+                Err(error) => fs::write(&target, error.into_bytes()).unwrap(),
+            }
             fs::File::options()
                 .write(true)
                 .open(&target)

@@ -7,8 +7,13 @@
 //! optimization itself is one run that makes no snapshot; the runs it starts name it as their
 //! cause. A trial that fails is recorded with the reason and the next one goes on.
 //!
-//! Not here yet: options that rewrite `extract`, limits other than the number of trials,
-//! measures other than recall, and choosing the next values from the results so far.
+//! The trials are every combination of the options (`search: grid`, the default), or as many as
+//! the limit says, chosen one after the other at random (`random`) or from the results so far
+//! (`tpe`, see `crate::tpe`). Trials are compared by recall, and by MRR when the recall is the
+//! same.
+//!
+//! Not here yet: options that rewrite `extract`, limits other than the number of trials, and
+//! measures other than recall and MRR.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -17,13 +22,17 @@ use std::time::Instant;
 use serde_json::{Map, Value, json};
 use yaml_rust2::Yaml;
 
+use crate::assess::Report;
 use crate::pipeline::{LATEST, RunRequest, run};
 use crate::records::object_id;
 use crate::settings::{SECTIONS, Settings, document, entries, plain_name, section};
 use crate::store::{Outcome, SnapshotId, Store, StoreError, StoreResult};
+use crate::tpe::{Domain, Method, Picked, Random, suggest};
 
 /// How many trials may fail one after the other before the rest are left.
 const FAILURES: usize = 3;
+/// How many times a trial that was tried already is drawn again before it is taken as it is.
+const REDRAWS: usize = 20;
 
 pub struct OptimizeRequest<'a> {
     /// The name of the optimization. The files and the tags of its trials start with it.
@@ -59,6 +68,7 @@ pub enum Event<'a> {
         number: usize,
         state: &'a State,
         recall: Option<f64>,
+        mrr: Option<f64>,
     },
 }
 
@@ -75,6 +85,27 @@ pub enum State {
     Failed(String),
     /// Not tried, with the reason.
     Skipped(String),
+}
+
+/// How the trials are chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Search {
+    /// Every combination of the options, in the order of the instruction.
+    Grid,
+    /// As many trials as the limit says, every value as likely as any other.
+    Random,
+    /// As many trials as the limit says, each chosen from the results so far.
+    Tpe,
+}
+
+impl Search {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Grid => "grid",
+            Self::Random => "random",
+            Self::Tpe => "tpe",
+        }
+    }
 }
 
 /// One trial: a configuration file and what running it gave.
@@ -100,23 +131,106 @@ pub struct Candidate {
     pub index: Option<SnapshotId>,
     pub report: Option<SnapshotId>,
     pub recall: Option<f64>,
+    pub mrr: Option<f64>,
     pub elapsed_ms: Option<u64>,
+}
+
+impl Candidate {
+    /// The order of the results: evaluated trials first, the best first; the others after, in
+    /// their order.
+    fn rank(&self, other: &Self) -> std::cmp::Ordering {
+        match (self.recall.zip(self.mrr), other.recall.zip(other.mrr)) {
+            (Some((recall, mrr)), Some((other_recall, other_mrr))) => {
+                Report::better(other_recall, other_mrr, recall, mrr)
+            }
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+        .then(self.number.cmp(&other.number))
+    }
 }
 
 #[derive(Debug)]
 pub struct Optimization {
     /// The run of the optimization.
     pub run: String,
-    /// The base first, then the trials in the order of the instruction.
+    /// The base first, then the trials in the order they were made.
     pub candidates: Vec<Candidate>,
     /// What the run keeps: `table` prints it.
     pub record: Value,
 }
 
+/// What an argument of an option can be.
+enum Slot {
+    /// One of these values.
+    Values(Vec<Value>),
+    /// A whole number in a range, with `search: random` or `tpe`.
+    Range { low: i64, high: i64, log: bool },
+}
+
+/// Where in the sections of an option an argument that varies is, and what it can be.
+struct Place {
+    section: String,
+    position: usize,
+    module: String,
+    argument: String,
+    slot: Slot,
+}
+
+/// An option of an axis: a label, the sections it rewrites, and the arguments in them that vary.
+struct Choice {
+    label: String,
+    sections: Map<String, Value>,
+    places: Vec<Place>,
+}
+
+impl Choice {
+    /// The sections with a value for each argument that varies, and the label that says which.
+    fn written(&self, values: &[Value]) -> (String, Map<String, Value>) {
+        let mut sections = self.sections.clone();
+        let mut labels = Vec::new();
+        for (place, value) in self.places.iter().zip(values) {
+            sections[&place.section][place.position][&place.module][&place.argument] =
+                value.clone();
+            labels.push(format!("{}={}", place.argument, label(value)));
+        }
+        let label = if labels.is_empty() {
+            self.label.clone()
+        } else {
+            format!("{}({})", self.label, labels.join(","))
+        };
+        (label, sections)
+    }
+
+    /// Every variant: one for each combination of the values of the arguments that vary.
+    fn variants(&self) -> StoreResult<Vec<(String, Map<String, Value>)>> {
+        let mut made: Vec<Vec<Value>> = vec![Vec::new()];
+        for place in &self.places {
+            let Slot::Values(values) = &place.slot else {
+                return Err(refused(format!(
+                    "Option {} gives {} a range. A range is tried with search: random or tpe.",
+                    self.label, place.argument
+                )));
+            };
+            made = made
+                .into_iter()
+                .flat_map(|chosen| {
+                    values.iter().map(move |value| {
+                        let mut chosen = chosen.clone();
+                        chosen.push(value.clone());
+                        chosen
+                    })
+                })
+                .collect();
+        }
+        Ok(made.iter().map(|values| self.written(values)).collect())
+    }
+}
+
 struct Axis {
     name: String,
-    /// The options with arrays of values written out: a label, and the sections it rewrites.
-    variants: Vec<(String, Map<String, Value>)>,
+    choices: Vec<Choice>,
 }
 
 struct Instruction {
@@ -125,6 +239,8 @@ struct Instruction {
     data: Option<String>,
     split: Option<String>,
     limit: Option<usize>,
+    search: Search,
+    seed: u64,
 }
 
 fn refused(reason: impl Into<String>) -> StoreError {
@@ -144,14 +260,51 @@ fn label(value: &Value) -> String {
     }
 }
 
-/// Writes out an option: every argument given as an array is one value in each variant.
-fn variants(
-    option: &str,
-    sections: &Map<String, Value>,
-) -> StoreResult<Vec<(String, Map<String, Value>)>> {
-    // Where the arrays are: section, entry, module, argument.
-    let mut slots: Vec<(String, usize, String, String, Vec<Value>)> = Vec::new();
-    for (name, value) in sections {
+/// `{ int: [low, high], log: true }`: a range of whole numbers. `None` for any other value.
+fn range(option: &str, argument: &str, given: &Value) -> StoreResult<Option<Slot>> {
+    let Value::Object(map) = given else {
+        return Ok(None);
+    };
+    let Some(bounds) = map.get("int") else {
+        return Ok(None);
+    };
+    let wrong = || {
+        refused(format!(
+            "{argument} in option {option} is a range written as {{ int: [low, high] }}, with log: true or false."
+        ))
+    };
+    if map.keys().any(|key| key != "int" && key != "log") {
+        return Err(wrong());
+    }
+    let [low, high] = bounds.as_array().map(Vec::as_slice).ok_or_else(wrong)? else {
+        return Err(wrong());
+    };
+    let (Some(low), Some(high)) = (low.as_i64(), high.as_i64()) else {
+        return Err(wrong());
+    };
+    let log = match map.get("log") {
+        None => false,
+        Some(Value::Bool(log)) => *log,
+        Some(_) => return Err(wrong()),
+    };
+    if low > high {
+        return Err(refused(format!(
+            "The range of {argument} in option {option} starts above where it ends."
+        )));
+    }
+    if log && low < 1 {
+        return Err(refused(format!(
+            "The range of {argument} in option {option} is on a logarithmic scale, so it starts at 1 or above."
+        )));
+    }
+    Ok(Some(Slot::Range { low, high, log }))
+}
+
+/// Reads an option: the sections it rewrites, and the arguments in them given as a list of
+/// values or as a range.
+fn choice(option: &str, sections: Map<String, Value>) -> StoreResult<Choice> {
+    let mut places = Vec::new();
+    for (name, value) in &sections {
         if name == "eval" {
             return Err(refused(format!(
                 "Option {option} rewrites eval. Every trial is measured the same way."
@@ -176,49 +329,34 @@ fn variants(
         }
         for (position, step) in parsed.steps.iter().enumerate() {
             for (argument, given) in &step.args {
-                if let Value::Array(values) = given {
-                    if values.is_empty() {
+                let slot = match given {
+                    Value::Array(values) if values.is_empty() => {
                         return Err(refused(format!(
                             "{argument} of {} in option {option} has no value to try.",
                             step.name
                         )));
                     }
-                    slots.push((
-                        name.clone(),
-                        position,
-                        step.name.clone(),
-                        argument.clone(),
-                        values.clone(),
-                    ));
-                }
+                    Value::Array(values) => Slot::Values(values.clone()),
+                    other => match range(option, argument, other)? {
+                        Some(slot) => slot,
+                        None => continue,
+                    },
+                };
+                places.push(Place {
+                    section: name.clone(),
+                    position,
+                    module: step.name.clone(),
+                    argument: argument.clone(),
+                    slot,
+                });
             }
         }
     }
-    let mut made = vec![(Vec::<String>::new(), sections.clone())];
-    for (name, position, module, argument, values) in &slots {
-        let mut next = Vec::with_capacity(made.len() * values.len());
-        for (labels, sections) in &made {
-            for value in values {
-                let mut sections = sections.clone();
-                sections[name][*position][module][argument] = value.clone();
-                let mut labels = labels.clone();
-                labels.push(format!("{argument}={}", label(value)));
-                next.push((labels, sections));
-            }
-        }
-        made = next;
-    }
-    Ok(made
-        .into_iter()
-        .map(|(labels, sections)| {
-            let name = if labels.is_empty() {
-                option.to_owned()
-            } else {
-                format!("{option}({})", labels.join(","))
-            };
-            (name, sections)
-        })
-        .collect())
+    Ok(Choice {
+        label: option.to_owned(),
+        sections,
+        places,
+    })
 }
 
 fn instruction(source: &str) -> StoreResult<Instruction> {
@@ -242,7 +380,7 @@ fn instruction(source: &str) -> StoreResult<Instruction> {
         if options.is_empty() {
             return Err(refused(format!("Axis {name} has no options.")));
         }
-        let mut made = Vec::new();
+        let mut choices = Vec::new();
         for (option, sections) in options {
             let Value::Object(sections) = sections else {
                 return Err(refused(format!(
@@ -262,12 +400,9 @@ fn instruction(source: &str) -> StoreResult<Instruction> {
                     }
                 }
             }
-            made.extend(variants(&option, &sections)?);
+            choices.push(choice(&option, sections)?);
         }
-        axes.push(Axis {
-            name,
-            variants: made,
-        });
+        axes.push(Axis { name, choices });
     }
     if axes.is_empty() {
         return Err(refused("The instruction has nothing to vary."));
@@ -291,12 +426,37 @@ fn instruction(source: &str) -> StoreResult<Instruction> {
         Yaml::Integer(limit) if *limit > 0 => Some(*limit as usize),
         _ => return Err(refused("limit.candidates is not a number above zero.")),
     };
+    let search = match root["search"].as_str() {
+        None if root["search"].is_badvalue() => Search::Grid,
+        Some("grid") => Search::Grid,
+        Some("random") => Search::Random,
+        Some("tpe") => Search::Tpe,
+        _ => return Err(refused("search is grid, random or tpe.")),
+    };
+    let seed = match &root["seed"] {
+        Yaml::BadValue => 0,
+        Yaml::Integer(seed) if *seed >= 0 => *seed as u64,
+        _ => return Err(refused("seed is a whole number, 0 or above.")),
+    };
+    if search != Search::Grid && limit.is_none() {
+        return Err(refused(format!(
+            "search: {} tries as many trials as limit.candidates says. Give the limit.",
+            search.as_str()
+        )));
+    }
+    if search == Search::Grid && !root["seed"].is_badvalue() {
+        return Err(refused(
+            "seed is for search: random or tpe. search: grid tries every combination in order.",
+        ));
+    }
     Ok(Instruction {
         base: text(&root["base"], "base configuration")?,
         axes,
         data: eval["data"].as_str().map(str::to_owned),
         split,
         limit,
+        search,
+        seed,
     })
 }
 
@@ -320,13 +480,13 @@ fn retagged(settings: &Settings, name: &str, tag: Option<&String>) -> Value {
 }
 
 /// Every choice of one variant on each axis, the first axis outermost.
-fn combinations(axes: &[Axis]) -> Vec<Vec<usize>> {
+fn combinations(counts: &[usize]) -> Vec<Vec<usize>> {
     let mut made = vec![Vec::new()];
-    for axis in axes {
+    for count in counts {
         made = made
             .into_iter()
             .flat_map(|chosen: Vec<usize>| {
-                (0..axis.variants.len()).map(move |variant| {
+                (0..*count).map(move |variant| {
                     let mut chosen = chosen.clone();
                     chosen.push(variant);
                     chosen
@@ -345,6 +505,7 @@ struct Ground<'a> {
     start: &'a str,
     data: &'a str,
     split: &'a str,
+    folder: &'a str,
 }
 
 impl Ground<'_> {
@@ -360,11 +521,11 @@ impl Ground<'_> {
     /// section a trial rewrites, and those after it, get the name of the trial; the sections
     /// before keep their modules and lose their tag, so that the base's names do not move. The
     /// result always gets the name. Nothing is released.
-    fn trial(&self, number: usize, rewrites: &[&Map<String, Value>]) -> (String, Vec<String>) {
+    fn trial(&self, number: usize, rewrites: &[Map<String, Value>]) -> (String, Vec<String>) {
         let mut settings = self.base.clone();
         let mut rewritten = Vec::new();
         for sections in rewrites {
-            for (name, value) in *sections {
+            for (name, value) in sections {
                 settings.replace(name, value.clone());
                 rewritten.push(name.as_str());
             }
@@ -394,6 +555,49 @@ impl Ground<'_> {
         settings.remove("serve");
         (settings.to_text(), named)
     }
+
+    /// A trial that is not tried yet: its file, its name, and whether it can run.
+    fn candidate(
+        &self,
+        number: usize,
+        choices: Vec<(String, String)>,
+        rewrites: &[Map<String, Value>],
+    ) -> Candidate {
+        let (config, named) = self.trial(number, rewrites);
+        let state = match Settings::parse(&config).and_then(|settings| settings.plan()) {
+            Ok(_) => State::Pending,
+            Err(reason) => State::Invalid(reason),
+        };
+        let name = if number == 0 {
+            "base".to_owned()
+        } else {
+            choices
+                .iter()
+                .map(|(axis, label)| format!("{axis}={label}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        Candidate {
+            number,
+            name,
+            choices,
+            config,
+            file: format!("{}/{number:03}.yaml", self.folder),
+            tag: self.tag(number),
+            named: if state == State::Pending {
+                named
+            } else {
+                Vec::new()
+            },
+            state,
+            ran: Vec::new(),
+            index: None,
+            report: None,
+            recall: None,
+            mrr: None,
+            elapsed_ms: None,
+        }
+    }
 }
 
 fn recorded(candidate: &Candidate) -> Value {
@@ -418,6 +622,7 @@ fn recorded(candidate: &Candidate) -> Value {
         "index": candidate.index.map(|id| id.0),
         "report": candidate.report.map(|id| id.0),
         "recall": candidate.recall,
+        "mrr": candidate.mrr,
         "elapsed_ms": candidate.elapsed_ms,
     })
 }
@@ -432,21 +637,31 @@ pub fn table(record: &Value) -> String {
         .find(|candidate| candidate["number"] == 0)
         .and_then(|candidate| candidate["recall"].as_f64());
     let mut order: Vec<&Value> = candidates.iter().collect();
+    let score = |candidate: &Value| {
+        candidate["recall"]
+            .as_f64()
+            .map(|recall| (recall, candidate["mrr"].as_f64().unwrap_or(0.0)))
+    };
     order.sort_by(|a, b| {
-        let key = |candidate: &Value| {
-            (
-                candidate["recall"].as_f64().map_or(1, |_| 0),
-                -candidate["recall"].as_f64().unwrap_or(0.0),
-                candidate["number"].as_u64().unwrap_or(0),
-            )
-        };
-        key(a)
-            .partial_cmp(&key(b))
-            .unwrap_or(std::cmp::Ordering::Equal)
+        match (score(a), score(b)) {
+            (Some((recall, mrr)), Some((other_recall, other_mrr))) => {
+                Report::better(other_recall, other_mrr, recall, mrr)
+            }
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+        .then(
+            a["number"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&b["number"].as_u64().unwrap_or(0)),
+        )
     });
     let mut rows = vec![[
         "Trial".to_owned(),
         "Recall".to_owned(),
+        "MRR".to_owned(),
         "To base".to_owned(),
         "Ran".to_owned(),
         "Time".to_owned(),
@@ -471,6 +686,10 @@ pub fn table(record: &Value) -> String {
         rows.push([
             format!("{:03}", candidate["number"].as_u64().unwrap_or(0)),
             recall.map_or("-".into(), |recall| format!("{recall:.3}")),
+            candidate["mrr"]
+                .as_f64()
+                .filter(|_| recall.is_some())
+                .map_or("-".into(), |mrr| format!("{mrr:.3}")),
             match (recall, base) {
                 (Some(recall), Some(base)) if candidate["number"] != 0 => {
                     format!("{:+.3}", recall - base)
@@ -490,7 +709,7 @@ pub fn table(record: &Value) -> String {
             what,
         ]);
     }
-    let widths: Vec<usize> = (0..5)
+    let widths: Vec<usize> = (0..6)
         .map(|column| {
             rows.iter()
                 .map(|row| row[column].chars().count())
@@ -498,10 +717,15 @@ pub fn table(record: &Value) -> String {
                 .unwrap_or(0)
         })
         .collect();
+    let chosen = match (record["search"].as_str(), record["seed"].as_u64()) {
+        (Some(search), Some(seed)) if search != "grid" => {
+            format!("; {search}, seed {seed}")
+        }
+        _ => String::new(),
+    };
     let mut lines = vec![format!(
-        "Optimization {} ({} on {}, {})",
+        "Optimization {} (recall, then MRR, on {}, {}{chosen})",
         record["name"].as_str().unwrap_or_default(),
-        record["metric"].as_str().unwrap_or_default(),
         record["data"].as_str().unwrap_or_default(),
         record["split"].as_str().unwrap_or_default(),
     )];
@@ -510,8 +734,11 @@ pub fn table(record: &Value) -> String {
         for (cell, width) in row.iter().zip(&widths) {
             line.push_str(&format!("{cell:<width$}  "));
         }
-        line.push_str(&row[5]);
+        line.push_str(&row[6]);
         lines.push(line);
+    }
+    if let Some(stopped) = record["stopped"].as_str() {
+        lines.push(stopped.to_owned());
     }
     lines.push(format!(
         "The files of the trials are in {}.",
@@ -540,6 +767,125 @@ pub fn latest(store: &Store, name: Option<&str>) -> StoreResult<Option<(Value, b
         .filter(|run| run.stage == "optimize" && run.stats["candidates"].is_array())
         .find(|run| name.is_none_or(|name| run.stats["name"] == name))
         .map(|run| (run.stats, run.state != "complete" && run.state != "failed")))
+}
+
+/// Runs one trial and records what it gave. True when it failed.
+fn attempt(
+    store: &Store,
+    request: &OptimizeRequest<'_>,
+    cause: &str,
+    candidate: &mut Candidate,
+    position: usize,
+    total: usize,
+) -> bool {
+    (request.progress)(&Event::Trial {
+        number: candidate.number,
+        position,
+        total,
+        name: &candidate.name,
+    });
+    let started = Instant::now();
+    let outcome = run(
+        store,
+        &RunRequest {
+            project: request.project,
+            indexes: request.indexes,
+            config: &candidate.config,
+            evaluate: true,
+            release: false,
+            latest: false,
+            cause: Some(cause),
+            progress: &|stage, outcome| {
+                (request.progress)(&Event::Stage { stage, outcome });
+            },
+        },
+    );
+    candidate.elapsed_ms = Some(started.elapsed().as_millis() as u64);
+    let failed = match outcome {
+        Ok(made) => {
+            candidate.ran = made.ran;
+            candidate.index = Some(made.index);
+            candidate.report = made.report;
+            candidate.recall = made.result.as_ref().map(|result| result.recall);
+            candidate.mrr = made.result.as_ref().map(|result| result.mrr);
+            candidate.state = State::Evaluated;
+            false
+        }
+        Err(error) => {
+            candidate.state = State::Failed(error.to_string());
+            candidate.named.clear();
+            true
+        }
+    };
+    (request.progress)(&Event::Done {
+        number: candidate.number,
+        state: &candidate.state,
+        recall: candidate.recall,
+        mrr: candidate.mrr,
+    });
+    failed
+}
+
+fn write(project: &Path, candidate: &Candidate) -> StoreResult<()> {
+    let path = project.join(&candidate.file);
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder)
+            .map_err(|error| refused(format!("{} cannot be written: {error}", folder.display())))?;
+    }
+    std::fs::write(&path, &candidate.config)
+        .map_err(|error| refused(format!("{} cannot be written: {error}", candidate.file)))
+}
+
+/// A trial of a random or TPE search: its number, the value of each parameter it used, and the
+/// sections those values gave.
+struct Tried {
+    number: usize,
+    picked: Vec<(usize, Picked)>,
+    sections: Vec<Map<String, Value>>,
+}
+
+/// The parameters a trial can vary, as the choosers see them: one for the option of each axis,
+/// and one for each argument that varies in each option.
+struct Space {
+    domains: Vec<Domain>,
+    /// For each axis, the parameter of its option.
+    axes: Vec<usize>,
+    /// For each axis and option, the parameters of its arguments.
+    places: Vec<Vec<Vec<usize>>>,
+}
+
+impl Space {
+    fn new(axes: &[Axis]) -> Self {
+        let mut domains = Vec::new();
+        let mut of_axes = Vec::new();
+        let mut places = Vec::new();
+        for axis in axes {
+            of_axes.push(domains.len());
+            domains.push(Domain::Choice(axis.choices.len()));
+            let mut of_choices = Vec::new();
+            for choice in &axis.choices {
+                let mut of_places = Vec::new();
+                for place in &choice.places {
+                    of_places.push(domains.len());
+                    domains.push(match &place.slot {
+                        Slot::Values(values) => Domain::Choice(values.len()),
+                        Slot::Range { low, high, log } => Domain::Int {
+                            low: *low,
+                            high: *high,
+                            log: *log,
+                        },
+                    });
+                }
+                of_choices.push(of_places);
+            }
+            places.push(of_choices);
+        }
+        Self {
+            domains,
+            axes: of_axes,
+            places,
+        }
+    }
 }
 
 /// Writes a configuration file for each trial of an instruction and runs them one after the
@@ -596,95 +942,36 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
     if kind(found)? != "eval-data" {
         return Err(refused(format!("{data} is not evaluation data.")));
     }
+    let folder = format!(".knowledge-nest/trials/{}", request.name);
     let ground = Ground {
         name: request.name,
         base: &base,
         start,
         data,
         split,
+        folder: &folder,
+    };
+    // With a grid, every combination is known before anything runs, and an option given a
+    // range is refused before anything is written.
+    let grid = match instruction.search {
+        Search::Grid => Some(
+            instruction
+                .axes
+                .iter()
+                .map(|axis| {
+                    axis.choices
+                        .iter()
+                        .map(Choice::variants)
+                        .collect::<StoreResult<Vec<_>>>()
+                        .map(|variants| variants.into_iter().flatten().collect::<Vec<_>>())
+                })
+                .collect::<StoreResult<Vec<_>>>()?,
+        ),
+        Search::Random | Search::Tpe => None,
     };
 
-    // The base is always tried, and first, so that what a trial is compared with is measured
-    // the same way.
-    let folder = format!(".knowledge-nest/trials/{}", request.name);
-    let mut candidates = Vec::new();
-    let mut chosen: Vec<Vec<usize>> = vec![Vec::new()];
-    chosen.extend(combinations(&instruction.axes));
-    for (number, chosen) in chosen.into_iter().enumerate() {
-        let picked: Vec<&(String, Map<String, Value>)> = instruction
-            .axes
-            .iter()
-            .zip(chosen)
-            .map(|(axis, variant)| &axis.variants[variant])
-            .collect();
-        let choices: Vec<(String, String)> = instruction
-            .axes
-            .iter()
-            .zip(&picked)
-            .map(|(axis, (label, _))| (axis.name.clone(), label.clone()))
-            .collect();
-        let rewrites: Vec<&Map<String, Value>> =
-            picked.iter().map(|(_, sections)| sections).collect();
-        let (config, named) = ground.trial(number, &rewrites);
-        let state = match Settings::parse(&config).and_then(|settings| settings.plan()) {
-            Ok(_) => State::Pending,
-            Err(reason) => State::Invalid(reason),
-        };
-        let name = if number == 0 {
-            "base".to_owned()
-        } else {
-            choices
-                .iter()
-                .map(|(axis, label)| format!("{axis}={label}"))
-                .collect::<Vec<_>>()
-                .join(",")
-        };
-        candidates.push(Candidate {
-            number,
-            name,
-            choices,
-            config,
-            file: format!("{folder}/{number:03}.yaml"),
-            tag: ground.tag(number),
-            named: if state == State::Pending {
-                named
-            } else {
-                Vec::new()
-            },
-            state,
-            ran: Vec::new(),
-            index: None,
-            report: None,
-            recall: None,
-            elapsed_ms: None,
-        });
-    }
-
-    // In the order of the instruction. What goes over the limit is left, and stays in the list.
-    let mut order: Vec<usize> = candidates
-        .iter()
-        .filter(|candidate| candidate.state == State::Pending)
-        .map(|candidate| candidate.number)
-        .collect();
-    if let Some(limit) = instruction.limit {
-        let kept = order.iter().filter(|number| **number == 0).count() + limit;
-        for number in order.split_off(kept.min(order.len())) {
-            candidates[number].state =
-                State::Skipped(format!("The limit of {limit} candidates was reached."));
-            candidates[number].named.clear();
-        }
-    }
-
-    // Every trial has a file, also the ones that are not run: the reason is in the list.
-    let written = |error: std::io::Error| refused(format!("{folder} cannot be written: {error}"));
-    std::fs::create_dir_all(request.project.join(&folder)).map_err(written)?;
-    for candidate in &candidates {
-        std::fs::write(request.project.join(&candidate.file), &candidate.config)
-            .map_err(written)?;
-    }
-
-    let record = |candidates: &[Candidate]| {
-        json!({
+    let record = |candidates: &[Candidate], stopped: Option<&str>| {
+        let mut record = json!({
             "name": request.name,
             "folder": folder,
             "base": object_id(base_text.as_bytes()).as_str(),
@@ -695,10 +982,63 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
                 "version": corpus.id.0,
                 "count": corpus.items.len(),
             },
-            "metric": "recall",
+            "metric": "recall, then mrr",
+            "search": instruction.search.as_str(),
             "candidates": candidates.iter().map(recorded).collect::<Vec<_>>(),
-        })
+        });
+        if instruction.search != Search::Grid {
+            record["seed"] = json!(instruction.seed);
+        }
+        if let Some(stopped) = stopped {
+            record["stopped"] = json!(stopped);
+        }
+        record
     };
+
+    // The base is always tried, and first, so that what a trial is compared with is measured
+    // the same way.
+    let mut candidates = vec![ground.candidate(0, Vec::new(), &[])];
+    if let Some(variants) = &grid {
+        let counts: Vec<usize> = variants.iter().map(Vec::len).collect();
+        for chosen in combinations(&counts) {
+            let picked: Vec<&(String, Map<String, Value>)> = variants
+                .iter()
+                .zip(chosen)
+                .map(|(axis, variant)| &axis[variant])
+                .collect();
+            let choices = instruction
+                .axes
+                .iter()
+                .zip(&picked)
+                .map(|(axis, (label, _))| (axis.name.clone(), label.clone()))
+                .collect();
+            let rewrites: Vec<Map<String, Value>> = picked
+                .iter()
+                .map(|(_, sections)| sections.clone())
+                .collect();
+            let number = candidates.len();
+            candidates.push(ground.candidate(number, choices, &rewrites));
+        }
+        // In the order of the instruction. What goes over the limit is left, and stays in the
+        // list.
+        if let Some(limit) = instruction.limit {
+            let mut pending = candidates
+                .iter_mut()
+                .filter(|candidate| candidate.number != 0 && candidate.state == State::Pending);
+            for candidate in pending.by_ref().skip(limit) {
+                candidate.state =
+                    State::Skipped(format!("The limit of {limit} candidates was reached."));
+                candidate.named.clear();
+            }
+        }
+        // Every trial has a file, also the ones that are not run: the reason is in the list.
+        for candidate in &candidates {
+            write(request.project, candidate)?;
+        }
+    } else {
+        write(request.project, &candidates[0])?;
+    }
+
     let mut draft = store.begin_scan("optimize", "optimization")?;
     draft.set_config(request.instruction.as_bytes())?;
     for candidate in &candidates {
@@ -706,65 +1046,139 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
     }
     // The runs of the trials write objects too.
     draft.flush()?;
-    draft.report_progress(&record(&candidates))?;
+    draft.report_progress(&record(&candidates, None))?;
     let cause = draft.run().to_owned();
-    let total = order.len();
     let mut failures = 0;
-    for (position, number) in order.into_iter().enumerate() {
-        if failures >= FAILURES {
-            candidates[number].state = State::Skipped(format!(
-                "{FAILURES} trials in a row failed, so the rest were not tried."
-            ));
-            candidates[number].named.clear();
-            continue;
+    let mut stopped = None;
+    let too_many = || format!("{FAILURES} trials in a row failed, so the rest were not tried.");
+
+    if grid.is_some() {
+        let order: Vec<usize> = candidates
+            .iter()
+            .filter(|candidate| candidate.state == State::Pending)
+            .map(|candidate| candidate.number)
+            .collect();
+        let total = order.len();
+        for (position, number) in order.into_iter().enumerate() {
+            if failures >= FAILURES {
+                candidates[number].state = State::Skipped(too_many());
+                candidates[number].named.clear();
+                continue;
+            }
+            let failed = attempt(
+                store,
+                request,
+                &cause,
+                &mut candidates[number],
+                position + 1,
+                total,
+            );
+            failures = if failed { failures + 1 } else { 0 };
+            draft.report_progress(&record(&candidates, None))?;
         }
-        let candidate = &mut candidates[number];
-        (request.progress)(&Event::Trial {
-            number,
-            position: position + 1,
-            total,
-            name: &candidate.name,
-        });
-        let started = Instant::now();
-        let outcome = run(
-            store,
-            &RunRequest {
-                project: request.project,
-                indexes: request.indexes,
-                config: &candidate.config,
-                evaluate: true,
-                release: false,
-                latest: false,
-                cause: Some(&cause),
-                progress: &|stage, outcome| {
-                    (request.progress)(&Event::Stage { stage, outcome });
-                },
+    } else {
+        // One trial after the other, each chosen from what the ones before gave.
+        let limit = instruction.limit.unwrap_or(1);
+        let total = limit + 1;
+        let method = match instruction.search {
+            Search::Tpe => Method::Tpe {
+                startup: (limit / 3).clamp(3, 10),
             },
-        );
-        candidate.elapsed_ms = Some(started.elapsed().as_millis() as u64);
-        match outcome {
-            Ok(made) => {
-                failures = 0;
-                candidate.ran = made.ran;
-                candidate.index = Some(made.index);
-                candidate.report = made.report;
-                candidate.recall = made.result.map(|result| result.recall);
-                candidate.state = State::Evaluated;
-            }
-            Err(error) => {
-                failures += 1;
-                candidate.state = State::Failed(error.to_string());
-                candidate.named.clear();
-            }
+            Search::Random | Search::Grid => Method::Random,
+        };
+        let space = Space::new(&instruction.axes);
+        let mut random = Random::new(instruction.seed);
+        // The values of each trial, and the sections they gave.
+        let mut tried: Vec<Tried> = Vec::new();
+        if attempt(store, request, &cause, &mut candidates[0], 1, total) {
+            failures += 1;
         }
-        (request.progress)(&Event::Done {
-            number,
-            state: &candidate.state,
-            recall: candidate.recall,
-        });
-        draft.report_progress(&record(&candidates))?;
+        draft.report_progress(&record(&candidates, None))?;
+        for number in 1..=limit {
+            if failures >= FAILURES {
+                stopped = Some(too_many());
+                break;
+            }
+            // What each parameter was in the trials so far, the best trial first.
+            let mut ranked: Vec<&Tried> = tried.iter().collect();
+            ranked.sort_by(|a, b| candidates[a.number].rank(&candidates[b.number]));
+            let history = |parameter: usize| -> Vec<Picked> {
+                ranked
+                    .iter()
+                    .filter_map(|tried| {
+                        tried
+                            .picked
+                            .iter()
+                            .find(|(at, _)| *at == parameter)
+                            .map(|(_, value)| *value)
+                    })
+                    .collect()
+            };
+            let mut next = None;
+            for draw in 0..REDRAWS {
+                let mut picked = Vec::new();
+                let mut choices = Vec::new();
+                let mut rewrites = Vec::new();
+                for (at, axis) in instruction.axes.iter().enumerate() {
+                    let parameter = space.axes[at];
+                    let Picked::Choice(option) = suggest(
+                        &space.domains[parameter],
+                        &history(parameter),
+                        method,
+                        &mut random,
+                    ) else {
+                        unreachable!("the option of an axis is a choice");
+                    };
+                    picked.push((parameter, Picked::Choice(option)));
+                    let chosen = &axis.choices[option];
+                    let mut values = Vec::new();
+                    for (place, parameter) in chosen.places.iter().zip(&space.places[at][option]) {
+                        let value = suggest(
+                            &space.domains[*parameter],
+                            &history(*parameter),
+                            method,
+                            &mut random,
+                        );
+                        picked.push((*parameter, value));
+                        values.push(match (&place.slot, value) {
+                            (Slot::Values(given), Picked::Choice(index)) => given[index].clone(),
+                            (_, Picked::Int(value)) => json!(value),
+                            (Slot::Range { low, .. }, Picked::Choice(_)) => json!(low),
+                        });
+                    }
+                    let (label, sections) = chosen.written(&values);
+                    choices.push((axis.name.clone(), label));
+                    rewrites.push(sections);
+                }
+                // A trial that was tried already gives nothing new: it is drawn again, a few
+                // times, and taken as it is when nothing else comes.
+                let again = tried.iter().any(|tried| tried.sections == rewrites);
+                next = Some((picked, choices, rewrites));
+                if !again || draw + 1 == REDRAWS {
+                    break;
+                }
+            }
+            let Some((picked, choices, rewrites)) = next else {
+                break;
+            };
+            let mut candidate = ground.candidate(number, choices, &rewrites);
+            write(request.project, &candidate)?;
+            draft.save(candidate.config.as_bytes())?;
+            draft.flush()?;
+            if candidate.state == State::Pending {
+                let failed = attempt(store, request, &cause, &mut candidate, number + 1, total);
+                failures = if failed { failures + 1 } else { 0 };
+            }
+            candidates.push(candidate);
+            tried.push(Tried {
+                number,
+                picked,
+                sections: rewrites,
+            });
+            draft.report_progress(&record(&candidates, None))?;
+        }
     }
-    let record = record(&candidates);
+    let record = record(&candidates, stopped.as_deref());
     draft.set_stats(record.clone());
     Ok(Optimization {
         run: draft.finish()?,

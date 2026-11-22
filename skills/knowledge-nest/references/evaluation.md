@@ -132,6 +132,10 @@ missed    pump-seal    シールの交換
 `Found at` is the place of the evidence among the returned chunks; `missed` means it was
 not within `top_k`. Missed cases come first because they are what to work on.
 
+The heading line also gives the **MRR** (mean reciprocal rank): 1 for evidence returned
+first, 0.5 for second, and so on, nothing for a miss, averaged over the cases. Results are
+compared by recall, and by MRR when the recall is the same.
+
 With `--json`, each case also has `expected` (source, document, quote) and `returned` (the
 chunks that came back, with document and lines). That is what you need to explain a miss.
 

@@ -59,6 +59,20 @@ pub struct Report {
     pub found: usize,
     /// The share of cases whose evidence was returned.
     pub recall: f64,
+    /// The mean reciprocal rank: one for evidence returned first, a half for second, and so on,
+    /// nothing for a miss. It tells apart results of the same recall by how high the evidence
+    /// comes.
+    pub mrr: f64,
+}
+
+impl Report {
+    /// Whether this result is better than `other`: by recall, and by MRR when the recall is the
+    /// same.
+    pub fn better(recall: f64, mrr: f64, other_recall: f64, other_mrr: f64) -> std::cmp::Ordering {
+        recall
+            .total_cmp(&other_recall)
+            .then(mrr.total_cmp(&other_mrr))
+    }
 }
 
 #[derive(Debug)]
@@ -148,15 +162,23 @@ pub fn report(store: &Store, snapshot: SnapshotId) -> StoreResult<Report> {
         cases.push((name.first().cloned().unwrap_or_default(), rank));
     }
     let found = cases.iter().filter(|(_, rank)| rank.is_some()).count();
-    let recall = if cases.is_empty() {
-        0.0
+    let (recall, mrr) = if cases.is_empty() {
+        (0.0, 0.0)
     } else {
-        found as f64 / cases.len() as f64
+        let reciprocal = cases
+            .iter()
+            .filter_map(|(_, rank)| rank.map(|rank| 1.0 / rank as f64))
+            .fold(0.0, |total, part| total + part);
+        (
+            found as f64 / cases.len() as f64,
+            reciprocal / cases.len() as f64,
+        )
     };
     Ok(Report {
         cases,
         found,
         recall,
+        mrr,
     })
 }
 

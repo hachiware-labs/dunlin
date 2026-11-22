@@ -67,6 +67,7 @@ const escape = (value) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
 const percent = (value) => (typeof value === 'number' ? `${(value * 100).toFixed(1)}%` : '–');
+const mrr = (value) => (typeof value === 'number' ? value.toFixed(3) : '–');
 const signed = (value) => `${value >= 0 ? '+' : '−'}${(Math.abs(value) * 100).toFixed(1)}`;
 const bar = (value) =>
   typeof value === 'number'
@@ -121,6 +122,7 @@ function resultPage(result) {
     title: `Evaluation result ${names}`,
     body: `<div class="stats">
 ${stat('recall', percent(result.recall))}
+${stat('MRR', mrr(result.mrr))}
 ${stat('cases found', `${result.found} of ${result.cases.length}`)}
 ${stat('cases missed', missed)}
 </div>
@@ -138,6 +140,7 @@ function overviewPage(data) {
 <td>${escape(entry.names.join(', ') || '–')}</td>
 <td class="num">${percent(entry.recall)}</td>
 <td>${bar(entry.recall)}</td>
+<td class="num">${mrr(entry.mrr)}</td>
 <td class="num">${entry.found} of ${entry.cases}</td>
 <td>${escape(entry.from?.[0] ?? '–')}</td>
 <td>${escape(entry.from?.[1] ?? '–')}</td>
@@ -152,9 +155,9 @@ function overviewPage(data) {
     title: 'Evaluation results',
     body: `${optimizations}
 <table>
-<thead><tr><th>Result</th><th>Recall</th><th></th><th>Found</th><th>Index</th><th>Evaluation data</th><th>Version</th></tr></thead>
+<thead><tr><th>Result</th><th>Recall</th><th></th><th>MRR</th><th>Found</th><th>Index</th><th>Evaluation data</th><th>Version</th></tr></thead>
 <tbody>
-${rows || '<tr><td colspan="7" class="dim">No result has a name yet. Run nest eval.</td></tr>'}
+${rows || '<tr><td colspan="8" class="dim">No result has a name yet. Run nest eval.</td></tr>'}
 </tbody></table>`,
   };
 }
@@ -163,9 +166,12 @@ function optimizationPage(record) {
   const trials = record.candidates;
   const base = trials.find((trial) => trial.number === 0);
   const number = (trial) => String(trial.number).padStart(3, '0');
+  // By recall, then by MRR, as the command line orders them.
   const ranked = [...trials].sort(
     (left, right) =>
-      (right.recall ?? -1) - (left.recall ?? -1) || left.number - right.number,
+      (right.recall ?? -1) - (left.recall ?? -1) ||
+      (right.mrr ?? -1) - (left.mrr ?? -1) ||
+      left.number - right.number,
   );
   const trialRows = ranked
     .map((trial) => {
@@ -181,6 +187,7 @@ function optimizationPage(record) {
 <td>${number(trial)}</td>
 <td class="num">${percent(trial.recall)}</td>
 <td>${bar(trial.recall)}</td>
+<td class="num">${evaluated ? mrr(trial.mrr) : '–'}</td>
 <td class="num">${toBase}</td>
 <td>${escape((trial.ran ?? []).join(' + ') || (evaluated ? 'nothing' : '–'))}</td>
 <td class="num">${typeof trial.elapsed_ms === 'number' && evaluated ? `${(trial.elapsed_ms / 1000).toFixed(1)}s` : '–'}</td>
@@ -244,12 +251,14 @@ ${stat('best recall', best ? percent(best.recall) : '–')}
 ${stat('base recall', base ? percent(base.recall) : '–')}
 ${stat('trials evaluated', `${trials.filter((trial) => typeof trial.recall === 'number').length} of ${trials.length}`)}
 </div>
-<p>Measured by <b>${escape(record.metric)}</b> on evaluation data <b>${escape(record.data)}</b>, split <b>${escape(record.split)}</b>.
+<p>Ordered by recall, then MRR, on evaluation data <b>${escape(record.data)}</b>, split <b>${escape(record.split)}</b>.
+${record.search && record.search !== 'grid' ? `Trials chosen by <b>${escape(record.search)}</b>, seed ${record.seed}.` : ''}
+${record.stopped ? `<span class="reason">${escape(record.stopped)}</span>` : ''}
 ${documents ? `Every trial used the documents <b>${escape(documents.name)}</b>, version ${documents.version} (${documents.count} documents).` : ''}</p>
 ${record.running ? '<p class="reason">This optimization is still running: the report shows what is done so far.</p>' : ''}
 <h2>Trials</h2>
 <table>
-<thead><tr><th>Trial</th><th>Recall</th><th></th><th>To base</th><th>Ran</th><th>Time</th><th>What changed</th></tr></thead>
+<thead><tr><th>Trial</th><th>Recall</th><th></th><th>MRR</th><th>To base</th><th>Ran</th><th>Time</th><th>What changed</th></tr></thead>
 <tbody>
 ${trialRows}
 </tbody></table>

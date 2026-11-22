@@ -9,7 +9,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
-use crate::assess::{Case, eval_data, report, save_eval_data};
+use crate::assess::{Case, Report, eval_data, report, save_eval_data};
 use crate::cli_args::Parsed;
 use crate::cli_project::CliError;
 use crate::cli_tools::CliEnv;
@@ -305,15 +305,17 @@ fn list(store: &Store, only: Option<&str>) -> Result<(Value, String), CliError> 
                 }
                 _ => {
                     let result = report(store, id).map_err(failed)?;
-                    recall = Some(result.recall);
+                    recall = Some((result.recall, result.mrr));
                     entry["recall"] = json!(result.recall);
+                    entry["mrr"] = json!(result.mrr);
                     entry["found"] = json!(result.found);
                     entry["cases"] = json!(result.cases.len());
                     format!(
-                        "recall {:.3} ({} of {}), index {} with data {}",
+                        "recall {:.3} ({} of {}), mrr {:.3}, index {} with data {}",
                         result.recall,
                         result.found,
                         result.cases.len(),
+                        result.mrr,
                         parents.first().map_or("-", String::as_str),
                         parents.get(1).map_or("-", String::as_str),
                     )
@@ -334,11 +336,11 @@ fn list(store: &Store, only: Option<&str>) -> Result<(Value, String), CliError> 
         }
         // Results are read the best first; the rest in the order they were made.
         if kind == "eval-report" {
-            rows.sort_by(|left, right| {
-                right
-                    .0
-                    .partial_cmp(&left.0)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+            rows.sort_by(|left, right| match (left.0, right.0) {
+                (Some((recall, mrr)), Some((other_recall, other_mrr))) => {
+                    Report::better(other_recall, other_mrr, recall, mrr)
+                }
+                _ => std::cmp::Ordering::Equal,
             });
         }
         if rows.is_empty() {
@@ -431,11 +433,12 @@ fn result(store: &Store, name: &str) -> Result<(Value, String), CliError> {
         .map(|parent| called(store, *parent))
         .collect::<Result<Vec<_>, _>>()?;
     let mut lines = vec![format!(
-        "Result {}: recall {:.3} ({} of {}), index {} with data {}",
+        "Result {}: recall {:.3} ({} of {}), mrr {:.3}, index {} with data {}",
         versioned(store, id)?,
         found.recall,
         found.found,
         found.cases.len(),
+        found.mrr,
         parents.first().map_or("-", String::as_str),
         parents.get(1).map_or("-", String::as_str),
     )];
@@ -459,6 +462,7 @@ fn result(store: &Store, name: &str) -> Result<(Value, String), CliError> {
         "names": snapshot.tags,
         "version": id.0,
         "recall": found.recall,
+        "mrr": found.mrr,
         "found": found.found,
         "from": parents,
         "made": moment(snapshot.created_at),
@@ -638,10 +642,11 @@ pub fn command(
             });
             if let Some(result) = &made.result {
                 lines.push(format!(
-                    "Recall: {:.3} ({} of {} cases)",
+                    "Recall: {:.3} ({} of {} cases), MRR {:.3}",
                     result.recall,
                     result.found,
-                    result.cases.len()
+                    result.cases.len(),
+                    result.mrr
                 ));
             }
             if let Some(name) = &made.released {
@@ -657,6 +662,7 @@ pub fn command(
                 "index": made.index.0,
                 "report": made.report.map(|id| id.0),
                 "recall": made.result.as_ref().map(|result| result.recall),
+                "mrr": made.result.as_ref().map(|result| result.mrr),
                 "found": made.result.as_ref().map(|result| result.found),
                 "cases": made.result.as_ref().map(|result| result.cases.len()),
                 "released": made.released,
@@ -824,9 +830,14 @@ pub fn command(
                             outcome: Some(outcome),
                         } => say(&format!("      {stage}: {}", outcome.as_str())),
                         Event::Stage { .. } => {}
-                        Event::Done { state, recall, .. } => say(&match (state, recall) {
+                        Event::Done {
+                            state, recall, mrr, ..
+                        } => say(&match (state, recall) {
                             (State::Failed(reason), _) => format!("      failed: {reason}"),
-                            (_, Some(recall)) => format!("      recall {recall:.3}"),
+                            (State::Invalid(reason), _) => format!("      invalid: {reason}"),
+                            (_, Some(recall)) => {
+                                format!("      recall {recall:.3}, MRR {:.3}", mrr.unwrap_or(0.0))
+                            }
                             _ => "      done".to_owned(),
                         }),
                     },

@@ -272,7 +272,7 @@ extract:
 | ユーザー辞書 | `dictionary suggest` と `dictionary add`。[検索評価とユーザー辞書](evaluation.md) |
 | 質問の自動生成と確認 | `eval-data generate` と `eval-data review`。[検索評価とユーザー辞書](evaluation.md) |
 | PDF、Office、HTML、OCR | `loader.auto` と `nest add ocr`。[PDF の抽出](pdf-extraction.md) |
-| MCP・HTTP での提供、`ask` | `serve`、`ask`。[MCP と RAG](mcp.md) |
+| MCP・HTTP での提供、`ask` | `serve`、`ask`。[MCP と RAG](mcp.md) · [11 提供する入口と、接続を許す相手を決める](#11-提供する入口と接続を許す相手を決める) |
 | エージェントとの調整 | [エージェントと試行する](agents.md) |
 
 どちらの流れかは、コマンドが読む設定ファイルの形で決まります。段階が `- source.filesystem: ...` のような並びなら新しい流れ、`modules:` と `use:` なら従来の流れです。1つのプロジェクトに、両方の形のファイルを置いても構いません。
@@ -288,7 +288,76 @@ Wiki と PARA は検索の知識とは別の仕組みで、この文書の版の
 - 長い取り込みは `nest progress <作業ID>` で進み具合を確認できます。
 - `serve` はページを Web と MCP の両方で提供します。人がブラウザで直した内容は、そのままエージェントが MCP で引く知識になります。
 
-## 11 チェックリスト
+## 11 提供する入口と、接続を許す相手を決める
+
+`nest serve` で何を出し、誰からの接続を受けるかは、`KnowledgeNestfile.yaml` の `serve` に書きます。`init` が既定値をすべて書き出すので、変えたい所だけを直します。次は RAG の既定値です。
+
+```yaml
+serve:
+  transport: http
+  host: 127.0.0.1          # 待ち受けるアドレス。既定では自分のマシンからだけ
+  port: 4318
+  endpoints:               # 出す入口。書かなかった入口は立ち上がらない
+    - responses            # POST /v1/responses：出典付きの答え
+    - search               # POST /v1/search：検索結果と文脈
+    - mcp                  # /mcp：エージェント向けの MCP（HTTP）
+  access:
+    allowed_hosts:         # 要求の宛先名（Host）として受け付けるもの
+      - localhost
+      - 127.0.0.1
+    allowed_origins: []    # 別のページのブラウザから呼んでよい送信元
+    auth:
+      type: none           # none か token
+      token_env: null      # token のとき、合言葉を入れた環境変数の名前
+  limits:
+    max_request_bytes: 1048576
+    request_timeout_seconds: 120
+    max_concurrent: 8
+```
+
+**入口（`endpoints`）** は、種別ごとに選べるものが決まっています。
+
+| 種別 | `transport` | 選べる `endpoints` | 既定のポート |
+|---|---|---|---|
+| `mcp` | `stdio` だけ | なし（`host` から `limits` までを書くと `ARG_CONFLICT`） | なし |
+| `rag` | `http` | `responses`、`search`、`mcp` | 4318 |
+| `wiki`、`para` | `http` | `web` | 4319 |
+
+- 回答 API を出さず、検索だけを出すときは `endpoints: [search, mcp]` にします。
+- 種別にない入口を書くと `ARG_RANGE` になります。
+
+**接続を許す相手（`access`）** は、次の順に確かめられます。
+
+- **宛先名。** 要求の `Host` が `allowed_hosts` にないと `403 HOST_FORBIDDEN` です。ホスト名か IP アドレスを、ポートを付けずに書きます。社内の名前（`nest.example.internal` など）で呼ばせるときは、その名前を足します。
+- **送信元。** ブラウザが付ける `Origin` が自分自身でも `allowed_origins` にもないと `403 ORIGIN_FORBIDDEN` です。`https://app.example.com` のように、スキームを含め、パスを付けずに書きます。空のままなら、ほかのサイトのページからは呼べません。開いたページが手元のサーバーに勝手に要求を送るのを防ぐためです。
+- **合言葉。** `host` を `127.0.0.1` などのループバック以外にするときは、`auth.type: token` が必須です。合言葉は設定ファイルに書かず、`token_env` に環境変数の名前だけを書きます。クライアントは `Authorization: Bearer <token>` を送ります。Wiki・PARA の画面は Basic 認証も受け付け、ユーザー名は `knowledge-nest`、パスワードは同じ合言葉です。
+
+ほかのマシンに開くときの例です。
+
+```yaml
+serve:
+  host: 0.0.0.0
+  access:
+    allowed_hosts: [nest.example.internal]
+    allowed_origins: [https://app.example.com]
+    auth: { type: token, token_env: NEST_TOKEN }
+```
+
+```sh
+export NEST_TOKEN=...      # 長い乱数にする
+nest validate --json       # 矛盾があれば、起動する前にここで分かる
+nest serve
+```
+
+- `nest serve --host` と `--port` は、その起動に限って値を変えます。上の検査は上書き後の値にもかかります。
+- `serve` の値はビルド ID や検索設定 ID に入りません。ポートや許可を変えても、作り直しや評価のし直しは要りません。
+- 通信の暗号化と、接続元のアドレスの範囲による制限はありません。社内に公開するときは、前に置く中継サーバー（リバースプロキシ）に任せます。
+
+`serve` が決めるのは、受ける側の接続だけです。モデルへの接続先は `models` の `base_url`（既定はローカルの Ollama）で決まります。取り込む Web のアドレスを許可したり制限したりする設定はありません。
+
+[HTTP の接続制限](mcp.md#http-の接続制限) · [serve の設定項目の仕様](knowledge-nest-spec.md#275-serve-の設定項目) · [設定ファイルの全文](config.md)
+
+## 12 チェックリスト
 
 - [ ] 評価データが、実際の質問に近い言い回しで10件以上ある
 - [ ] 基準を `nest eval` で測り、結果に名前がある

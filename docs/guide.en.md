@@ -274,7 +274,7 @@ These are not in the new flow yet. Use the configuration that `nest init` writes
 | User dictionary | `dictionary suggest` and `dictionary add`. [Evaluation and dictionary](evaluation.md) |
 | Generate and review questions | `eval-data generate` and `eval-data review`. [Evaluation and dictionary](evaluation.md) |
 | PDF, Office, HTML, OCR | `loader.auto` and `nest add ocr`. [PDF extraction](pdf-extraction.md) |
-| Serve over MCP or HTTP, `ask` | `serve`, `ask`. [MCP and RAG](mcp.md) |
+| Serve over MCP or HTTP, `ask` | `serve`, `ask`. [MCP and RAG](mcp.md) · [11 Choose what to serve and whom to let in](#11-choose-what-to-serve-and-whom-to-let-in) |
 | Tuning with an agent | [Agents and trials](agents.md) |
 
 Which flow a command uses depends on the form of the configuration file it reads. Sections written as lists of steps such as `- source.filesystem: ...` use the new flow; `modules:` with `use:` uses the earlier flow. One project may hold files of both forms. (Most of the linked pages are in Japanese.)
@@ -290,7 +290,76 @@ Wiki and PARA are a separate mechanism and are not in this guide's versioned sto
 - Follow a long ingest with `nest progress <job-id>`.
 - `serve` offers the pages both on the web and over MCP. What people fix in the browser becomes the knowledge agents use over MCP.
 
-## 11 Checklist
+## 11 Choose what to serve and whom to let in
+
+What `nest serve` offers, and whose connections it accepts, is set in the `serve` section of `KnowledgeNestfile.yaml`. `init` writes every default, so change only what you need. These are the defaults for RAG:
+
+```yaml
+serve:
+  transport: http
+  host: 127.0.0.1          # address to listen on; by default only this machine
+  port: 4318
+  endpoints:               # what to offer; anything not listed is not started
+    - responses            # POST /v1/responses: answers with sources
+    - search               # POST /v1/search: results and context
+    - mcp                  # /mcp: MCP over HTTP for agents
+  access:
+    allowed_hosts:         # names accepted as the request's Host
+      - localhost
+      - 127.0.0.1
+    allowed_origins: []    # origins whose pages may call from a browser
+    auth:
+      type: none           # none or token
+      token_env: null      # with token, the name of the variable holding it
+  limits:
+    max_request_bytes: 1048576
+    request_timeout_seconds: 120
+    max_concurrent: 8
+```
+
+**Endpoints** depend on the project type.
+
+| Type | `transport` | `endpoints` you can choose | Default port |
+|---|---|---|---|
+| `mcp` | `stdio` only | none (writing `host` through `limits` is `ARG_CONFLICT`) | none |
+| `rag` | `http` | `responses`, `search`, `mcp` | 4318 |
+| `wiki`, `para` | `http` | `web` | 4319 |
+
+- To offer search without the answering API, use `endpoints: [search, mcp]`.
+- An endpoint the type does not have is `ARG_RANGE`.
+
+**Whom to let in** (`access`) is checked in this order.
+
+- **Host.** A request whose `Host` is not in `allowed_hosts` gets `403 HOST_FORBIDDEN`. Write a host name or IP address without a port. If people reach the server by an internal name such as `nest.example.internal`, add that name.
+- **Origin.** A browser request whose `Origin` is neither the server itself nor in `allowed_origins` gets `403 ORIGIN_FORBIDDEN`. Write it with the scheme and no path, such as `https://app.example.com`. Left empty, pages on other sites cannot call the server, so a page you open cannot send requests to the server on your machine.
+- **Token.** When `host` is not a loopback address such as `127.0.0.1`, `auth.type: token` is required. Keep the token out of the configuration file: `token_env` names the environment variable that holds it. Clients send `Authorization: Bearer <token>`. The Wiki and PARA pages also accept Basic authentication, with the user name `knowledge-nest` and the token as the password.
+
+An example that opens the server to other machines:
+
+```yaml
+serve:
+  host: 0.0.0.0
+  access:
+    allowed_hosts: [nest.example.internal]
+    allowed_origins: [https://app.example.com]
+    auth: { type: token, token_env: NEST_TOKEN }
+```
+
+```sh
+export NEST_TOKEN=...      # use a long random value
+nest validate --json       # reports conflicts before you start the server
+nest serve
+```
+
+- `nest serve --host` and `--port` change the values for that run only. The checks above apply to the values after the change.
+- `serve` settings are not part of the build ID or search configuration ID. Changing the port or access needs no rebuild or new evaluation.
+- There is no encryption and no limit by client address range. To serve inside an organization, leave those to a reverse proxy in front.
+
+`serve` decides only which connections come in. Where models are reached is `base_url` in `models` (a local Ollama by default). There is no setting that allows or limits the web addresses to take documents from.
+
+[HTTP limits](mcp.md#http-の接続制限) · [Spec of the serve settings](knowledge-nest-spec.md#275-serve-の設定項目) · [Full configuration files](config.md) (Japanese)
+
+## 12 Checklist
 
 - [ ] At least 10 evaluation cases, phrased like real questions
 - [ ] The baseline is measured with `nest eval` and its result has a name

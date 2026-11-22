@@ -65,7 +65,7 @@ cd para
 nest ingress ../inbox
 ```
 
-The AI reads the documents, writes notes, and files each under one of the four categories. The citations of what it wrote are checked, and sentences that do not match the source word for word are not saved. If it takes a while, give the job ID to `nest progress <job-id>` to follow it.
+The AI reads the documents, writes notes, and files each under one of the four categories. Pass a URL, as in `nest ingress https://...`, to ingest a web page. The citations of what it wrote are checked, and sentences that do not match the source word for word are not saved. If it takes a while, give the job ID to `nest progress <job-id>` to follow it.
 
 ## 4 Read: in a browser and over MCP
 
@@ -75,7 +75,7 @@ nest serve
 
 `serve` offers the notes both on the web and over MCP.
 
-- **In a browser**: open `http://127.0.0.1:4319`. Projects, Areas, Resources, and Archives sit at the top of the tree on the left. The top page explains the four categories and lists the active Projects.
+- **In a browser**: open `http://127.0.0.1:4319`. Projects, Areas, Resources, and Archives sit at the top of the file tree on the left, and the note or original you open shows on the right. Give a URL or a file to **資料を取り込む** (add documents) at the top left to ingest it. The top page explains the four categories and lists the active Projects.
 - **From an agent**: register it in your MCP client's settings, and Claude or another agent answers from the notes you have organized.
 
 ## 5 Keep using it

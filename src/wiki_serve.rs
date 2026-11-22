@@ -66,9 +66,23 @@ const WORK_STAGES: [(&str, &str); 13] = [
     ("failed", "失敗"),
 ];
 
-const STYLE: &str = "body{font:1rem/1.6 system-ui;margin:0;color:#20252b;background:#faf9f6}main{display:grid;grid-template-columns:minmax(12rem,1fr) minmax(0,3fr) minmax(15rem,1.4fr);min-height:100vh}section,nav,aside{padding:1.25rem;border-right:1px solid #ccc}textarea{width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere}.pane>summary{display:none}@media(max-width:800px){main{display:block}.pane>summary{display:list-item}}";
+const STYLE: &str = concat!(
+    "body{font:1rem/1.6 system-ui;margin:0;color:#20252b;background:#faf9f6}",
+    "main{display:grid;grid-template-columns:minmax(15rem,20rem) minmax(0,1fr);min-height:100vh}",
+    "nav{padding:1rem;border-right:1px solid #ccc;background:#f3f1ec;position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;box-sizing:border-box}",
+    "section{padding:1.25rem 2rem;max-width:60rem}",
+    "nav h2{font-size:.8rem;letter-spacing:.05em;color:#5b6470;margin:1.2rem 0 .3rem}",
+    ".tree,.tree ul{list-style:none;margin:0;padding-left:1rem}nav>details>.tree{padding-left:0}",
+    ".tree summary{cursor:pointer;color:#5b6470}.tree a{text-decoration:none;color:inherit;display:inline-block;padding:0 .25rem;border-radius:.25rem;overflow-wrap:anywhere}",
+    ".tree a:hover{background:#e4e1d9}[aria-current]{font-weight:600;background:#dfe7f2}",
+    ".add label,.ops label{display:block;margin:.25rem 0}.add input{width:100%;box-sizing:border-box}",
+    ".ops{margin-top:2rem;border-top:1px solid #ccc;padding-top:.5rem}.meta{color:#5b6470}",
+    "textarea{width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere}.source{border-left:3px solid #ccc;padding-left:1rem}",
+    ".pane>summary{display:none}",
+    "@media(max-width:800px){main{display:block}nav{position:static;max-height:none;border-right:0;border-bottom:1px solid #ccc}section{padding:1rem}.pane>summary{display:list-item}}"
+);
 
-const SELECTION_SCRIPT: &str = "document.addEventListener(\"pointerup\", () => { const selection = getSelection(); const section = document.querySelector(\"main>section\"); const text = selection && section.contains(selection.anchorNode) && section.contains(selection.focusNode) ? selection.toString().trim() : \"\"; if (text) { document.getElementById(\"action-target\").value = text.slice(0, 2000); document.getElementById(\"selection-label\").hidden = false; } });";
+const SELECTION_SCRIPT: &str = "document.addEventListener(\"pointerup\", () => { const selection = getSelection(); const section = document.getElementById(\"content\"); const text = selection && section.contains(selection.anchorNode) && section.contains(selection.focusNode) ? selection.toString().trim() : \"\"; if (text) { document.getElementById(\"action-target\").value = text.slice(0, 2000); document.getElementById(\"selection-label\").hidden = false; } });";
 
 fn stage_label(stage: &str) -> &str {
     WORK_STAGES
@@ -349,6 +363,115 @@ fn render_work(work: Option<&ConfigValue>, token: &str, page: Option<&str>) -> S
         })
         .collect();
     out + &answer + &changes + &undo + &issues + &details + "</section>"
+}
+
+/// The folders and files of the left column, in the order they were added.
+#[derive(Default)]
+struct Tree {
+    folders: Vec<(String, Tree)>,
+    leaves: Vec<String>,
+}
+
+impl Tree {
+    /// The folder at `parts`, made when it is missing.
+    fn folder(&mut self, parts: &[String]) -> &mut Tree {
+        let Some((first, rest)) = parts.split_first() else {
+            return self;
+        };
+        let index = match self.folders.iter().position(|(name, _)| name == first) {
+            Some(index) => index,
+            None => {
+                self.folders.push((first.clone(), Tree::default()));
+                self.folders.len() - 1
+            }
+        };
+        self.folders[index].1.folder(rest)
+    }
+
+    fn leaf(&mut self, parts: &[String], html: String) {
+        self.folder(parts).leaves.push(html);
+    }
+
+    /// Nested lists; each folder opens and closes as a `details` element.
+    fn html(&self) -> String {
+        let mut out = String::from("<ul class=\"tree\">");
+        for (name, folder) in &self.folders {
+            out += &format!(
+                "<li><details open><summary>{}</summary>{}</details></li>",
+                escape_html(name),
+                folder.html()
+            );
+        }
+        for leaf in &self.leaves {
+            out += &format!("<li>{leaf}</li>");
+        }
+        out + "</ul>"
+    }
+}
+
+/// A link of the tree to `/?{query}`, marked when it is the one shown.
+fn leaf_link(query: &str, label: &str, title: &str, current: bool, after: &str) -> String {
+    format!(
+        "<a href=\"/?{query}\" title=\"{}\"{}>{}</a>{after}",
+        escape_html(title),
+        if current {
+            " aria-current=\"page\""
+        } else {
+            ""
+        },
+        escape_html(label)
+    )
+}
+
+/// Where a source sits in the tree: the folders of its path and its name. Web pages are grouped
+/// under `Web` and their host, and named by the rest of their address.
+fn source_path(object_id: &str) -> (Vec<String>, String) {
+    if crate::wiki_fetch::is_web_address(object_id)
+        && let Ok(url) = url::Url::parse(object_id)
+    {
+        let mut rest = url.path().to_owned();
+        if let Some(query) = url.query() {
+            rest = format!("{rest}?{query}");
+        }
+        let rest = percent_encoding::percent_decode_str(&rest)
+            .decode_utf8_lossy()
+            .into_owned();
+        let host = match url.port() {
+            Some(port) => format!("{}:{port}", url.host_str().unwrap_or_default()),
+            None => url.host_str().unwrap_or_default().to_owned(),
+        };
+        return (vec!["Web".into(), host], rest);
+    }
+    let mut parts: Vec<String> = object_id
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let name = parts.pop().unwrap_or_else(|| object_id.to_owned());
+    (parts, name)
+}
+
+/// Whether the loader wrote a source's text as Markdown: Markdown, HTML and Office files, and web
+/// pages other than plain text, PDF and JSON.
+fn markdown_source(object_id: &str) -> bool {
+    let web = crate::wiki_fetch::is_web_address(object_id);
+    let path = match url::Url::parse(object_id) {
+        Ok(url) if web => url.path().to_ascii_lowercase(),
+        _ => object_id.to_ascii_lowercase(),
+    };
+    let name = path.rsplit(['/', '\\']).next().unwrap_or_default();
+    let extension = name.rfind('.').map_or("", |at| &name[at..]);
+    [
+        ".md",
+        ".markdown",
+        ".html",
+        ".htm",
+        ".docx",
+        ".xlsx",
+        ".pptx",
+    ]
+    .contains(&extension)
+        || (web && ![".txt", ".pdf", ".json"].contains(&extension))
 }
 
 /// `displayPage(page, known)`: the page as HTML, with links to known pages kept on the screen.
@@ -797,6 +920,96 @@ impl WikiServer {
         &self.request.base
     }
 
+    /// A source in the right column: where it came from, the pages that cite it and its text as
+    /// the loader read it.
+    fn source_view(
+        &self,
+        id: &str,
+        source: &ConfigValue,
+        reflected: bool,
+        content: &[ConfigValue],
+    ) -> Result<String, StageError> {
+        let cancel = Cancellation::default();
+        let project = crate::wiki_project::Project {
+            request: self.base(),
+            cancel: &cancel,
+        };
+        let database = project.database()?;
+        let document = crate::wiki_project::current_document(&database, source, &cancel)?;
+        drop(database);
+        let object_id = js_text(source.get("objectId"));
+        // A web page is named by its whole address; a file by its name.
+        let name = if crate::wiki_fetch::is_web_address(&object_id) {
+            object_id.clone()
+        } else {
+            source_path(&object_id).1
+        };
+        let address = document
+            .as_ref()
+            .and_then(|document| document.get("evidence"))
+            .and_then(|evidence| evidence.get("source"))
+            .and_then(|source| source.get("url"))
+            .or_else(|| source.get("url"))
+            .and_then(ConfigValue::as_str)
+            .filter(|url| crate::wiki_fetch::is_web_address(url))
+            .map(|url| {
+                format!(
+                    "<p><a href=\"{0}\" rel=\"noreferrer noopener\" target=\"_blank\">{0}</a></p>",
+                    escape_html(url)
+                )
+            })
+            .unwrap_or_default();
+        let citing: String = content
+            .iter()
+            .filter(|page| {
+                items(page.get("citations")).iter().any(|citation| {
+                    citation
+                        .get("source")
+                        .and_then(|source| source.get("sourceId"))
+                        .and_then(ConfigValue::as_str)
+                        == Some(id)
+                })
+            })
+            .map(|page| {
+                let target = page
+                    .get("archive_id")
+                    .filter(|value| !matches!(value, ConfigValue::Null))
+                    .or_else(|| page.get("id"));
+                format!(
+                    "<li><a href=\"/?page={}\">{}</a></li>",
+                    encode_uri_component(&js_text(target)),
+                    escape_html(&js_text(page.get("title")))
+                )
+            })
+            .collect();
+        let text = match &document {
+            Some(document) => {
+                let body = str_of(document, "content");
+                if markdown_source(&object_id) {
+                    render(body)
+                } else {
+                    format!("<pre>{}</pre>", escape_html(body))
+                }
+            }
+            None => "<p>本文を読み出せませんでした。</p>".to_owned(),
+        };
+        Ok(format!(
+            "<h1>{}</h1><p class=\"meta\">原本 · {}{}</p>{address}<h2>引用しているページ</h2>{}<h2>本文</h2><div class=\"source\">{text}</div>",
+            escape_html(&name),
+            escape_html(&object_id),
+            if reflected {
+                ""
+            } else {
+                " · 未反映（ページにはまだ書かれていません）"
+            },
+            if citing.is_empty() {
+                "<p>まだありません。</p>".to_owned()
+            } else {
+                format!("<ul>{citing}</ul>")
+            },
+        ))
+    }
+
     /// A form instruction: checks it, queues it as work and redirects to its progress.
     fn post(
         &self,
@@ -856,10 +1069,28 @@ impl WikiServer {
             }
             _ => None,
         };
+        // A web address to fetch, from its own field or written where a path would go.
+        let address = match text_of("url") {
+            url if !url.is_empty() && action == "ingress" && upload.is_none() => Some(url),
+            _ if action == "ingress"
+                && upload.is_none()
+                && crate::wiki_fetch::is_web_address(&value) =>
+            {
+                Some(value.clone())
+            }
+            _ => None,
+        };
+        if let Some(address) = &address {
+            if crate::wiki_fetch::normalize(address).is_err() {
+                return Ok(html(400, "http または https の URL を指定してください"));
+            }
+            value = address.clone();
+        }
         if !supported.contains(&action.as_str())
             || (!["verify", "content", "archive", "restore", "pending"].contains(&action.as_str())
                 && value.is_empty()
-                && upload.is_none())
+                && upload.is_none()
+                && address.is_none())
         {
             return Ok(html(400, "無効な操作"));
         }
@@ -958,7 +1189,7 @@ impl WikiServer {
         {
             return Ok(html(400, "操作に必要な入力が不足しています"));
         }
-        if action == "ingress" && upload.is_none() {
+        if action == "ingress" && upload.is_none() && address.is_none() {
             let base = self.base();
             let file = realpath(&node_path::resolve(&base.root, &value))?;
             let root = realpath(&base.root)?;
@@ -1052,23 +1283,30 @@ impl WikiServer {
                 escape_html(&js_text(page.get("title")))
             )
         };
-        let menu: String = if base.kind == "para" {
-            CATEGORIES
-                .iter()
-                .map(|category| {
-                    format!(
-                        "<li>{category}<ul>{}</ul></li>",
-                        active
-                            .iter()
-                            .filter(|page| str_of(page, "id").starts_with(&format!("{category}/")))
-                            .map(page_link)
-                            .collect::<String>()
-                    )
-                })
-                .collect()
-        } else {
-            active.iter().map(page_link).collect()
-        };
+        let current_page = current.map(|page| js_text(page.get("id")));
+        // Pages as a tree of folders: the parts of their IDs (the PARA categories come first).
+        let mut page_tree = Tree::default();
+        if base.kind == "para" {
+            for category in CATEGORIES {
+                page_tree.folder(&[category.to_string()]);
+            }
+        }
+        for page in &active {
+            let id = js_text(page.get("id"));
+            let mut parts: Vec<String> = id.split('/').map(str::to_owned).collect();
+            parts.pop();
+            page_tree.leaf(
+                &parts,
+                leaf_link(
+                    &format!("page={}", encode_uri_component(&id)),
+                    &js_text(page.get("title")),
+                    &id,
+                    current_page.as_deref() == Some(id.as_str()),
+                    "",
+                ),
+            );
+        }
+        let menu = page_tree.html();
         let archived: String = content
             .iter()
             .filter(|page| truthy(page.get("archived")))
@@ -1119,13 +1357,46 @@ impl WikiServer {
             _ => None,
         };
         let mut statement = connection
-            .prepare("SELECT data FROM wiki_sources ORDER BY id")
+            .prepare("SELECT id, data, reflected FROM wiki_sources ORDER BY id")
             .map_err(sql)?;
-        let sources: Vec<ConfigValue> = statement
-            .query_map([], |row| row.get::<_, String>(0))
+        let sources: Vec<(String, ConfigValue, bool)> = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)? != 0,
+                ))
+            })
             .map_err(sql)?
-            .map(|row| row.map_err(sql).and_then(|data| parse(&data)))
+            .map(|row| {
+                row.map_err(sql)
+                    .and_then(|(id, data, reflected)| Ok((id, parse(&data)?, reflected)))
+            })
             .collect::<Result<_, _>>()?;
+        drop(statement);
+        let requested_source = param("source").filter(|_| current.is_none());
+        let current_source = requested_source
+            .and_then(|requested| sources.iter().find(|(id, _, _)| id == requested));
+        // Sources as a tree: the folders of their paths, and web pages by their host.
+        let mut source_tree = Tree::default();
+        for (id, source, reflected) in &sources {
+            let object_id = js_text(source.get("objectId"));
+            let (parts, label) = source_path(&object_id);
+            source_tree.leaf(
+                &parts,
+                leaf_link(
+                    &format!("source={}", encode_uri_component(id)),
+                    &label,
+                    &object_id,
+                    requested_source == Some(id.as_str()),
+                    if *reflected {
+                        ""
+                    } else {
+                        " <small>未反映</small>"
+                    },
+                ),
+            );
+        }
         let mut recent = active.clone();
         recent.sort_by(|a, b| {
             crate::wiki_inspect::locale_compare(
@@ -1156,8 +1427,8 @@ impl WikiServer {
             .iter()
             .map(|page| str_of(page, "id").to_owned())
             .collect();
-        let center = match (current, &rules) {
-            (Some(current), _) => format!(
+        let center = match (current, current_source, &rules) {
+            (Some(current), _, _) => format!(
                 "<h1>{}</h1>{}{}<h2>出典</h2><ol>{}</ol>",
                 escape_html(&js_text(current.get("title"))),
                 if truthy(current.get("archived")) {
@@ -1168,19 +1439,29 @@ impl WikiServer {
                 display_page(current, &known),
                 items(current.get("citations"))
                     .iter()
-                    .map(|citation| format!(
-                        "<li>{} {}</li>",
-                        escape_html(&js_text(
-                            citation
-                                .get("source")
-                                .and_then(|source| source.get("objectId"))
-                        )),
-                        line_range(citation.get("range"))
-                    ))
+                    .map(|citation| {
+                        let source = citation.get("source");
+                        let name =
+                            escape_html(&js_text(source.and_then(|source| source.get("objectId"))));
+                        let label = match source
+                            .and_then(|source| source.get("sourceId"))
+                            .and_then(ConfigValue::as_str)
+                        {
+                            Some(id) => format!(
+                                "<a href=\"/?source={}\">{name}</a>",
+                                encode_uri_component(id)
+                            ),
+                            None => name,
+                        };
+                        format!("<li>{label} {}</li>", line_range(citation.get("range")))
+                    })
                     .collect::<String>()
             ),
-            (None, Some(rules)) => render(rules),
-            (None, None) => format!(
+            (None, Some((id, source, reflected)), _) => {
+                self.source_view(id, source, *reflected, &content)?
+            }
+            (None, None, Some(rules)) => render(rules),
+            (None, None, None) => format!(
                 "<h1>{}</h1><h2>目的と範囲</h2><p>{}</p><p>{}</p><p>原本 {} 件、未反映 {count} 件</p>{}<h2>最近更新したページ</h2><ul>{recent}</ul>",
                 escape_html(&js_text(about.get("title"))),
                 escape_html(&js_text(about.get("purpose"))),
@@ -1196,17 +1477,26 @@ impl WikiServer {
             ),
         };
         let current_id = current.map(|page| js_text(page.get("id")));
+        let at_top = current.is_none() && current_source.is_none();
         let body = format!(
             concat!(
                 "<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
                 "{refresh}<title>{title}</title><style>{style}</style>",
-                "<main><nav><details class=\"pane\" open><summary>資料の階層</summary><a href=\"/\">トップ</a> · <a href=\"/?rules\">運用の決まり</a><h2>ページ</h2><ul>{menu}</ul><h2>原本</h2><ul>{sources}",
-                "</ul><h2>アーカイブ</h2><ul>{archived}</ul></details></nav><section>{center}",
-                "</section><aside><details class=\"pane\" open><summary>質問と操作</summary><h2>質問と操作</h2>{target}",
+                "<main><nav><details class=\"pane\" open><summary>ファイル</summary>",
+                "<p class=\"home\"><a href=\"/\"{top_current}>トップ</a> · <a href=\"/?rules\"{rules_current}>運用の決まり</a></p>",
+                "<form class=\"add\" method=\"post\" enctype=\"multipart/form-data\" action=\"/action{action}\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\">",
+                "<input type=\"hidden\" name=\"page\" value=\"{page}\"><h2>資料を取り込む</h2>",
+                "<label>URL<input type=\"url\" name=\"url\" placeholder=\"https://\"></label>",
+                "<label>ファイル<input type=\"file\" name=\"upload\"></label>",
+                "<button name=\"action\" value=\"ingress\">取り込む</button>{pending}</form>",
+                "<h2>ページ</h2>{menu}<h2>原本</h2>{sources}",
+                "<h2>アーカイブ</h2><ul>{archived}</ul></details></nav>",
+                "<section>{work}<article id=\"content\">{center}</article>",
+                "<details class=\"ops\"{ops_open}><summary>質問と操作</summary>{target}",
                 "<form method=\"post\" enctype=\"multipart/form-data\" action=\"/action{action}\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\">",
                 "<input type=\"hidden\" name=\"page\" value=\"{page}\">",
-                "<label>質問、資料のパス、ページ ID、または作業 ID<textarea name=\"value\" rows=\"4\"></textarea></label><button name=\"action\" value=\"query\">質問する</button>",
-                "<label>資料ファイル <input type=\"file\" name=\"upload\"></label><button name=\"action\" value=\"ingress\">資料を追加</button><button name=\"action\" value=\"pending\">未反映の資料を取り込む</button>",
+                "<label>質問、資料のパス、ページ ID、または作業 ID<textarea name=\"value\" rows=\"3\"></textarea></label><button name=\"action\" value=\"query\">質問する</button>",
+                "<button name=\"action\" value=\"ingress\">パスの資料を追加</button>",
                 "<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button>",
                 "<button name=\"action\" value=\"archive\">アーカイブ</button><button name=\"action\" value=\"restore\">復元</button><button name=\"action\" value=\"undo\">取り消す</button>",
                 "<details><summary>変更・出典</summary><label>対象の節・範囲、保存先ページ ID、または指摘の状態<input name=\"second\" id=\"action-target\"></label>",
@@ -1214,8 +1504,7 @@ impl WikiServer {
                 "{page_actions}",
                 "<button name=\"action\" value=\"save-answer\">回答をページに保存</button><button name=\"action\" value=\"issue\">指摘の状態を更新</button>",
                 "<button name=\"action\" value=\"rule\">今後の決まりに追記</button></details></form>",
-                "{work}",
-                "<h3>最近の作業</h3><ul>{history}</ul></details></aside></main>",
+                "<h3>最近の作業</h3><ul>{history}</ul></details></section></main>",
                 "{script}</html>"
             ),
             refresh = if working {
@@ -1225,13 +1514,28 @@ impl WikiServer {
             },
             title = escape_html(&js_text(about.get("title"))),
             style = STYLE,
+            top_current = if at_top && rules.is_none() {
+                " aria-current=\"page\""
+            } else {
+                ""
+            },
+            rules_current = if at_top && rules.is_some() {
+                " aria-current=\"page\""
+            } else {
+                ""
+            },
+            pending = if count > 0 {
+                format!(
+                    "<button name=\"action\" value=\"pending\">未反映の資料を取り込む（{count} 件）</button>"
+                )
+            } else {
+                String::new()
+            },
             menu = menu,
-            sources = sources
-                .iter()
-                .map(|source| format!("<li>{}</li>", escape_html(&js_text(source.get("objectId")))))
-                .collect::<String>(),
+            sources = source_tree.html(),
             archived = archived,
             center = center,
+            ops_open = if current.is_some() { " open" } else { "" },
             target = match current {
                 Some(current) => format!(
                     "<p>対象 {}</p><p id=\"selection-label\" hidden>選択範囲を対象にします</p>",

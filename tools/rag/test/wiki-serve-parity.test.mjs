@@ -1,7 +1,10 @@
 // Spec 28.12 step 5b: the screen of Wiki and PARA projects runs in Rust and answers as the
-// JavaScript screen (test/fixtures/wiki-reference) did: the same status codes, headers and pages,
-// the same checks of hosts, origins, credentials, forms and uploads, and the same recorded work.
-// Two copies of one project are served, one by the CLI and one by the reference.
+// JavaScript screen (test/fixtures/wiki-reference) did: the same status codes, headers and shown
+// content, the same checks of hosts, origins, credentials, forms and uploads, and the same recorded
+// work. Two copies of one project are served, one by the CLI and one by the reference. The layout
+// around the content (a file tree on the left, the content on the right) is the Rust screen's own,
+// so full screens are compared by the content and the work they show (wiki-screen.test.mjs covers
+// the layout).
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -70,6 +73,16 @@ function equalText(left, right, label) {
   while (at < left.length && left[at] === right[at]) at++;
   assert.equal(left.slice(Math.max(0, at - 300), at + 300), right.slice(Math.max(0, at - 300), at + 300), label);
   assert.equal(left.length, right.length, label);
+}
+
+/** What both screens show of a full screen: the content and the work, without the layout. */
+function screenParts(body) {
+  if (!body.startsWith('<!doctype html>')) return body;
+  const center = /<article id="content">([\s\S]*?)<\/article>/u.exec(body)?.[1]
+    ?? /<\/nav><section>([\s\S]*?)<\/section><aside>/u.exec(body)?.[1] ?? '';
+  const work = /<section aria-live="polite"[\s\S]*?<\/section>/u.exec(body)?.[0] ?? '';
+  // Citations link to their source on the Rust screen.
+  return 'content: ' + center.replace(/<a href="\/\?source=[^"]*">(.*?)<\/a>/gu, '$1') + '\nwork: ' + work;
 }
 
 /** Replaces form keys, nonces, work IDs, times, digests, ports and project paths by placeholders. */
@@ -159,7 +172,7 @@ test('serves the Wiki screen like the former JavaScript screen', { timeout: 300_
     'access-control-allow-origin', 'access-control-allow-credentials', 'access-control-allow-methods', 'vary', 'www-authenticate', 'allow', 'connection'];
   const view = (response, text) => JSON.stringify({ status: response.status,
     headers: Object.fromEntries(headers.filter((name) => response.headers[name] !== undefined && !(name === 'connection' && response.headers[name] === 'keep-alive')).map((name) => [name, text(String(response.headers[name]))])),
-    body: text(response.body) });
+    body: text(screenParts(response.body)) });
   /** Sends the same request to both screens and compares the replies. */
   const same = async (label, request) => {
     const own = (port) => typeof request === 'function' ? request(port) : request;

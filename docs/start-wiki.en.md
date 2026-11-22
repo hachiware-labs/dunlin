@@ -62,6 +62,12 @@ nest ingress ../manuals
 
 This can take a few minutes. Give the job ID it prints to `nest progress <job-id>` to follow it. To save the originals now and read and write later, add `--source-only`, then run `nest ingress --pending` afterwards.
 
+Web pages can be ingested by URL too. HTML, PDF, Markdown, and Office documents are downloaded, and their content at that moment is saved as the original. Ingesting the same URL again saves a new version of the same document.
+
+```sh
+nest ingress https://example.com/manuals/pump
+```
+
 ## 4 Read: in a browser and over MCP
 
 ```sh
@@ -74,9 +80,8 @@ nest serve
 
 | Column | Contents |
 |---|---|
-| Left | The tree of documents and pages. Ingested originals and the archive are listed separately |
-| Middle | The top page, or the page you opened. Citation numbers jump to the original |
-| Right | The box for questions and instructions, and the job history |
+| Left | A file tree. Pages by folder, originals by the folders of their paths, and web documents under "Web" by host. **資料を取り込む** (add documents) at the top takes a URL or a file |
+| Right | What you opened: a page with its citations, or an original with its ingested text and the pages that cite it. **質問と操作** (questions and actions) below it takes questions and instructions |
 
 The top page shows the purpose and scope, what each section holds, and how many documents are not yet reflected and how many findings are open. You know what to do next as soon as you open it.
 

@@ -458,7 +458,21 @@ pub(crate) fn ingress(
         Some(entry) => entry.1 = object_id,
         None => files.push((file, object_id)),
     };
+    // Files downloaded from web addresses, with the address each stands for.
+    let mut fetched: HashMap<String, String> = HashMap::new();
+    let mut addresses = 0;
     for input in request.args.iter().flatten() {
+        if crate::wiki_fetch::is_web_address(input) {
+            if dry_run {
+                crate::wiki_fetch::normalize(input)?;
+                addresses += 1;
+                continue;
+            }
+            let download = crate::wiki_fetch::fetch(input, &request.artifacts)?;
+            fetched.insert(download.file.clone(), download.url.clone());
+            add(&mut files, download.file, download.url);
+            continue;
+        }
         let home = input
             .strip_prefix("~/")
             .or_else(|| input.strip_prefix("~\\"));
@@ -500,9 +514,10 @@ pub(crate) fn ingress(
     let grouped: Vec<(String, String, String)> = files
         .iter()
         .map(|(file, object_id)| {
-            let key = match upload {
-                Some(name) => format!("browser:{}", nfkc(name)),
-                None => file.clone(),
+            let key = match (fetched.get(file), upload) {
+                (Some(url), _) => format!("url:{url}"),
+                (None, Some(name)) => format!("browser:{}", nfkc(name)),
+                (None, None) => file.clone(),
             };
             (
                 format!("source-{}", &sha256_hex(key.as_bytes())[..24]),
@@ -553,7 +568,10 @@ pub(crate) fn ingress(
     };
     if dry_run {
         return Ok(object(vec![
-            ("files", ConfigValue::Number(files.len() as f64)),
+            (
+                "files",
+                ConfigValue::Number((files.len() + addresses) as f64),
+            ),
             ("pending", ConfigValue::Number(pending.len() as f64)),
             ("skipped", ConfigValue::Array(skipped)),
         ]));
@@ -627,10 +645,14 @@ pub(crate) fn ingress(
     let database = project.database()?;
     let mut documents: Vec<ConfigValue> = Vec::new();
     tracker.progress("indexing_sources", Some((0, grouped.len())));
-    for (index, (id, _, _)) in grouped.iter().enumerate() {
-        let Some(document) = by_index.remove(&index) else {
+    for (index, (id, file, _)) in grouped.iter().enumerate() {
+        let Some(mut document) = by_index.remove(&index) else {
             continue;
         };
+        // A downloaded page links to its address rather than to the saved copy.
+        if let (Some(url), ConfigValue::Object(entries)) = (fetched.get(file), &mut document) {
+            assign(entries, "url", Some(text(url)));
+        }
         let content = str_of(&document, "content").to_owned();
         let mut input = Vec::new();
         for name in [

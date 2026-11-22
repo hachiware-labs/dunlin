@@ -80,10 +80,10 @@ nest serve
 
 | Column | Contents |
 |---|---|
-| Left | A file tree. Pages by folder, originals by the folders of their paths, and web documents under "Web" by host. **資料を取り込む** (add documents) at the top takes a URL or a file |
-| Right | What you opened: a page with its citations, or an original with its ingested text and the pages that cite it. **質問と操作** (questions and actions) below it takes questions and instructions |
+| Left | Where things are. **資料を取り込む** (add documents, by URL or file), the home, the job history, the rules, and a file tree. **ページ** (pages) are what the AI wrote; **原本** (originals) are the documents you ingested |
+| Right | What you opened, and what you can do with it. Under a page and its citations you can ask about it, have it revised by instruction, and check it. An original shows its ingested text and the pages that cite it |
 
-The top page shows the purpose and scope, what each section holds, and how many documents are not yet reflected and how many findings are open. You know what to do next as soon as you open it.
+The home shows the purpose and scope, a box for questions, the number of pages, originals, originals not yet reflected, and open findings, the pages changed lately, and the latest jobs. You know what to do next as soon as you open it. The screen itself is in Japanese.
 
 **From an agent**: register it in your MCP client's settings, and Claude or another agent answers from the same pages people read. The pages are also saved as HTML in `site/`, readable without a server.
 

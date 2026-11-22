@@ -30,7 +30,7 @@ The order runs from closest to action at the top to farthest at the bottom.
 | Unit | Pages by topic | Notes |
 | Top-level sections | Topic sections | Projects, Areas, Resources, Archives |
 | Archiving | Puts stale pages away | Moves finished efforts to Archives |
-| Top page | What each section holds | The four categories, and the list of active Projects |
+| Home | Counts and the pages changed lately | The four categories with their counts, and the list of active Projects |
 
 Commands, screen, and citation rules are the same as the Wiki. Build a Wiki for an encyclopedia of knowledge; build PARA to keep your desk in order.
 
@@ -75,7 +75,7 @@ nest serve
 
 `serve` offers the notes both on the web and over MCP.
 
-- **In a browser**: open `http://127.0.0.1:4319`. Projects, Areas, Resources, and Archives sit at the top of the file tree on the left, and the note or original you open shows on the right. Give a URL or a file to **資料を取り込む** (add documents) at the top left to ingest it. The top page explains the four categories and lists the active Projects.
+- **In a browser**: open `http://127.0.0.1:4319`. Projects, Areas, Resources, and Archives sit at the top of the file tree on the left. The note or original you open shows on the right, with what you can do with it (ask, revise by instruction, check). Give a URL or a file to **資料を取り込む** (add documents) at the top left to ingest it. The home shows the purpose, a box for questions, the four categories with their note counts, and the notes changed lately.
 - **From an agent**: register it in your MCP client's settings, and Claude or another agent answers from the notes you have organized.
 
 ## 5 Keep using it

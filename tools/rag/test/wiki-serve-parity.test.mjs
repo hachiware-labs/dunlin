@@ -86,8 +86,10 @@ function screenParts(body) {
   let center = own ? own[2] : /<\/nav><section>([\s\S]*?)<\/section><aside>/u.exec(body)?.[1] ?? '';
   if (own ? own[1] === 'top' : /^<h1>[^<]*<\/h1><h2>目的と範囲<\/h2>/u.test(center)) center = '';
   const work = /<section aria-live="polite"[\s\S]*?<\/section>/u.exec(body)?.[0] ?? '';
-  // On the Rust screen citations link to their source and open their quoted passage.
-  center = center.replace(/<form class="inline"[\s\S]*?<\/form>/gu, '').replace(/<a href="\/\?source=[^"]*">(.*?)<\/a>/gu, '$1');
+  // On the Rust screen citation numbers jump to their citation, and citations link to their
+  // source and open their quoted passage.
+  center = center.replace(/<form class="inline"[\s\S]*?<\/form>/gu, '').replace(/<a href="\/\?source=[^"]*">(.*?)<\/a>/gu, '$1')
+    .replace(/<a class="ref" href="#cite-\d+">(\d+)<\/a>/gu, ' [$1]').replace(/<li id="cite-\d+">/gu, '<li>');
   return 'content: ' + center + '\nwork: ' + work;
 }
 

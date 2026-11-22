@@ -76,7 +76,7 @@ const STYLE: &str = concat!(
     "main>nav{background:var(--side);border-right:1px solid var(--line);position:sticky;top:0;height:100vh;overflow:auto;padding:18px 14px 32px}",
     ".brand{display:flex;align-items:center;gap:10px;color:var(--text);text-decoration:none;padding:2px 6px 14px}",
     ".brand strong{font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-    ".logo{flex:none;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#7c3aed);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}",
+    ".logo{flex:none;width:30px;height:30px;border-radius:9px;background:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 3 7.5l9 4.5 9-4.5z'/%3E%3Cpath d='m3 12 9 4.5 9-4.5'/%3E%3Cpath d='m3 16.5 9 4.5 9-4.5'/%3E%3C/svg%3E\") center/18px no-repeat,linear-gradient(135deg,#2563eb,#7c3aed);box-shadow:0 2px 6px rgba(37,99,235,.35)}",
     ".kind{margin-left:auto;flex:none;font-size:11px;font-weight:700;padding:1px 9px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}",
     ".field{display:block;margin:8px 0 0}.field span{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}",
     "input,textarea{font:inherit;font-size:14px;line-height:1.5;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}",
@@ -103,9 +103,9 @@ const STYLE: &str = concat!(
     ".file{--icon:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E\")}",
     ".web{--icon:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18'/%3E%3C/svg%3E\")}",
     ".view{padding:28px 40px 64px;min-width:0}.view>*{max-width:860px;margin-left:auto;margin-right:auto}",
-    ".crumbs{display:flex;flex-wrap:wrap;gap:6px;font-size:13px;color:var(--muted);margin-bottom:12px}.crumbs span+span::before{content:'/';margin-right:6px;opacity:.5}",
+    ".crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin-bottom:12px}.crumbs span+span::before{content:'/';margin-right:6px;opacity:.5}.crumbs em{margin-left:auto;font-style:normal;font-size:12px}",
     "article{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:36px 44px;box-shadow:var(--shadow);overflow-wrap:anywhere}",
-    "article h1{font-size:28px;line-height:1.35;letter-spacing:-.01em;margin:0 0 16px}article.top h1{font-size:32px}",
+    "article h1{font-size:28px;line-height:1.35;letter-spacing:-.01em;margin:0 0 16px}article.top{padding:44px;background:linear-gradient(160deg,var(--accent-soft),var(--card) 55%)}article.top h1{font-size:32px;margin-bottom:10px}",
     "article h2{font-size:16px;margin:32px 0 10px;padding-top:20px;border-top:1px solid var(--line)}",
     "article p:empty{display:none}article ol,article ul{padding-left:1.4em}article li{margin:4px 0}article li::marker{color:var(--muted)}",
     "article code{background:var(--bg);padding:1px 5px;border-radius:5px;font-size:.92em}",
@@ -133,10 +133,10 @@ const STYLE: &str = concat!(
     "main>nav h2{display:flex;align-items:baseline;gap:8px;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);margin:24px 8px 6px}",
     "main>nav h2 small,.archive small{font-weight:400;letter-spacing:0;opacity:.85}",
     ".archive{margin-top:24px}.archive>summary{cursor:pointer;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);padding:0 8px 6px}.archive small{margin-left:8px}",
-    ".hint{font-size:12.5px;line-height:1.6;color:var(--muted);margin:0 0 10px}.lead{font-size:17px;margin:0 0 6px}",
-    ".ask{display:flex;gap:8px;margin-top:22px}.ask input{flex:1;padding:10px 14px;font-size:15px;border-radius:10px}.ask button{margin:0;padding:0 20px;border-radius:10px;font-size:14px}",
+    ".hint{font-size:12.5px;line-height:1.6;color:var(--muted);margin:0 0 10px}.lead{font-size:17px;line-height:1.7;margin:0 0 6px;max-width:38em}",
+    ".ask{display:flex;gap:8px;margin-top:24px}.ask input{flex:1;padding:12px 16px 12px 44px;font-size:15px;border-radius:12px;background:var(--card) url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a919b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E\") 14px center/18px no-repeat;box-shadow:var(--shadow)}.ask button{margin:0;padding:0 22px;border-radius:12px;font-size:14px}",
     ".tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:16px}",
-    ".tile{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--text);text-decoration:none;box-shadow:var(--shadow)}a.tile:hover{border-color:var(--accent)}",
+    ".tile{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--text);text-decoration:none;box-shadow:var(--shadow);transition:border-color .15s,transform .15s}a.tile:hover{border-color:var(--accent);transform:translateY(-1px)}",
     ".tile b{font-size:26px;line-height:1.25}.tile span{font-size:13px;font-weight:600}.tile small{font-size:11.5px;line-height:1.5;color:var(--muted)}.tile.warn b{color:var(--warn)}",
     ".tile form{margin-top:auto}.tile button{margin:8px 0 0;padding:3px 10px;font-size:12px}",
     ".panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin-top:16px;box-shadow:var(--shadow)}.panel h2{font-size:15px;margin:0 0 8px}",
@@ -150,8 +150,21 @@ const STYLE: &str = concat!(
     ".dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--accent)}.dot.succeeded{background:var(--ok)}.dot.failed{background:var(--bad)}",
     ".more{margin:8px 0 0;font-size:13px}form.inline{display:inline}form.inline button{margin:0 0 0 8px;padding:1px 9px;font-size:12px;color:var(--muted)}",
     "@media(max-width:820px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}",
+    ":focus-visible{outline:2px solid var(--accent);outline-offset:2px}::selection{background:var(--accent-soft)}",
+    "main>nav{scrollbar-width:thin;scrollbar-color:var(--line) transparent}a,button,summary{transition:background-color .15s,border-color .15s,color .15s}",
+    "article.page>p,article.page>ul,article.page>ol,article.rules>p,article.rules li{font-size:16px;line-height:1.9}article.page>p{max-width:42em}",
+    ".ref{font-size:.7em;font-weight:700;vertical-align:super;line-height:0;margin-left:3px;padding:1px 6px;border-radius:99px;background:var(--accent-soft);color:var(--accent);text-decoration:none}.ref:hover{background:var(--accent);color:var(--accent-text)}",
+    "article.page>h2:last-of-type{font-size:13px;letter-spacing:.06em;color:var(--muted)}",
+    "article.page>h2:last-of-type+ol{list-style:none;padding:0;margin:0;counter-reset:cite;font-size:14px}",
+    "article.page>h2:last-of-type+ol>li{counter-increment:cite;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;margin:0;padding:6px 10px;border-radius:8px;color:var(--muted)}",
+    "article.page>h2:last-of-type+ol>li::before{content:counter(cite);flex:none;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-size:11px;font-weight:700;display:grid;place-items:center}",
+    "article.page>h2:last-of-type+ol>li:target{background:var(--accent-soft)}article.page>h2:last-of-type+ol form{margin-left:auto}",
+    ".actions h2{margin-bottom:12px}.actions>details{border-top:1px solid var(--line)}.actions>details[open]{padding-bottom:16px}",
+    ".actions>details>summary{list-style:none;display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;padding:12px 0;font-size:14px;font-weight:600;color:var(--text)}.actions>details>summary::-webkit-details-marker{display:none}",
+    ".actions>details>summary::before{content:'';flex:none;width:6px;height:6px;border:solid var(--muted);border-width:0 1.6px 1.6px 0;transform:rotate(-45deg);transition:transform .15s;margin:0 4px}.actions>details[open]>summary::before{transform:rotate(45deg)}",
+    ".actions>details>summary:hover{color:var(--accent)}",
     ".pane>summary{display:none}",
-    "@media(max-width:820px){main{display:block}main>nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.pane>summary{display:list-item;cursor:pointer;font-weight:600;margin-bottom:8px}.view{padding:16px}article{padding:22px 20px;border-radius:12px}article h1,article.top h1{font-size:23px}}",
+    "@media(max-width:820px){main{display:block}main>nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.pane>summary{display:list-item;cursor:pointer;font-weight:600;margin-bottom:8px}.view{padding:16px}article,article.top{padding:22px 20px;border-radius:12px}.ask{flex-direction:column}.ask button{padding:10px}article h1,article.top h1{font-size:23px}}",
 );
 
 const SELECTION_SCRIPT: &str = "document.addEventListener(\"pointerup\", () => { const selection = getSelection(); const section = document.getElementById(\"content\"); const text = selection && section.contains(selection.anchorNode) && section.contains(selection.focusNode) ? selection.toString().trim() : \"\"; if (text) { document.querySelectorAll(\"[data-selection]\").forEach((input) => { input.value = text.slice(0, 2000); }); document.querySelectorAll(\".selection-label\").forEach((label) => { label.hidden = false; }); } });";
@@ -479,6 +492,21 @@ impl Tree {
         }
         out + "</ul>"
     }
+}
+
+/// The citation numbers of a page's text (` [1]`) as links to their citation in the list below.
+fn cited_markers(html: &str, citations: usize) -> String {
+    let marker = regex::Regex::new(r" \[(\d+)\]").expect("a valid pattern");
+    marker
+        .replace_all(html, |found: &regex::Captures<'_>| {
+            match found[1].parse::<usize>() {
+                Ok(number) if (1..=citations).contains(&number) => {
+                    format!("<a class=\"ref\" href=\"#cite-{number}\">{number}</a>")
+                }
+                _ => found[0].to_owned(),
+            }
+        })
+        .into_owned()
 }
 
 /// What a work did, in a line or two above its details: the passage a citation quotes, the pages
@@ -1714,7 +1742,10 @@ impl WikiServer {
                     } else {
                         ""
                     },
-                    display_page(page, &known),
+                    cited_markers(
+                        &display_page(page, &known),
+                        items(page.get("citations")).len()
+                    ),
                     items(page.get("citations"))
                         .iter()
                         .enumerate()
@@ -1734,16 +1765,16 @@ impl WikiServer {
                                 None => name,
                             };
                             format!(
-                                "<li>{label} {}{}<input type=\"hidden\" name=\"value\" value=\"{}\"><button name=\"action\" value=\"cite\">引用箇所を見る</button></form></li>",
+                                "<li id=\"cite-{number}\">{label} {}{}<input type=\"hidden\" name=\"value\" value=\"{number}\"><button name=\"action\" value=\"cite\">引用箇所を見る</button></form></li>",
                                 line_range(citation.get("range")),
                                 form("inline"),
-                                index + 1
+                                number = index + 1
                             )
                         })
                         .collect::<String>()
                 );
                 let manage = format!(
-                    "<section class=\"panel\"><h2>このページの管理</h2><p class=\"hint\">検査は引用とリンクを確かめます。内容の検査は AI が関連ページとの食い違いを調べます。</p>{}<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button>{}</form></section>",
+                    "<p class=\"hint\">検査は引用とリンクを確かめます。内容の検査は AI が関連ページとの食い違いを調べます。</p>{}<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button>{}</form>",
                     form("row"),
                     if archived {
                         "<button name=\"action\" value=\"restore\">アーカイブから戻す</button>"
@@ -1752,20 +1783,24 @@ impl WikiServer {
                     }
                 );
                 let panels = if archived {
-                    manage
+                    format!(
+                        "<section class=\"panel actions\"><h2>このページでできること</h2><details name=\"act\" open><summary>検査・アーカイブ</summary>{manage}</details></section>"
+                    )
                 } else {
                     format!(
                         concat!(
-                            "<section class=\"panel\"><h2>このページに質問する</h2>{}<input type=\"hidden\" name=\"second\" data-selection>",
+                            "<section class=\"panel actions\"><h2>このページでできること</h2>",
+                            "<details name=\"act\" open><summary>質問する</summary>{}<input type=\"hidden\" name=\"second\" data-selection>",
                             "<textarea name=\"value\" rows=\"2\" required placeholder=\"このページの内容について質問します\"></textarea>",
                             "<p class=\"hint selection-label\" hidden>本文で選択した範囲について質問します</p>",
-                            "<button class=\"primary\" name=\"action\" value=\"query\">質問する</button></form></section>",
-                            "<section class=\"panel\"><h2>AI に指示して直す</h2><p class=\"hint\">ページは直接編集せず、指示で直します。引用は保たれます。</p>{}",
+                            "<button class=\"primary\" name=\"action\" value=\"query\">質問する</button></form></details>",
+                            "<details name=\"act\"><summary>AI に指示して直す</summary><p class=\"hint\">ページは直接編集せず、指示で直します。引用は保たれます。</p>{}",
                             "<textarea name=\"value\" rows=\"2\" required placeholder=\"例：点検前の確認事項を箇条書きにしてください\"></textarea>",
                             "<label>対象の節・範囲（本文を選択すると入ります）<input name=\"second\" data-selection></label>",
                             "<details><summary>資料にない内容を補足する</summary><label>補足の内容<textarea name=\"supplement\" rows=\"2\"></textarea></label>",
                             "<label>記録者<input name=\"third\"></label></details>",
-                            "<button class=\"primary\" name=\"action\" value=\"instruct\">指示を実行</button></form></section>{}"
+                            "<button class=\"primary\" name=\"action\" value=\"instruct\">指示を実行</button></form></details>",
+                            "<details name=\"act\"><summary>検査・アーカイブ</summary>{}</details></section>"
                         ),
                         form(""),
                         form(""),
@@ -1800,7 +1835,12 @@ impl WikiServer {
                 "rules",
                 render(rules),
                 format!(
-                    "<section class=\"panel\"><h2>決まりを追加する</h2><p class=\"hint\">ここに足した決まりは、これ以降のすべての取り込みと指示に効きます。</p>{}<textarea name=\"value\" rows=\"2\" required placeholder=\"例：手順は番号付きで書く\"></textarea><button class=\"primary\" name=\"action\" value=\"rule\">決まりを追加</button></form></section>",
+                    "<section class=\"panel\"><h2>決まりを追加する</h2><p class=\"hint\">{}ここに足した決まりは、これ以降のすべての取り込みと指示に効きます。</p>{}<textarea name=\"value\" rows=\"2\" required placeholder=\"例：手順は番号付きで書く\"></textarea><button class=\"primary\" name=\"action\" value=\"rule\">決まりを追加</button></form></section>",
+                    if rules.lines().filter(|line| !line.trim().is_empty()).count() <= 1 {
+                        "まだ決まりはありません。"
+                    } else {
+                        ""
+                    },
                     form("")
                 ),
             ),
@@ -1877,14 +1917,11 @@ impl WikiServer {
                 } else {
                     String::new()
                 };
-                let pages_panel = if recent.is_empty() {
-                    "<section class=\"panel\" id=\"pages\"><h2>最近更新したページ</h2><p class=\"empty\">まだページがありません。左上の「資料を取り込む」に URL かファイルを渡すと、AI が読んでページを書きます。</p></section>".to_owned()
-                } else {
+                let cards = |pages: &[&ConfigValue]| {
                     format!(
-                        "<section class=\"panel\" id=\"pages\"><h2>最近更新したページ</h2><ul class=\"cards\">{}</ul></section>",
-                        recent
+                        "<ul class=\"cards\">{}</ul>",
+                        pages
                             .iter()
-                            .take(8)
                             .map(|page| format!(
                                 "<li><a href=\"/?page={}\"><strong>{}</strong><span>{}</span><time>{}</time></a></li>",
                                 encode_uri_component(&js_text(page.get("id"))),
@@ -1895,9 +1932,33 @@ impl WikiServer {
                             .collect::<String>()
                     )
                 };
+                // PARA: the efforts under way come before everything else.
+                let projects: Vec<&ConfigValue> = recent
+                    .iter()
+                    .filter(|page| {
+                        base.kind == "para" && str_of(page, "id").starts_with("Projects/")
+                    })
+                    .copied()
+                    .collect();
+                let projects_panel = if projects.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "<section class=\"panel\"><h2>進行中の Projects</h2>{}</section>",
+                        cards(&projects)
+                    )
+                };
+                let pages_panel = if recent.is_empty() {
+                    "<section class=\"panel\" id=\"pages\"><h2>最近更新したページ</h2><p class=\"empty\">まだページがありません。左上の「資料を取り込む」に URL かファイルを渡すと、AI が読んでページを書きます。</p></section>".to_owned()
+                } else {
+                    format!(
+                        "<section class=\"panel\" id=\"pages\"><h2>最近更新したページ</h2>{}</section>",
+                        cards(&recent[..recent.len().min(8)])
+                    )
+                };
                 let panels = format!(
                     concat!(
-                        "{tiles}{categories}{pages_panel}",
+                        "{tiles}{categories}{projects_panel}{pages_panel}",
                         "<section class=\"panel\"><h2>最近の作業</h2>{}<p class=\"more\"><a href=\"/?history\">作業の履歴をすべて見る</a></p></section>",
                         "<section class=\"panel\"><h2>点検する</h2><p class=\"hint\">検査は、引用が原本にあるか、版が古くないか、リンク切れがないかを確かめます。内容の検査は、AI がページ同士の食い違いを調べます。</p>",
                         "{}<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button></form></section>"
@@ -1906,6 +1967,7 @@ impl WikiServer {
                     form("row"),
                     tiles = tiles,
                     categories = categories,
+                    projects_panel = projects_panel,
                     pages_panel = pages_panel,
                 );
                 ("top", center, panels)
@@ -1943,11 +2005,19 @@ impl WikiServer {
             String::new()
         } else {
             format!(
-                "<div class=\"crumbs\">{}</div>",
+                "<div class=\"crumbs\">{}{}</div>",
                 crumbs
                     .iter()
                     .map(|part| format!("<span>{}</span>", escape_html(part)))
-                    .collect::<String>()
+                    .collect::<String>(),
+                match &shown {
+                    Shown::Page(page) => format!(
+                        "<em>更新 {} · 出典 {} 件</em>",
+                        escape_html(&ago(&js_text(page.get("changed")), now)),
+                        items(page.get("citations")).len()
+                    ),
+                    _ => String::new(),
+                }
             )
         };
         let tree_or_empty = |tree: &Tree| {
@@ -1963,7 +2033,7 @@ impl WikiServer {
         let body = format!(
             concat!(
                 "<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
-                "{refresh}<title>{title}</title><style>{style}</style>",
+                "{refresh}<title>{title}</title><link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cg transform='translate(4 4)' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3 3 7.5l9 4.5 9-4.5z'/%3E%3Cpath d='m3 12 9 4.5 9-4.5'/%3E%3Cpath d='m3 16.5 9 4.5 9-4.5'/%3E%3C/g%3E%3C/svg%3E\"><style>{style}</style>",
                 "<main><nav><details class=\"pane\" open><summary>メニュー</summary>",
                 "<a class=\"brand\" href=\"/\"><span class=\"logo\"></span><strong>{title}</strong><span class=\"kind\">{kind}</span></a>",
                 "<details class=\"add\"{add_open}><summary>資料を取り込む</summary>",

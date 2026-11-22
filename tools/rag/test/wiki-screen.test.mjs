@@ -177,9 +177,12 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   assert.match(after.body, /title="http:\/\/127\.0\.0\.1:\d+\/manuals\/pump"><span class="name">\/manuals\/pump<\/span><\/a><\/li>/u);
   const pageId = /href="\/\?page=([^"]+)"/u.exec(after.body)[1];
   const page = await send(port, { path: '/?page=' + pageId });
-  assert.match(page.body, /<h2>出典<\/h2><ol><li><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a>/u);
+  assert.match(page.body, /<h2>出典<\/h2><ol><li id="cite-1"><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a>/u);
+  // Citation numbers in the text jump to their citation.
+  assert.match(page.body, /<a class="ref" href="#cite-1">1<\/a>/u);
+  assert.match(page.body, /<div class="crumbs"><span>ページ<\/span><span>guides<\/span><span>[^<]*<\/span><em>更新 [^<]* · 出典 1 件<\/em><\/div>/u);
   // The actions of a page sit under it: ask about it, have it revised, and manage it.
-  assert.match(page.body, /<h2>このページに質問する<\/h2>.*<h2>AI に指示して直す<\/h2>.*<h2>このページの管理<\/h2>/su);
+  assert.match(page.body, /<h2>このページでできること<\/h2><details name="act" open><summary>質問する<\/summary>.*<summary>AI に指示して直す<\/summary>.*<summary>検査・アーカイブ<\/summary>/su);
   const cited = await post({ action: 'cite', page: decodeURIComponent(pageId), value: '1' });
   assert.equal(cited.status, 303);
   let quoted;

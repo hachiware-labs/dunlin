@@ -175,7 +175,28 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   const after = await send(port, {});
   assert.match(after.body, /<h2>ページ<small>AI がまとめた記事<\/small><\/h2><ul class="tree"><li><details open><summary>guides<\/summary>/u);
   assert.match(after.body, /title="http:\/\/127\.0\.0\.1:\d+\/manuals\/pump"><span class="name">\/manuals\/pump<\/span><\/a><\/li>/u);
+  // The top is the contents of the Wiki: every page under its folder, with a line about it.
+  assert.match(after.body, /<section class="panel" id="pages"><h2>guides<small>1<\/small><\/h2><ul class="cards"><li><a href="\/\?page=guides%2Fnote-\d+"><strong>[^<]+<\/strong><span>概要<\/span><time>出典 1 · \d{4}-\d\d-\d\d<\/time><\/a><\/li><\/ul><\/section>/u);
+  assert.match(after.body, /<form class="ask" method="get" action="\/"><input type="search" name="q" required placeholder="ページを検索する"/u);
+  assert.match(after.body, /<h2>AI に質問する<\/h2>.*<button class="primary" name="action" value="query">質問する<\/button>.*<h2>保守<\/h2>/su);
+  // A search finds the pages that hold every word, and marks the words in the passage.
+  const found = await send(port, { path: '/?q=' + encodeURIComponent('点検 ポンプ') });
+  assert.match(found.body, /<article id="content" class="search"><h1>検索<\/h1>.*<p class="meta found">1 件のページが見つかりました。<\/p><ul class="cards hits"><li><a href="\/\?page=guides%2Fnote-\d+">/su);
+  assert.match(found.body, /<mark>ポンプ<\/mark>の<mark>点検<\/mark>/u);
+  const none = await send(port, { path: '/?q=' + encodeURIComponent('点検 zebra') });
+  assert.match(none.body, /<p class="meta found">該当するページがありません。/u);
+  // The folder of pages has its contents and its log as files of their own.
+  const contents = await readFile(join(base, 'wiki', 'index.html'), 'utf8');
+  assert.match(contents, /<!-- knowledge-nest:catalog -->/u);
+  assert.match(contents, /<section data-group><h2>guides<small>1<\/small><\/h2><ul class="pages"><li data-text="[^"]*"><a href="guides\/note-\d+\.html"><strong>/u);
+  assert.match(contents, /<p class="meta">ページ 1 件 · 原本 2 件（未反映 1 件） · 最終更新 \d{4}-\d\d-\d\d<\/p>/u);
+  assert.match(await readFile(join(base, 'wiki', 'log.html'), 'utf8'), /<li><h2><time>\[\d{4}-\d\d-\d\d\] ingress<\/time> \| 取り込み<\/h2><p>原本 1 件 · ページ 1 件<\/p><ul><li><a href="guides\/note-\d+\.html">/u);
   const pageId = /href="\/\?page=([^"]+)"/u.exec(after.body)[1];
+  // The file of the page links up to the contents, and to its source by a path of its own.
+  const pageFile = await readFile(join(base, 'wiki', ...decodeURIComponent(pageId).split('/')) + '.html', 'utf8');
+  assert.match(pageFile, /<main><nav class="up"><a href="\.\.\/index\.html">目録<\/a><span>guides<\/span><\/nav><h1>/u);
+  assert.match(pageFile, /<nav class="toc" aria-label="目次">.*<article class="body"><h2 id="section-1">概要<\/h2>/su);
+  assert.match(pageFile, /<a class="ref" href="#cite-1">1<\/a>.*<section class="notes"><h2>出典<\/h2><ol><li id="cite-1">/su);
   const page = await send(port, { path: '/?page=' + pageId });
   // A page of three sections or more has its contents, and each entry jumps to its section.
   assert.match(page.body, /<nav class="toc" aria-label="目次"><h2>目次<\/h2><ol><li><a href="#section-1">概要<\/a><\/li><li><a href="#section-2">手順<\/a><\/li><li><a href="#section-3">根拠<\/a><\/li><\/ol><\/nav><div class="body"><h2 id="section-1">概要<\/h2>/u);

@@ -848,7 +848,7 @@ impl Project<'_> {
             }
             None => None,
         };
-        let markdown = str_of(page, "markdown");
+        let markdown = &portable_links(str_of(page, "id"), str_of(page, "markdown"));
         let body = if truthy(page.get("archived")) {
             format!(
                 "**アーカイブ済み**\n\n{}{markdown}",
@@ -861,9 +861,42 @@ impl Project<'_> {
         } else {
             markdown.to_owned()
         };
+        // A source inside the project is linked by its path from the page.
+        let local = |url: &str| -> Option<String> {
+            let file = url::Url::parse(url)
+                .ok()
+                .filter(|url| url.scheme() == "file")?
+                .to_file_path()
+                .ok()?;
+            let file = file.to_string_lossy();
+            let within = node_path::relative(&self.request.root, &file);
+            if within.is_empty() || outside(&within) {
+                return None;
+            }
+            Some(url_path(&node_path::relative(
+                &node_path::dirname(&path),
+                &file,
+            )))
+        };
         let citations: Vec<ConfigValue> = items(page.get("citations"))
             .iter()
             .map(|citation| {
+                let mut citation = citation.clone();
+                let link = citation
+                    .get("source")
+                    .and_then(|source| string_field(source, "url"))
+                    .and_then(local);
+                if let (Some(link), ConfigValue::Object(entries)) = (link, &mut citation) {
+                    let mut source = field_of(entries, "source");
+                    if let ConfigValue::Object(source) = &mut source {
+                        assign(source, "url", Some(text(&link)));
+                    }
+                    assign(entries, "source", Some(source));
+                }
+                citation
+            })
+            .map(|citation| {
+                let citation = &citation;
                 let Some(original) = citation
                     .get("original")
                     .filter(|original| truthy(Some(original)))
@@ -903,13 +936,66 @@ impl Project<'_> {
     }
 }
 
+/// The value of a key of an object's entries, or null.
+fn field_of(entries: &[(String, ConfigValue)], name: &str) -> ConfigValue {
+    entries
+        .iter()
+        .find(|(key, _)| key == name)
+        .map_or(ConfigValue::Null, |(_, value)| value.clone())
+}
+
+/// The link to a page from another, as the path between their files.
+fn page_link(from: &str, to: &str) -> String {
+    let from: Vec<&str> = from.split('/').collect();
+    let folder = &from[..from.len() - 1];
+    let to: Vec<&str> = to.split('/').collect();
+    let shared = folder
+        .iter()
+        .zip(&to[..to.len() - 1])
+        .take_while(|(left, right)| left == right)
+        .count();
+    "../".repeat(folder.len() - shared)
+        + &to[shared..]
+            .iter()
+            .map(|part| encode_uri_component(part))
+            .collect::<Vec<_>>()
+            .join("/")
+        + ".html"
+}
+
+/// The Markdown of a page with its links to other pages as paths between their files. A link
+/// that names a page by its ID (`/guides/pump`, `pump`) would only work on the screen.
+pub(crate) fn portable_links(id: &str, markdown: &str) -> String {
+    let mut out = String::with_capacity(markdown.len());
+    let mut last = 0;
+    for (start, end) in link_targets(markdown) {
+        let target = &markdown[start..end];
+        let path = target.split(['?', '#']).next().unwrap_or_default();
+        let name = path.rsplit('/').next().unwrap_or_default();
+        let by_id = !name.is_empty() && !name.contains('.');
+        if !(by_id || (path.starts_with('/') && path.ends_with(".html"))) {
+            continue;
+        }
+        let Some(page) = linked_page(id, target).filter(|page| id_parts(page).is_ok()) else {
+            continue;
+        };
+        out += &markdown[last..start];
+        out += &page_link(id, &page);
+        if let Some(at) = target.find('#') {
+            out += &target[at..];
+        }
+        last = end;
+    }
+    out + &markdown[last..]
+}
+
 fn outside(within: &str) -> bool {
     let separator = if cfg!(windows) { "..\\" } else { "../" };
     within == ".." || within.starts_with(separator) || node_path::is_absolute(within)
 }
 
 /// A relative file path as a URL path: `relative.split(sep).map(encodeURIComponent).join('/')`.
-fn url_path(relative: &str) -> String {
+pub(crate) fn url_path(relative: &str) -> String {
     let separator = if cfg!(windows) { '\\' } else { '/' };
     relative
         .split(separator)
@@ -1311,5 +1397,35 @@ impl Project<'_> {
             &self.request.config_root,
             str_of(&self.ingress_plan(2), "rules"),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::portable_links;
+
+    #[test]
+    fn links_by_page_id_become_paths_between_the_files() {
+        let from = "アジャイル/スクラム";
+        // A page named from the top of the folder, in the same folder and in another one.
+        assert_eq!(
+            portable_links(
+                from,
+                "[a](/アジャイル/スプリント) [b](ふりかえり#x) [c](/トヨタ生産方式/かんばん.html)"
+            ),
+            concat!(
+                "[a](%E3%82%B9%E3%83%97%E3%83%AA%E3%83%B3%E3%83%88.html) ",
+                "[b](%E3%81%B5%E3%82%8A%E3%81%8B%E3%81%88%E3%82%8A.html#x) ",
+                "[c](../%E3%83%88%E3%83%A8%E3%82%BF%E7%94%9F%E7%94%A3%E6%96%B9%E5%BC%8F/%E3%81%8B%E3%82%93%E3%81%B0%E3%82%93.html)"
+            )
+        );
+        assert_eq!(portable_links("a/b/c", "[x](/d)"), "[x](../../d.html)");
+        assert_eq!(portable_links("top", "[x](a/b)"), "[x](a/b.html)");
+    }
+
+    #[test]
+    fn other_links_stay_as_written() {
+        let text = "[a](sprint.html) [b](../x/y.html) [c](https://example.com/a) [d](#top) [e](img/a.png) [f](mailto:a@example.com) [g](docs/)";
+        assert_eq!(portable_links("a/scrum", text), text);
     }
 }

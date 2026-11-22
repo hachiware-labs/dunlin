@@ -22,7 +22,7 @@ CLI のコマンドの解釈から、`KnowledgeNestfile.yaml` の読み込みと
 | `.knowledge-nest/state.sqlite` | 構築段階の結果、ビルド、タグ、採用履歴、評価データやレポート、Wiki・PARA の状態 |
 | `.knowledge-nest/corpus/` | 原文から抽出した本文、位置、版 |
 | `.knowledge-nest/artifacts/` | 保存対象の原本（構築では、テキスト文書の原本はコーパスの本文から復元するので置かない）、ビルドごとの索引、ベクトル、構築時の辞書 |
-| `site/`、`rules.md` | Wiki・PARA の生成済み HTML と運用の決まり |
+| `wiki/`（PARA は `site/`）、`rules.md` | Wiki・PARA の生成済み HTML（ページ、目録の `index.html`、作業の記録の `log.html`）と運用の決まり |
 
 入力の識別子と段階の設定を使い、抽出やチャンク化の結果を再利用します。差分のキーワード索引では、可能な環境で変更されない Tantivy セグメントをハードリンクで共有します。各ビルドは作成時のユーザー辞書を参照します。
 

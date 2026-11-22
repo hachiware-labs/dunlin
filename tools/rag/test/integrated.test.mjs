@@ -287,7 +287,7 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   assert.equal(calls.length, 0);
   const result = await json('ingress', 'manual.txt');
   assert.equal(result.data.pages[0].id, 'maintenance');
-  assert.match(await readFile(join(root, 'wiki', 'site', 'maintenance.html'), 'utf8'), /交換手順/u);
+  assert.match(await readFile(join(root, 'wiki', 'wiki', 'maintenance.html'), 'utf8'), /交換手順/u);
   const answer = await json('query', '交換手順');
   assert.equal(answer.data.pages[0].id, 'maintenance');
   assert.equal((await json('cite', 'maintenance', '1')).data.quote, '交換手順を確認する。');
@@ -303,7 +303,7 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   const citation = (await json('cite', 'maintenance', '2')).data;
   assert.equal(citation.quote, '交換周期は3か月。');
   assert.ok(citation.evidence.original.sha256);
-  const published = await readFile(join(root, 'wiki', 'site', 'maintenance.html'), 'utf8');
+  const published = await readFile(join(root, 'wiki', 'wiki', 'maintenance.html'), 'utf8');
   assert.match(published, /&lt;script&gt;/u);
   assert.ok(!published.includes('<script>'));
   assert.equal(await readFile(join(root, 'manual.txt'), 'utf8'), '交換手順を確認する。\n');

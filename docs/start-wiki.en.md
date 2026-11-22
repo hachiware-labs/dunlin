@@ -85,7 +85,7 @@ nest serve
 
 The home shows the purpose and scope, a box for questions, the number of pages, originals, originals not yet reflected, and open findings, the pages changed lately, and the latest jobs. You know what to do next as soon as you open it. The screen itself is in Japanese.
 
-**From an agent**: register it in your MCP client's settings, and Claude or another agent answers from the same pages people read. The pages are also saved as HTML in `site/`, readable without a server.
+**From an agent**: register it in your MCP client's settings, and Claude or another agent answers from the same pages people read. The pages are also saved as HTML in `wiki/`, readable without a server; `wiki/index.html` lists them all.
 
 ## 5 Ask
 

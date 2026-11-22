@@ -16,6 +16,22 @@ export function link(href, label) {
   return `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
 }
 
+/** The way up to the contents of the folder, as far above the page as its ID is deep. */
+function up(metadata) {
+  const parts = typeof metadata?.id === 'string' && metadata.id ? metadata.id.split('/') : [];
+  return parts.length ? `<nav class="up"><a href="${'../'.repeat(parts.length - 1)}index.html">目録</a>${parts.slice(0, -1).map((part) => `<span>${escapeHtml(part)}</span>`).join('')}</nav>` : '';
+}
+
+/** The sections of a page: each `h2` gets an id, and three or more of them a table of contents. */
+function sectioned(html) {
+  const entries = [];
+  const text = html.replace(/<h2>(.*?)<\/h2>/gu, (_, inner) => {
+    entries.push(inner.replace(/<[^>]+>| \[\d+\]/gu, ''));
+    return `<h2 id="section-${entries.length}">${inner}</h2>`;
+  });
+  return [text, entries.length < 3 ? '' : `<nav class="toc" aria-label="目次"><h2>目次</h2><ol>${entries.map((entry, index) => `<li><a href="#section-${index + 1}">${entry}</a></li>`).join('')}</ol></nav>`];
+}
+
 export function renderDocument(title, body, { metadata, navigation = '' } = {}) {
   const safeTitle = escapeHtml(title);
   const footer = metadata ? `<!-- knowledge-nest:publication ${Buffer.from(JSON.stringify(metadata)).toString('base64url')} -->\n` : '';
@@ -31,21 +47,28 @@ export function renderDocument(title, body, { metadata, navigation = '' } = {}) 
   pre { overflow: auto; padding: .85rem; border: 1px solid GrayText; border-radius: .35rem; }
   img { max-width: 100%; height: auto; }
 </style>
-${navigation}<main><h1>${safeTitle}</h1>${body}</main>
+${navigation}<main>${up(metadata)}<h1>${safeTitle}</h1>${body}</main>
 </html>\n${footer}`;
 }
 
 export function renderPublication({ title, markdown: content, citations }, metadata) {
-  const entries = citations.map(({ source, range, original, locations }) => {
+  const entries = citations.map(({ source, range, original, locations }, index) => {
     const useOriginal = original && source.url.startsWith('knowledge-nest://');
     const url = useOriginal ? original.uri : source.url;
-    const sourceLink = sourceProtocols.has(URL.parse(url)?.protocol) ? link(url, source.objectId) : escapeHtml(source.objectId);
+    // A source in the project is a path from the page, which has no scheme.
+    const linked = sourceProtocols.has(URL.parse(url)?.protocol) || (URL.parse(url) === null && url !== '');
+    const sourceLink = linked ? link(url, source.objectId) : escapeHtml(source.objectId);
     const position = citationLocations(locations);
     const originalLink = original && !useOriginal ? ` · ${link(original.uri, '原本')}` : '';
-    return `<li>${sourceLink} · L${range.startLine}–L${range.endLine}${position ? ` · ${escapeHtml(position)}` : ''}${originalLink}</li>`;
+    return `<li id="cite-${index + 1}">${sourceLink} · L${range.startLine}–L${range.endLine}${position ? ` · ${escapeHtml(position)}` : ''}${originalLink}</li>`;
   });
-  const sources = entries.length ? `<section><h2>出典</h2><ol>${entries.join('\n')}</ol></section>` : '';
-  return renderDocument(title, `<article>${renderMarkdown(content)}</article>${sources}`, { metadata });
+  const sources = entries.length ? `<section class="notes"><h2>出典</h2><ol>${entries.join('\n')}</ol></section>` : '';
+  const [text, contents] = sectioned(renderMarkdown(content));
+  const cited = text.replace(/ \[(\d+)\]/gu, (found, digits) => {
+    const number = Number(digits);
+    return number >= 1 && number <= citations.length ? `<a class="ref" href="#cite-${number}">${number}</a>` : found;
+  });
+  return renderDocument(title, `${contents}<article class="body">${cited}</article>${sources}`, { metadata });
 }
 
 export function readPublication(content) {

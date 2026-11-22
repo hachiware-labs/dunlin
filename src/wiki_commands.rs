@@ -293,6 +293,23 @@ pub fn run(request: &WikiRequest, cancel: &Cancellation) -> Result<WikiOutcome, 
     } else {
         execute(&project, &connection, &Tracker::none(), &mut warnings)?
     };
+    // The contents and the log of the folder of pages follow what the command did.
+    if !truthy(request.values.get("dry-run")) && !["cite", "rules", "progress"].contains(&command) {
+        if let Err(error) = crate::wiki_folder::sync(&project, &connection) {
+            if !read_only {
+                warnings.push(object(vec![
+                    ("code", text("CONTENTS_NOT_WRITTEN")),
+                    (
+                        "message",
+                        text(&format!(
+                            "index.html and log.html were not written: {}",
+                            error.message
+                        )),
+                    ),
+                ]));
+            }
+        }
+    }
     Ok(WikiOutcome { output, warnings })
 }
 

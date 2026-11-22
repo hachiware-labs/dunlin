@@ -1982,6 +1982,15 @@ fn search_project(project_type: &str) -> bool {
     project_type == "mcp" || project_type == "rag"
 }
 
+/// The folder of pages `init` makes: `wiki` for a Wiki, `site` for PARA.
+pub fn pages_folder(project_type: &str) -> &'static str {
+    if project_type == "wiki" {
+        "wiki"
+    } else {
+        "site"
+    }
+}
+
 /// The serve section `init` writes for a project type.
 pub fn serve_template(project_type: &str) -> ConfigValue {
     if project_type == "mcp" {
@@ -2021,7 +2030,10 @@ pub fn serve_template(project_type: &str) -> ConfigValue {
         ),
     ];
     if !search_project(project_type) {
-        entries.push(("pages".into(), ConfigValue::String("./site".into())));
+        entries.push((
+            "pages".into(),
+            ConfigValue::String(format!("./{}", pages_folder(project_type))),
+        ));
     }
     ConfigValue::Object(entries)
 }

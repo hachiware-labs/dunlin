@@ -16,7 +16,7 @@ export function serveTemplate(type) {
   return type === 'mcp' ? { transport: 'stdio' } : {
     transport: 'http', host: '127.0.0.1', port: type === 'rag' ? 4318 : 4319,
     endpoints: [...endpoints[type]], access: structuredClone(access), limits: { ...limits },
-    ...(isSearchProject(type) ? {} : { pages: './site' }),
+    ...(isSearchProject(type) ? {} : { pages: type === 'wiki' ? './wiki' : './site' }),
   };
 }
 

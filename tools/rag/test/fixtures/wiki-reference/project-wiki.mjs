@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
 import { resolveApiKey, resolveConfigValue } from '../cli-reference/config.mjs';
@@ -234,7 +234,21 @@ async function savePage(project, page, atomicWrite) {
   const archivedPath = page.archive_id && await publicationPath(project, page.archive_id);
   const archiveLink = archivedPath && relative(dirname(path), archivedPath).split(sep).map(encodeURIComponent).join('/');
   const body = page.archived ? '**アーカイブ済み**\n\n' + (archiveLink ? '[アーカイブで読む](' + archiveLink + ')\n\n' : '') + page.markdown : page.markdown;
-  const citations = page.citations.map((citation) => {
+  // A source inside the project is linked by its path from the page.
+  const local = (url) => {
+    let file;
+    try {
+      if (!url.startsWith('file:')) return url;
+      file = fileURLToPath(url);
+    } catch {
+      return url;
+    }
+    const within = relative(project.root, file);
+    if (!within || within === '..' || within.startsWith('..' + sep) || isAbsolute(within)) return url;
+    return relative(dirname(path), file).split(sep).map(encodeURIComponent).join('/');
+  };
+  const citations = page.citations.map((citation) => (typeof citation.source?.url === 'string'
+    ? { ...citation, source: { ...citation.source, url: local(citation.source.url) } } : citation)).map((citation) => {
     if (!citation.original) return citation;
     const { pathname } = new URL(citation.original.uri);
     const [, archive, digest] = pathname.split('/');

@@ -28,7 +28,8 @@ use crate::serve::{
     AbortOnDrop, Body, Reply, Running, ServeSettings, header, hostname, request_target,
 };
 use crate::transform_stage::StageError;
-use crate::wiki_html::CONTENT_SECURITY_POLICY;
+use crate::wiki_folder::{self, snippet};
+use crate::wiki_html::{CONTENT_SECURITY_POLICY, cited_markers, sectioned};
 use crate::wiki_project::{
     CATEGORIES, WikiRequest, encode_uri_component, link_targets, linked_page, pages, realpath,
     str_of,
@@ -147,6 +148,7 @@ const STYLE: &str = concat!(
     ".cards,.works{list-style:none;margin:0;padding:0}.cards li+li{border-top:1px solid var(--line)}",
     ".cards a{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:10px 12px;margin:0 -12px;border-radius:8px;text-decoration:none;color:var(--text)}.cards a:hover,.works a:hover{background:var(--hover)}",
     ".cards strong{font-size:15px;font-weight:600}.cards time{grid-row:1;grid-column:2;font-size:12px;color:var(--muted)}.cards span{grid-column:1/-1;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+    ".panel h2 small{margin-left:8px;font-size:12px;font-weight:400;color:var(--muted)}.hits span{white-space:normal}.found{margin:20px 0 8px}mark{background:var(--accent-soft);color:inherit;border-radius:3px;padding:0 1px}",
     ".works a{display:flex;align-items:center;gap:10px;padding:7px 12px;margin:0 -12px;border-radius:8px;text-decoration:none;color:var(--text);font-size:14px}",
     ".works span{font-size:13px;color:var(--muted)}.works time{margin-left:auto;font-size:12px;color:var(--muted)}",
     ".dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--accent)}.dot.succeeded{background:var(--ok)}.dot.failed{background:var(--bad)}",
@@ -181,6 +183,9 @@ const STYLE: &str = concat!(
     ".pane>summary{display:none}",
     "@media(max-width:820px){main{display:block}main>nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.pane>summary{display:list-item;cursor:pointer;font-weight:600;margin-bottom:8px}.view{padding:20px 18px 56px}.ask{flex-direction:column}.ask button{padding:10px}article h1,article.top h1{font-size:30px}article.page .body>p:first-child{font-size:17.5px}article.page .body>h2{font-size:20px;margin-top:40px}}",
 );
+
+/// The start of the form that searches the pages.
+const SEARCH_FORM: &str = "<form class=\"ask\" method=\"get\" action=\"/\">";
 
 const SELECTION_SCRIPT: &str = "document.addEventListener(\"pointerup\", () => { const selection = getSelection(); const section = document.getElementById(\"content\"); const text = selection && section.contains(selection.anchorNode) && section.contains(selection.focusNode) ? selection.toString().trim() : \"\"; if (text) { document.querySelectorAll(\"[data-selection]\").forEach((input) => { input.value = text.slice(0, 2000); }); document.querySelectorAll(\".selection-label\").forEach((label) => { label.hidden = false; }); } });";
 
@@ -509,49 +514,6 @@ impl Tree {
     }
 }
 
-/// The sections of a page: each `h2` gets an id, and three or more of them a table of contents.
-fn sectioned(html: &str) -> (String, String) {
-    let heading = regex::Regex::new(r"<h2>(.*?)</h2>").expect("a valid pattern");
-    let markup = regex::Regex::new(r"<[^>]+>| \[\d+\]").expect("a valid pattern");
-    let mut entries: Vec<String> = Vec::new();
-    let text = heading
-        .replace_all(html, |found: &regex::Captures<'_>| {
-            entries.push(markup.replace_all(&found[1], "").into_owned());
-            format!("<h2 id=\"section-{}\">{}</h2>", entries.len(), &found[1])
-        })
-        .into_owned();
-    if entries.len() < 3 {
-        return (text, String::new());
-    }
-    let contents = format!(
-        "<nav class=\"toc\" aria-label=\"目次\"><h2>目次</h2><ol>{}</ol></nav>",
-        entries
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| format!(
-                "<li><a href=\"#section-{}\">{entry}</a></li>",
-                index + 1
-            ))
-            .collect::<String>()
-    );
-    (text, contents)
-}
-
-/// The citation numbers of a page's text (` [1]`) as links to their citation in the list below.
-fn cited_markers(html: &str, citations: usize) -> String {
-    let marker = regex::Regex::new(r" \[(\d+)\]").expect("a valid pattern");
-    marker
-        .replace_all(html, |found: &regex::Captures<'_>| {
-            match found[1].parse::<usize>() {
-                Ok(number) if (1..=citations).contains(&number) => {
-                    format!("<a class=\"ref\" href=\"#cite-{number}\">{number}</a>")
-                }
-                _ => found[0].to_owned(),
-            }
-        })
-        .into_owned()
-}
-
 /// What a work did, in a line or two above its details: the passage a citation quotes, the pages
 /// an instruction wrote, or how many findings a check has.
 fn work_summary(work: &ConfigValue) -> String {
@@ -660,51 +622,6 @@ fn ago(iso: &str, now: i64) -> String {
         seconds if seconds < 3600 => format!("{} 分前", seconds / 60),
         seconds if seconds < 86_400 => format!("{} 時間前", seconds / 3600),
         seconds => format!("{} 日前", seconds / 86_400),
-    }
-}
-
-/// The start of a page as one line of plain text, without citation numbers and Markdown marks.
-fn snippet(markdown: &str) -> String {
-    let mut plain = String::new();
-    let mut rest = markdown;
-    while let Some(open) = rest.find('[') {
-        plain.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        match after.find(']') {
-            Some(close) if close > 0 && after[..close].bytes().all(|b| b.is_ascii_digit()) => {
-                rest = &after[close + 1..];
-            }
-            // A link keeps its words and loses its target.
-            Some(close) if after[close + 1..].starts_with('(') => {
-                let target = &after[close + 1..];
-                match target.find(')') {
-                    Some(end) => {
-                        plain.push_str(&after[..close]);
-                        rest = &target[end + 1..];
-                    }
-                    None => {
-                        plain.push('[');
-                        rest = after;
-                    }
-                }
-            }
-            _ => {
-                plain.push('[');
-                rest = after;
-            }
-        }
-    }
-    plain.push_str(rest);
-    let words: Vec<&str> = plain
-        .split_whitespace()
-        .map(|word| word.trim_matches(['#', '*', '`', '|', '>', '-']))
-        .filter(|word| !word.is_empty())
-        .collect();
-    let line = words.join(" ");
-    if line.chars().count() > 90 {
-        format!("{}…", line.chars().take(90).collect::<String>())
-    } else {
-        line
     }
 }
 
@@ -1747,6 +1664,7 @@ impl WikiServer {
             Source(&'a (String, ConfigValue, bool)),
             Rules(&'a str),
             History,
+            Search(&'a str),
             Top,
         }
         let shown = match (current, current_source, &rules) {
@@ -1754,7 +1672,11 @@ impl WikiServer {
             (None, Some(source), _) => Shown::Source(source),
             (None, None, Some(rules)) => Shown::Rules(rules),
             (None, None, None) if param("history").is_some() => Shown::History,
-            (None, None, None) => Shown::Top,
+            (None, None, None) => match param("q").map(str::trim).filter(|words| !words.is_empty())
+            {
+                Some(words) => Shown::Search(words),
+                None => Shown::Top,
+            },
         };
         let selection_key = uuid::Uuid::new_v4().to_string();
         let policy = CONTENT_SECURITY_POLICY.replace("form-action 'none'", "form-action 'self'");
@@ -1915,10 +1837,40 @@ impl WikiServer {
                 ),
                 String::new(),
             ),
+            Shown::Search(words) => {
+                let hits = wiki_folder::search(active.iter().copied(), words);
+                let terms = wiki_folder::search_words(words);
+                let found = if hits.is_empty() {
+                    "該当するページがありません。空白で区切った語のすべてを、題名か本文に含むページを探します。".to_owned()
+                } else {
+                    format!("{} 件のページが見つかりました。", hits.len())
+                };
+                let list = if hits.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "<ul class=\"cards hits\">{}</ul>",
+                        hits.iter()
+                            .map(|hit| format!(
+                                "<li><a href=\"/?page={}\"><strong>{}</strong><span>{}</span><time>{}</time></a></li>",
+                                encode_uri_component(str_of(hit.page, "id")),
+                                wiki_folder::marked(str_of(hit.page, "title"), &terms),
+                                wiki_folder::marked(&hit.passage, &terms),
+                                escape_html(wiki_folder::folder(str_of(hit.page, "id")))
+                            ))
+                            .collect::<String>()
+                    )
+                };
+                let center = format!(
+                    "<h1>検索</h1>{SEARCH_FORM}<input type=\"search\" name=\"q\" required value=\"{}\" aria-label=\"ページを検索する\"><button class=\"primary\">検索</button></form><p class=\"meta found\">{found}</p>{list}",
+                    escape_html(words)
+                );
+                ("search", center, String::new())
+            }
             Shown::Top => {
                 let scope = js_text(about.get("out_of_scope"));
                 let center = format!(
-                    "<h1>{}</h1><p class=\"lead\">{}</p>{}{}<input name=\"value\" required placeholder=\"この {kind} に質問する\"><button class=\"primary\" name=\"action\" value=\"query\">質問する</button></form>",
+                    "<h1>{}</h1><p class=\"lead\">{}</p>{}{SEARCH_FORM}<input type=\"search\" name=\"q\" required placeholder=\"ページを検索する\" aria-label=\"ページを検索する\"><button class=\"primary\">検索</button></form>",
                     escape_html(&js_text(about.get("title"))),
                     escape_html(&js_text(about.get("purpose"))),
                     if scope.is_empty() {
@@ -1926,8 +1878,6 @@ impl WikiServer {
                     } else {
                         format!("<p class=\"meta\">範囲外：{}</p>", escape_html(&scope))
                     },
-                    form("ask"),
-                    kind = if base.kind == "para" { "PARA" } else { "Wiki" },
                 );
                 let issues = match (open_issues, inspection) {
                     (Some(open), Some(inspection)) => format!(
@@ -2011,23 +1961,47 @@ impl WikiServer {
                         cards(&projects)
                     )
                 };
-                let pages_panel = if recent.is_empty() {
-                    "<section class=\"panel\" id=\"pages\"><h2>最近更新したページ</h2><p class=\"empty\">まだページがありません。左上の「資料を取り込む」に URL かファイルを渡すと、AI が読んでページを書きます。</p></section>".to_owned()
+                // The contents: every page by folder, with a line about it.
+                let listed = wiki_folder::entries(active.iter().copied());
+                let pages_panel = if listed.is_empty() {
+                    "<section class=\"panel\" id=\"pages\"><h2>目録</h2><p class=\"empty\">まだページがありません。左上の「資料を取り込む」に URL かファイルを渡すと、AI が読んでページを書きます。</p></section>".to_owned()
                 } else {
-                    format!(
-                        "<section class=\"panel\" id=\"pages\"><h2>最近更新したページ</h2>{}</section>",
-                        cards(&recent[..recent.len().min(8)])
-                    )
+                    wiki_folder::groups(&listed)
+                        .iter()
+                        .enumerate()
+                        .map(|(index, (name, list))| {
+                            format!(
+                                "<section class=\"panel\"{}><h2>{}<small>{}</small></h2><ul class=\"cards\">{}</ul></section>",
+                                if index == 0 { " id=\"pages\"" } else { "" },
+                                escape_html(name),
+                                list.len(),
+                                list.iter()
+                                    .map(|entry| format!(
+                                        "<li><a href=\"/?page={}\"><strong>{}</strong><span>{}</span><time>出典 {} · {}</time></a></li>",
+                                        encode_uri_component(&entry.id),
+                                        escape_html(&entry.title),
+                                        escape_html(&entry.summary),
+                                        entry.citations,
+                                        escape_html(&entry.changed)
+                                    ))
+                                    .collect::<String>()
+                            )
+                        })
+                        .collect::<String>()
                 };
                 let panels = format!(
                     concat!(
                         "{tiles}{categories}{projects_panel}{pages_panel}",
+                        "<section class=\"panel\"><h2>AI に質問する</h2><p class=\"hint\">ページ全体を読んで、出典付きで答えます。</p>",
+                        "{}<input name=\"value\" required placeholder=\"この {kind} に質問する\"><button class=\"primary\" name=\"action\" value=\"query\">質問する</button></form></section>",
                         "<section class=\"panel\"><h2>最近の作業</h2>{}<p class=\"more\"><a href=\"/?history\">作業の履歴をすべて見る</a></p></section>",
-                        "<section class=\"panel\"><h2>点検する</h2><p class=\"hint\">検査は、引用が原本にあるか、版が古くないか、リンク切れがないかを確かめます。内容の検査は、AI がページ同士の食い違いを調べます。</p>",
+                        "<section class=\"panel\"><h2>保守</h2><p class=\"hint\">検査は、引用が原本にあるか、版が古くないか、リンク切れがないかを確かめます。内容の検査は、AI がページ同士の食い違いを調べます。書き方は<a href=\"/?rules\">運用の決まり</a>で指示します。</p>",
                         "{}<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button></form></section>"
                     ),
+                    form("row"),
                     work_list(&history[..history.len().min(5)]),
                     form("row"),
+                    kind = if base.kind == "para" { "PARA" } else { "Wiki" },
                     tiles = tiles,
                     categories = categories,
                     projects_panel = projects_panel,
@@ -2062,6 +2036,7 @@ impl WikiServer {
             }
             Shown::Rules(_) => crumbs.push("運用の決まり".into()),
             Shown::History => crumbs.push("作業の履歴".into()),
+            Shown::Search(_) => crumbs.push("検索".into()),
             Shown::Top => {}
         }
         let crumbs = if crumbs.is_empty() {
@@ -2106,7 +2081,7 @@ impl WikiServer {
                 "<label class=\"field\"><span>ファイル</span><input type=\"file\" name=\"upload\"></label>",
                 "<details><summary>プロジェクト内のファイルを指定する</summary><label class=\"field\"><span>プロジェクトからのパス</span><input name=\"value\" placeholder=\"manuals/pump.md\"></label></details>",
                 "<button class=\"primary\" name=\"action\" value=\"ingress\">取り込む</button></form></details>",
-                "<ul class=\"menu\"><li><a href=\"/\"{top_current}>ホーム</a></li><li><a href=\"/?history\"{history_current}>作業の履歴</a></li>",
+                "<ul class=\"menu\"><li><a href=\"/\"{top_current}>目録</a></li><li><a href=\"/?history\"{history_current}>作業の履歴</a></li>",
                 "<li><a href=\"/?rules\"{rules_current}>運用の決まり</a></li></ul>",
                 "<h2>ページ<small>AI がまとめた記事</small></h2>{menu}<h2>原本<small>取り込んだ資料</small></h2>{sources}",
                 "{archived}</details></nav>",

@@ -111,6 +111,8 @@ async function model(t) {
 function normalizer() {
   const digests = new Map();
   return (text) => text
+    // The style of a page is the CLI's own, also in the files a work kept.
+    .replace(/<style>[^<]*<\/style>/gu, '<style></style>')
     .replace(/<!-- knowledge-nest:publication ([\w-]+) -->/gu, (_, data) => '<!-- ' + Buffer.from(data, 'base64url').toString('utf8') + ' -->')
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/gu, 'TIME')
     .replace(/(\\?")(acquiredAtMs|pid)\1:\d+/gu, '$1$2$1:0')
@@ -140,11 +142,14 @@ async function snapshot(base) {
     const walk = async (directory, prefix) => {
       for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : 1)) {
         if (entry.isDirectory()) await walk(join(directory, entry.name), prefix + entry.name + '/');
-        else files[prefix + entry.name] = (await readFile(join(directory, entry.name), 'utf8')).replace(/<!-- knowledge-nest:publication ([\w-]+) -->/u,
+        // The contents and the log of the folder are the CLI's own.
+        else if (!prefix && ['index.html', 'log.html'].includes(entry.name)) continue;
+        else files[prefix + entry.name] = (await readFile(join(directory, entry.name), 'utf8')).replace(/<style>[\s\S]*?<\/style>/u, '<style></style>').replace(/<!-- knowledge-nest:publication ([\w-]+) -->/u,
           (_, data) => '<!-- ' + Buffer.from(data, 'base64url').toString('utf8') + ' -->');
       }
     };
-    await walk(join(base, 'site'), '');
+    // A Wiki keeps its pages in `wiki`, PARA in `site`.
+    await walk(join(base, (await readdir(base)).includes('wiki') ? 'wiki' : 'site'), '');
     return { rows, files, rules: await readFile(join(base, 'rules.md'), 'utf8') };
   } finally {
     db.close();

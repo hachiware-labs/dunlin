@@ -1726,7 +1726,10 @@ fn initialize(
         mkdir(&node_path::join(&root, &["docs"]))?;
     }
     if !is_search_project(kind) {
-        mkdir(&node_path::join(&root, &["site"]))?;
+        mkdir(&node_path::join(
+            &root,
+            &[crate::config_check::pages_folder(kind)],
+        ))?;
         write_new(
             &node_path::join(&root, &["rules.md"]),
             "# 運用の決まり\n",

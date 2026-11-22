@@ -170,7 +170,7 @@ async function initialize(type, directory, values) {
   await writeFile(configPath, writeTemplate(config), { flag: 'wx' });
   if (isSearchProject(type) && source === undefined) await mkdir(join(root, 'docs'), { recursive: true });
   if (!isSearchProject(type)) {
-    await mkdir(join(root, 'site'), { recursive: true });
+    await mkdir(join(root, type === 'wiki' ? 'wiki' : 'site'), { recursive: true });
     await writeFile(join(root, 'rules.md'), '# 運用の決まり\n', { flag: 'wx' }).catch((error) => {
       if (error.code !== 'EEXIST') throw error;
     });

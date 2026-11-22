@@ -241,7 +241,7 @@ serve:
     max_request_bytes: 1048576
     request_timeout_seconds: 120
     max_concurrent: 8
-  pages: ./site
+  pages: ./wiki
 ```
 
 ## para

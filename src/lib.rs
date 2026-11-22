@@ -110,6 +110,8 @@ mod wiki_commands;
 #[cfg(any(feature = "node", test))]
 mod wiki_fetch;
 #[cfg(any(feature = "node", test))]
+mod wiki_folder;
+#[cfg(any(feature = "node", test))]
 mod wiki_html;
 #[cfg(any(feature = "node", test))]
 mod wiki_ingress;

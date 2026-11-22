@@ -12,7 +12,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::extract::Apply;
 use crate::records::{ModuleIdentity, Process};
-use crate::transform::Chunking;
+use crate::transform::{Chunking, Context};
 
 /// The sections that hold a list of modules.
 pub const SECTIONS: [&str; 4] = ["extract", "transform", "index", "search"];
@@ -45,6 +45,8 @@ pub struct Plan {
     /// Which changes of the folder `extract` takes in.
     pub apply: Apply,
     pub chunking: Chunking,
+    /// What the chunks say about their place in the document.
+    pub context: Context,
     /// The most chunks a search returns.
     pub top_k: usize,
 }
@@ -174,6 +176,39 @@ fn only(step: &Step, known: &[&str], fixed: &[(&str, &str)]) -> Result<(), Strin
     Ok(())
 }
 
+/// `context` of a chunking module: what a chunk says about its place in the document.
+fn context_asked(step: &Step) -> Result<Context, String> {
+    let module = &step.name;
+    let asked = match step.args.get("context") {
+        None => return Ok(Context::default()),
+        Some(Value::Object(asked)) => asked,
+        Some(_) => return Err(format!("{module} takes context as a mapping.")),
+    };
+    let mut context = Context::default();
+    for (name, value) in asked {
+        let part = match name.as_str() {
+            "document" => &mut context.document,
+            "headings" => &mut context.headings,
+            "prepend" => &mut context.prepend,
+            _ => return Err(format!("The context of {module} has no {name}.")),
+        };
+        *part = value
+            .as_bool()
+            .ok_or_else(|| format!("The context of {module} takes {name} as true or false."))?;
+    }
+    if context.prepend && !context.document && !context.headings {
+        return Err(format!(
+            "The context of {module} has nothing to prepend. Add document or headings."
+        ));
+    }
+    if context.document && !context.prepend {
+        return Err(format!(
+            "The context of {module} uses document only with prepend."
+        ));
+    }
+    Ok(context)
+}
+
 /// `apply` of `source.filesystem`: the changes of the folder that are taken in.
 fn changes_taken(value: &Value) -> Result<Apply, String> {
     const REASON: &str = "source.filesystem takes apply as a list of add, update and delete.";
@@ -277,10 +312,16 @@ impl Settings {
 
         let transform = self.section("transform")?;
         let mut chunking = None;
+        let mut context = Context::default();
         for step in &transform.steps {
             let made = match step.name.as_str() {
                 "chunk.length" => {
-                    only(step, &["size", "overlap"], &[("unit", "characters")])?;
+                    only(
+                        step,
+                        &["size", "overlap", "context"],
+                        &[("unit", "characters")],
+                    )?;
+                    context = context_asked(step)?;
                     let size = whole(step, "size", 1, 1_048_576)?;
                     let overlap = whole(step, "overlap", 0, 1_048_576)?;
                     if overlap >= size {
@@ -289,7 +330,8 @@ impl Settings {
                     Chunking::Length { size, overlap }
                 }
                 "chunk.structure" => {
-                    only(step, &["max_chars"], &[])?;
+                    only(step, &["max_chars", "context"], &[])?;
+                    context = context_asked(step)?;
                     Chunking::Structure {
                         max_chars: whole(step, "max_chars", 1, 1_048_576)?,
                     }
@@ -353,12 +395,18 @@ impl Settings {
             extract_tag: extract.tag,
             apply,
             chunking,
+            context,
             top_k: top_k.ok_or("search has no retrieval module.")?,
         })
     }
 }
 
 impl Plan {
+    /// What the chunking is to the store, with the context it adds.
+    pub fn chunking_process(&self) -> Process {
+        crate::transform::process(self.chunking, self.context)
+    }
+
     /// What the search is to the store. It is part of the key of an evaluation, and of nothing
     /// a build makes.
     pub fn retrieval(&self) -> Process {
@@ -392,6 +440,7 @@ mod tests {
         );
         assert_eq!(plan.top_k, 10);
         assert_eq!(plan.apply, Apply::ALL);
+        assert_eq!(plan.context, Context::default());
         assert_eq!(
             settings.section("index").unwrap().tag.as_deref(),
             Some("main")
@@ -429,6 +478,36 @@ mod tests {
                 delete: false
             }
         );
+        assert_eq!(
+            reason(
+                "transform",
+                "  - chunk.structure: { max_chars: 200, context: { prepend: true } }\n"
+            ),
+            "The context of chunk.structure has nothing to prepend. Add document or headings."
+        );
+        assert_eq!(
+            reason(
+                "transform",
+                "  - chunk.structure: { max_chars: 200, context: { document: true } }\n"
+            ),
+            "The context of chunk.structure uses document only with prepend."
+        );
+        let mut settings = Settings::parse(CONFIG).unwrap();
+        let before = settings.plan().unwrap().chunking_process().id();
+        let with_context = "transform:\n  - chunk.length: { size: 200, overlap: 20, context: { document: true, headings: true, prepend: true } }\n";
+        let replaced = Settings::parse(with_context).unwrap();
+        settings.replace("transform", replaced.get("transform").unwrap().clone());
+        let plan = settings.plan().unwrap();
+        assert_eq!(
+            plan.context,
+            Context {
+                document: true,
+                headings: true,
+                prepend: true
+            }
+        );
+        // The context is part of what the chunking is: another context is another result.
+        assert_ne!(plan.chunking_process().id(), before);
         assert_eq!(
             reason("search", "  - retrieval.vector: { top_k: 10 }\n"),
             "retrieval.vector needs index.vector in index."

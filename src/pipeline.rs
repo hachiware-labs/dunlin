@@ -9,7 +9,7 @@ use std::path::Path;
 use crate::extract::{Apply, ExtractOutcome, ExtractRequest, extract};
 use crate::index::{IndexOutcome, IndexRequest, index};
 use crate::store::{Store, StoreResult};
-use crate::transform::{Chunking, TransformOutcome, TransformRequest, transform};
+use crate::transform::{Chunking, Context, TransformOutcome, TransformRequest, transform};
 
 pub struct BuildRequest<'a> {
     /// The ID of the source the folder is.
@@ -62,6 +62,7 @@ pub fn build(store: &Store, request: &BuildRequest<'_>) -> StoreResult<BuildOutc
                 size: request.size,
                 overlap: request.overlap,
             },
+            context: Context::default(),
             tag: Some(request.transform_tag),
             config: request.config,
             cause: None,

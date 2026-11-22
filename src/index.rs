@@ -7,10 +7,14 @@
 //!
 //! Not here yet: updating an index from the one before it, the vector index, and removing the
 //! directories of versions that are no longer needed. The index keeps its own copy of the text.
+//!
+//! When the chunks ask for it, the text that is searched starts with the context of the chunk:
+//! the name of the document and the headings above the chunk. The text a search returns does not.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use icu_normalizer::ComposingNormalizerBorrowed;
 use serde_json::{Value, json};
 
 use crate::engine::KeywordOptions;
@@ -78,6 +82,35 @@ fn open(location: &Path) -> StoreResult<KnowledgeBase> {
     .map_err(failed)
 }
 
+/// Puts the context of each chunk before the text that is searched for it: the name of the
+/// document when it is given, then the headings the chunk keeps.
+fn prepend(chunks: &mut Value, content: &str, document: Option<&str>) {
+    let nfkc = ComposingNormalizerBorrowed::new_nfkc();
+    for chunk in chunks.as_array_mut().into_iter().flatten() {
+        let headings = chunk["context"]["headings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str);
+        let context: Vec<&str> = document.into_iter().chain(headings).collect();
+        if context.is_empty() {
+            continue;
+        }
+        let range = |name: &str| chunk["byteRange"][name].as_u64().map(|at| at as usize);
+        let text = match chunk["searchText"].as_str() {
+            Some(text) => Some(text.to_owned()),
+            None => range("start")
+                .zip(range("end"))
+                .and_then(|(start, end)| content.get(start..end))
+                .map(str::to_owned),
+        };
+        if let Some(text) = text {
+            let header = nfkc.normalize(&context.join(" > ")).into_owned();
+            chunk["searchText"] = json!(format!("{header}\n\n{text}"));
+        }
+    }
+}
+
 /// Builds the index of a `chunks` snapshot in a new directory.
 fn build(store: &Store, input: SnapshotId, location: &Path) -> StoreResult<usize> {
     let mut sources: BTreeMap<String, Vec<DocumentInput>> = BTreeMap::new();
@@ -98,8 +131,13 @@ fn build(store: &Store, input: SnapshotId, location: &Path) -> StoreResult<usize
         };
         let content = String::from_utf8(store.bytes(&text.object)?)
             .map_err(|_| StoreError::new("A text part does not hold text."))?;
-        let chunks: Value = serde_json::from_slice(&store.bytes(&chunks.object)?)
+        let context = chunks.attrs.get("context").cloned();
+        let mut chunks: Value = serde_json::from_slice(&store.bytes(&chunks.object)?)
             .map_err(|_| StoreError::new("A chunks part does not hold chunks."))?;
+        if let Some(context) = context.filter(|context| context["prepend"] == true) {
+            let named = (context["document"] == true).then_some(document.as_str());
+            prepend(&mut chunks, &content, named);
+        }
         let format = if text.media_type == "text/markdown" {
             "markdown"
         } else {

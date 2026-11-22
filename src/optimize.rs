@@ -311,7 +311,7 @@ impl Ground<'_> {
     /// keys. No document is read.
     fn expect(&self, plan: &Plan) -> StoreResult<(Vec<String>, usize)> {
         let store = self.store;
-        let chunking = plan.chunking.process();
+        let chunking = plan.chunking_process();
         let chunks = store.lookup("chunks", &[self.input], &chunking)?;
         let index = match chunks {
             Some(chunks) => store.lookup("index", &[chunks], &indexing())?,
@@ -359,6 +359,7 @@ impl Ground<'_> {
             &TransformRequest {
                 input: self.input,
                 chunking: plan.chunking,
+                context: plan.context,
                 tag: None,
                 config,
                 cause,
@@ -548,7 +549,7 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
     let mut seen: HashMap<String, usize> = HashMap::new();
     for (candidate, plan) in candidates.iter_mut().zip(&plans) {
         let Some(plan) = plan else { continue };
-        let identity = format!("{} {}", plan.chunking.process().id(), plan.retrieval().id());
+        let identity = format!("{} {}", plan.chunking_process().id(), plan.retrieval().id());
         match seen.get(&identity) {
             Some(first) => {
                 candidate.state = State::Same(*first);

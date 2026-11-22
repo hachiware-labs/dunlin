@@ -346,3 +346,127 @@ fn runs_only_what_follows_a_changed_section() {
     assert_eq!(notes["built"]["generation"], 2);
     assert_eq!(project.found("trial-80", "排水"), ["manuals/valve.md"]);
 }
+
+#[test]
+fn searches_a_chunk_by_the_headings_above_it() {
+    use dunlin::extract::{Apply, ExtractRequest, extract};
+    use dunlin::index::{IndexRequest, index};
+    use dunlin::records::ItemId;
+    use dunlin::transform::{Chunking, Context, TransformRequest, transform};
+
+    let project = Project::new();
+    let extracted = extract(
+        &project.store,
+        &ExtractRequest {
+            source: "docs",
+            root: &project.docs(),
+            tag: Some("docs"),
+            config: None,
+            apply: Apply::ALL,
+        },
+    )
+    .unwrap()
+    .extracted
+    .snapshot;
+    // The same chunking with and without the context, each with an index of its own.
+    let make = |context: Context, tag: &str| {
+        let chunks = transform(
+            &project.store,
+            &TransformRequest {
+                input: extracted,
+                chunking: Chunking::Structure { max_chars: 200 },
+                context,
+                tag: None,
+                config: None,
+                cause: None,
+            },
+        )
+        .unwrap();
+        index(
+            &project.store,
+            &IndexRequest {
+                input: chunks.chunks.snapshot,
+                directory: &project.indexes(),
+                tag: Some(tag),
+                config: None,
+                cause: None,
+            },
+        )
+        .unwrap();
+        chunks
+    };
+    let plain = make(Context::default(), "plain");
+    let with = make(
+        Context {
+            document: true,
+            headings: true,
+            prepend: true,
+        },
+        "context",
+    );
+    // The context is part of what the chunking is, so the documents are chunked again.
+    assert_eq!((plain.chunked, with.chunked), (4, 4));
+    assert_ne!(plain.chunks.snapshot, with.chunks.snapshot);
+
+    // The first lines of the chunks of the pump manual that a search finds.
+    let starts = |index: &str, query: &str| {
+        let mut lines: Vec<usize> = project
+            .search(index, query)
+            .into_iter()
+            .filter(|found| found.document == "manuals/pump.md")
+            .map(|found| found.lines.0)
+            .collect();
+        lines.sort_unstable();
+        lines
+    };
+    // 保守 is only in the title of the document. With the context, the sections below the
+    // title are found by it as well.
+    assert_eq!(starts("plain", "保守"), [1]);
+    assert_eq!(starts("context", "保守"), [1, 3, 7]);
+    // What a search returns is the chunk as it is in the document, without the context.
+    let found = project.search("context", "保守");
+    let parts_section = found.iter().find(|found| found.lines.0 == 7).unwrap();
+    assert!(parts_section.text.starts_with("## 部品\n"));
+    assert!(!parts_section.text.contains("保守"));
+
+    // Each chunk keeps the headings above it, and the chunks say what the index is to do.
+    let items = project.store.snapshot(with.chunks.snapshot).unwrap().items;
+    let (_, item) = items
+        .iter()
+        .find(|(name, _)| name[1] == "manuals/pump.md")
+        .unwrap();
+    let parts = project.store.item(&ItemId::parse(item).unwrap()).unwrap();
+    let part = parts.iter().find(|part| part.kind == "chunks").unwrap();
+    assert_eq!(
+        part.attrs,
+        serde_json::json!({
+            "count": 3,
+            "context": { "document": true, "headings": true, "prepend": true },
+        })
+    );
+    let chunks: serde_json::Value =
+        serde_json::from_slice(&project.store.bytes(&part.object).unwrap()).unwrap();
+    let headings: Vec<&serde_json::Value> = chunks
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|chunk| &chunk["context"]["headings"])
+        .collect();
+    assert_eq!(
+        headings,
+        [
+            &serde_json::json!(["ポンプの保守"]),
+            &serde_json::json!(["ポンプの保守", "点検"]),
+            &serde_json::json!(["ポンプの保守", "部品"]),
+        ]
+    );
+    // Without the context, the chunks are what they were before there was one.
+    let items = project.store.snapshot(plain.chunks.snapshot).unwrap().items;
+    let (_, item) = items
+        .iter()
+        .find(|(name, _)| name[1] == "manuals/pump.md")
+        .unwrap();
+    let parts = project.store.item(&ItemId::parse(item).unwrap()).unwrap();
+    let part = parts.iter().find(|part| part.kind == "chunks").unwrap();
+    assert_eq!(part.attrs, serde_json::json!({ "count": 3 }));
+}

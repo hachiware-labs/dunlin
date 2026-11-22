@@ -1,6 +1,6 @@
-# Dunlin 文書取り込みツール
+# Knowledge-Nest 文書取り込みツール
 
-HTTP(S) や S3 から原本を取得してパースし、全文と出典情報を Dunlin の `replaceDocuments` に渡す開発用ツールです。Dunlin は全文をコーパスに保存し、チャンクからキーワード索引を作ります。`--index` には、ライブラリの `Dunlin.open()` で直接開く索引ディレクトリを渡します。Dunlinfile を使って MCP や RAG を作る手順は CLI ガイドを参照してください。[ライブラリ API](../../docs/api.md) · [CLI ガイド](../../docs/mcp.md)
+HTTP(S) や S3 から原本を取得してパースし、全文と出典情報を Knowledge-Nest の `replaceDocuments` に渡す開発用ツールです。Knowledge-Nest は全文をコーパスに保存し、チャンクからキーワード索引を作ります。`--index` には、ライブラリの `KnowledgeNest.open()` で直接開く索引ディレクトリを渡します。KnowledgeNestfile を使って MCP や RAG を作る手順は CLI ガイドを参照してください。[ライブラリ API](../../docs/api.md) · [CLI ガイド](../../docs/mcp.md)
 
 ## セットアップ
 
@@ -26,9 +26,9 @@ node tools/import/cli.mjs --index ./knowledge --source web --keep-original https
 - S3 では、バケットのみ、または末尾が `/` の URL をプレフィックスとして列挙します。プレフィックスでは `.txt`、`.md`、`.markdown`、`.html`、`.htm` を対象とします。それ以外の URL は単一キーを取得します。キー内の空白や `#` は `%20` や `%23` のようにエンコードします。
 - S3 のリージョン・認証情報は AWS SDK の設定から取得します。たとえば `AWS_REGION` と AWS プロファイルを利用できます。単一キーには `s3:GetObject`、プレフィックスには加えて `s3:ListBucket` の権限が必要です。S3 互換の検証環境には `--s3-endpoint` でパス形式のエンドポイントを指定できます。 [AWS SDK の認証情報](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html)
 - 上限は登録本文 1 文書あたり 1 MiB、抽出前の HTML 4 MiB、1 回の本文合計 64 MiB です。
-- パース後の全文と行範囲は、`--index` 配下の `.dunlin-corpus-v1/corpus.sqlite` に文書ごと・版ごとに保存します。JSON 保存は `--corpus-backend json` で選べます。`--keep-original` を指定すると、そのソースの原本も保存します。
+- パース後の全文と行範囲は、`--index` 配下の `.knowledge-nest-corpus-v1/corpus.sqlite` に文書ごと・版ごとに保存します。JSON 保存は `--corpus-backend json` で選べます。`--keep-original` を指定すると、そのソースの原本も保存します。
 
-取り込み後は、`Dunlin.open('./knowledge')` で同じ `--index` ディレクトリを開きます。開いたインスタンスの `search(query, { sourceIds: ['web'] })` が返す `hits[].evidence` から URL と行範囲を確認できます。`read(evidence)` で該当箇所を取得します。
+取り込み後は、`KnowledgeNest.open('./knowledge')` で同じ `--index` ディレクトリを開きます。開いたインスタンスの `search(query, { sourceIds: ['web'] })` が返す `hits[].evidence` から URL と行範囲を確認できます。`read(evidence)` で該当箇所を取得します。
 
 ## 検証
 

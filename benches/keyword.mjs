@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 const files = Number(process.argv[2] ?? 1_000);
 const iterations = Number(process.argv[3] ?? 300);
@@ -16,7 +16,7 @@ function percentiles(samples) {
   return { p50: quantile(0.50), p95: quantile(0.95), p99: quantile(0.99) };
 }
 
-const root = await mkdtemp(join(tmpdir(), 'dunlin-benchmark-'));
+const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-benchmark-'));
 let database;
 try {
   const docs = join(root, 'docs');
@@ -28,14 +28,14 @@ try {
   }
 
   let start = performance.now();
-  database = await Dunlin.open(store);
+  database = await KnowledgeNest.open(store);
   const firstOpenMs = performance.now() - start;
   start = performance.now();
   const indexed = await database.addSource({ id: 'bench', kind: 'filesystem', path: docs });
   const ingestMs = performance.now() - start;
   await database.close();
   start = performance.now();
-  database = await Dunlin.open(store);
+  database = await KnowledgeNest.open(store);
   const reopenMs = performance.now() - start;
   const firstSearchStart = performance.now();
   await database.search('feature_0 認証方式');

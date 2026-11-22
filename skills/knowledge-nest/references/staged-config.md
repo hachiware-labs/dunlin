@@ -1,8 +1,8 @@
 # The staged configuration file
 
-A staged `Dunlinfile.yaml` says what each stage does, as a list of modules that run in
-order. Any file name works: the file is given to `dunlin build <file>` or
-`dunlin eval <file>`; without one they read `Dunlinfile.yaml` of the project.
+A staged `KnowledgeNestfile.yaml` says what each stage does, as a list of modules that run in
+order. Any file name works: the file is given to `knowledge-nest build <file>` or
+`knowledge-nest eval <file>`; without one they read `KnowledgeNestfile.yaml` of the project.
 
 ## A complete file
 
@@ -31,7 +31,7 @@ serve:
 ```
 
 Paths are relative to the project folder, not to the configuration file. A trial file in
-`.dunlin/trials/...` still means the project's `./docs`.
+`.knowledge-nest/trials/...` still means the project's `./docs`.
 
 ## Sections
 
@@ -41,7 +41,7 @@ Paths are relative to the project folder, not to the configuration file. A trial
 | `transform` | the chunks | yes, or `- from: <name>` |
 | `index` | the index | yes, or `- from: <name>` |
 | `search` | nothing; how the index is searched | yes |
-| `eval` | an evaluation result | only for `dunlin eval` |
+| `eval` | an evaluation result | only for `knowledge-nest eval` |
 | `serve` | nothing; the name an index is served under | only for `--release` |
 
 Two entries are not modules:
@@ -86,7 +86,7 @@ PDF and Office loaders and LLM modules are not supported in the staged style yet
 
 A list of `add`, `update`, `delete`. The default is all three. Leaving one out means that
 kind of change is not taken in: with `[add, update]` a file deleted from the folder stays
-in the documents. `dunlin build` prints what was left out.
+in the documents. `knowledge-nest build` prints what was left out.
 
 ### `context`: a chunk knows where it is
 
@@ -106,7 +106,7 @@ This helps most with documents that have a clear heading structure and short sec
 
 ## Names
 
-Every version Dunlin makes can have names, and each kind of thing has its own names:
+Every version Knowledge-Nest makes can have names, and each kind of thing has its own names:
 documents, chunks, indexes, evaluation data and results. The same name in two kinds does
 not clash.
 
@@ -122,14 +122,14 @@ For a single configuration, `default` is enough.
 ## Checking a file
 
 ```sh
-dunlin validate                      # Dunlinfile.yaml of the project
-dunlin validate --config other.yaml
+knowledge-nest validate                      # KnowledgeNestfile.yaml of the project
+knowledge-nest validate --config other.yaml
 ```
 
 ```text
-Dunlinfile.yaml can run: extract, transform, index, eval.
+KnowledgeNestfile.yaml can run: extract, transform, index, eval.
 ```
 
-`validate` builds nothing. `dunlin build` makes the same check before it does anything, so
+`validate` builds nothing. `knowledge-nest build` makes the same check before it does anything, so
 a file that is wrong never half-runs. The messages are specific ("chunk.length needs
 overlap smaller than size"); fix what they name.

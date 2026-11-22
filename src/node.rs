@@ -282,7 +282,7 @@ pub fn store_originals(
     })
 }
 
-/// Reads `Dunlinfile.yaml` text. Returns `{ syntaxError: { line, message } }`, or
+/// Reads `KnowledgeNestfile.yaml` text. Returns `{ syntaxError: { line, message } }`, or
 /// `{ config, lines }` where `lines` lists `[path, line]` for every value.
 #[napi]
 pub fn parse_config(text: String) -> Result<String> {
@@ -695,7 +695,7 @@ impl crate::serve::ServeHost for JsHost {
     }
 }
 
-/// The search and read functions a caller passes to `Dunlin.serveMcp`.
+/// The search and read functions a caller passes to `KnowledgeNest.serveMcp`.
 impl crate::mcp::McpHost for JsHost {
     fn search(
         &self,
@@ -1318,7 +1318,7 @@ fn eval_data_outcome(
 
 /// Runs an `eval-data` command on `state.sqlite` (see `eval_data`). A command that reads the
 /// documents of the active build fails with the code `BUILD_NEEDED`; run it with
-/// `Dunlin#evalData` on the open build instead.
+/// `KnowledgeNest#evalData` on the open build instead.
 #[napi]
 pub fn eval_data(env: &Env, request: String) -> Result<Object<'_>> {
     let (deferred, promise) = env.create_deferred::<String, _>()?;
@@ -1965,7 +1965,7 @@ impl NativeDatabase {
     fn database(&self) -> Result<Arc<KnowledgeBase>> {
         self.0
             .clone()
-            .ok_or_else(|| Error::new(Status::GenericFailure, "CLOSED|Dunlin is closed"))
+            .ok_or_else(|| Error::new(Status::GenericFailure, "CLOSED|Knowledge-Nest is closed"))
     }
 }
 
@@ -2077,7 +2077,7 @@ impl crate::cli_run::CliEvents for CliHost {
     }
 }
 
-/// Runs the `dunlin` CLI with `process.argv.slice(2)` (see `cli_run`). It prints the result and
+/// Runs the `knowledge-nest` CLI with `process.argv.slice(2)` (see `cli_run`). It prints the result and
 /// resolves to the exit code. `host(id, kind, args)` hears `serving` (`true` while a server runs,
 /// when SIGINT and SIGTERM should abort `cancel`) and `opened` (an index a server opened).
 #[napi]

@@ -9,10 +9,10 @@ const counts = process.argv.slice(2).length ? process.argv.slice(2).map(Number) 
 if (!counts.every((count) => Number.isSafeInteger(count) && count > 0)) throw new Error('文書数には正の整数を指定してください。');
 const cli = fileURLToPath(new URL('../tools/rag/cli.mjs', import.meta.url));
 const temp = await realpath(tmpdir());
-const root = await realpath(await mkdtemp(join(temp, 'dunlin-cli-bench-')));
-if (dirname(root) !== temp || !basename(root).startsWith('dunlin-cli-bench-')) throw new Error('Unexpected temporary directory.');
+const root = await realpath(await mkdtemp(join(temp, 'knowledge-nest-cli-bench-')));
+if (dirname(root) !== temp || !basename(root).startsWith('knowledge-nest-cli-bench-')) throw new Error('Unexpected temporary directory.');
 const exec = promisify(execFile);
-const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'empty-global.yaml') };
+const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'empty-global.yaml') };
 async function run(cwd, ...args) {
   const { stdout } = await exec(process.execPath, [cli, ...args, '--json'], { cwd, env, maxBuffer: 16 * 1024 * 1024 });
   return JSON.parse(stdout).data;

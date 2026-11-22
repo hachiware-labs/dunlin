@@ -13,9 +13,9 @@ const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const runNode = promisify(execFile);
 
 test('diagnoses evaluation misses and measures whole and partial queries against a separate dictionary build', { timeout: 60_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-dictionary-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-dictionary-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout).data;
   const rejects = (promise, code, hint) => assert.rejects(promise, (error) => {
@@ -25,7 +25,7 @@ test('diagnoses evaluation misses and measures whole and partial queries against
   await run('init', 'mcp', 'kb');
   await rejects(json('dictionary', 'suggest'), 'EVAL_DATA_REQUIRED', 'eval-data add');
   const docs = join(root, 'kb', 'docs');
-  const configPath = join(root, 'kb', 'Dunlinfile.yaml');
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const target = 'docs:product.txt';
   const quote = '製品東京大学は限定品';
   await Promise.all([
@@ -47,7 +47,7 @@ test('diagnoses evaluation misses and measures whole and partial queries against
     ['大学', 'docs:lecture.txt', '東京大学で講演します。'],
     ['点検', 'docs:maintenance.txt', '点検は毎月実施します。'],
   ]) await json('eval-data', 'add', '--question', question, '--doc', doc, '--quote', expected);
-  await rejects(json('dictionary', 'suggest'), 'REPORT_REQUIRED', 'dunlin eval');
+  await rejects(json('dictionary', 'suggest'), 'REPORT_REQUIRED', 'knowledge-nest eval');
 
   const config = parse(await readFile(configPath, 'utf8'));
   config.eval.modules.find(({ use }) => use === 'metric.evidence_recall').with.at = ['context', 1];
@@ -88,7 +88,7 @@ test('diagnoses evaluation misses and measures whole and partial queries against
   await rejects(json('dictionary', 'add', 'selected.csv', '--config', candidateFile), 'INVALID_USER_DICTIONARY');
   assert.equal(await readFile(candidatePath, 'utf8'), candidateInput);
   await writeFile(selected, candidate.csv + '\n');
-  await rejects(json('dictionary', 'add', 'selected.csv', '--config', 'kb/Dunlinfile.yaml'), 'CANDIDATE_REQUIRED');
+  await rejects(json('dictionary', 'add', 'selected.csv', '--config', 'kb/KnowledgeNestfile.yaml'), 'CANDIDATE_REQUIRED');
   const added = await json('dictionary', 'add', 'selected.csv', '--config', candidateFile);
   assert.match(await readFile(candidatePath, 'utf8'), /^# Trial configuration comment\n/u);
   assert.equal(await readFile(added.user_dictionary, 'utf8'), candidate.csv + '\n');

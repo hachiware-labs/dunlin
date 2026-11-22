@@ -102,7 +102,7 @@ pub struct RunRequest<'a> {
     pub indexes: &'a Path,
     /// The configuration file, in the syntax of the new store.
     pub config: &'a str,
-    /// Evaluate the index as the `eval` section says, as `dunlin eval` and a trial do. A build
+    /// Evaluate the index as the `eval` section says, as `knowledge-nest eval` and a trial do. A build
     /// leaves the section alone.
     pub evaluate: bool,
     /// Move the name `serve` gives to the index. A trial leaves it where it is.

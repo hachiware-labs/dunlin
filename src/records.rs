@@ -321,12 +321,15 @@ pub fn item_value(parts: &[Part]) -> Value {
 
 /// The ID of a document's item: all of its parts, in order.
 pub fn item_id(parts: &[Part]) -> ItemId {
-    ItemId::from_hex(&derive("Dunlin data management item", &item_value(parts)))
+    ItemId::from_hex(&derive(
+        "Knowledge-Nest data management item",
+        &item_value(parts),
+    ))
 }
 
 /// The ID of an information object: its JSON, whatever the order of its keys.
 pub fn info_id(value: &Value) -> InfoId {
-    InfoId::from_hex(&derive("Dunlin data management info", value))
+    InfoId::from_hex(&derive("Knowledge-Nest data management info", value))
 }
 
 /// What identifies one module of a process.
@@ -370,7 +373,10 @@ impl Process {
     /// The ID under which an object remembers what this process made of it. Give only the
     /// modules that apply to the item.
     pub fn id(&self) -> ProcessId {
-        ProcessId::from_hex(&derive("Dunlin data management process", &self.to_value()))
+        ProcessId::from_hex(&derive(
+            "Knowledge-Nest data management process",
+            &self.to_value(),
+        ))
     }
 }
 
@@ -421,7 +427,7 @@ pub fn list_from_value(value: &Value) -> Option<Vec<(ItemName, String)>> {
 /// The digest of a snapshot's type and items.
 pub fn list_digest(kind: &str, items: &[(ItemName, String)]) -> ListDigest {
     ListDigest::from_hex(&derive(
-        "Dunlin data management list",
+        "Knowledge-Nest data management list",
         &json!({ "type": kind, "items": list_value(items) }),
     ))
 }
@@ -431,7 +437,7 @@ pub fn list_digest(kind: &str, items: &[(ItemName, String)]) -> ListDigest {
 /// same items leads to the same key.
 pub fn snapshot_key(kind: &str, inputs: &[ListDigest], process: &Process) -> SnapshotKey {
     SnapshotKey::from_hex(&derive(
-        "Dunlin data management snapshot key",
+        "Knowledge-Nest data management snapshot key",
         &json!({
             "type": kind,
             "inputs": inputs.iter().map(ListDigest::as_str).collect::<Vec<_>>(),
@@ -538,10 +544,10 @@ mod tests {
                     .to_string(),
             ],
             [
-                "itm-6fe0524f4adbb45e0a396827af87897de8c7896de623c7015b01aa3af1ed3477",
-                "prc-ba94d72b3abf0a88b8b01c8259c62198f975da3f7548b68d26cd61328a8ba348",
-                "lst-455195414b5e2c7a55ebf5b5d55227534e7dee1fe6ce92d1296abed75a144c5d",
-                "sky-7a01e06cd905bd58dab9be7d9335877ad44487e2ddf38b7d4c3f48dbe990660d",
+                "itm-8ced0ab69678feb9c021123d4da5b0b5a718a5b5f7c92528329c888534b117de",
+                "prc-5066bb72dcc28ca4f32ec7634eb51c6aeb16b4de696db471c49a8d77c6d4cda3",
+                "lst-727f9f222afdec789860ca983e2b5c5ac6f317d36dda56ee466866a27df21eb1",
+                "sky-79af304789fd66fcb9c31464099b5045dd74ab202008342203e5796d305505d6",
             ]
         );
         // What is hashed for the list: BLAKE3 of `[1,<this>]` in the domain of lists.
@@ -602,8 +608,8 @@ mod tests {
         // Equal values of different kinds do not share an identifier.
         let value = json!([]);
         assert_ne!(
-            derive("Dunlin data management item", &value),
-            derive("Dunlin data management process", &value)
+            derive("Knowledge-Nest data management item", &value),
+            derive("Knowledge-Nest data management process", &value)
         );
     }
 

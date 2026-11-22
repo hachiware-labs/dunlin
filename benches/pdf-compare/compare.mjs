@@ -3,14 +3,14 @@
 //
 // Usage: node benches/pdf-compare/compare.mjs <directory of PDFs> [--runs <n>] [--show]
 //
-// pdf_oxide runs through Dunlin.loadCorpus, as builds use it, with the cache bypassed.
+// pdf_oxide runs through KnowledgeNest.loadCorpus, as builds use it, with the cache bypassed.
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { Dunlin } from '../../dist/index.js';
+import { KnowledgeNest } from '../../dist/index.js';
 
 const { values, positionals } = parseArgs({ allowPositionals: true, options: { runs: { type: 'string', default: '3' }, show: { type: 'boolean' } } });
 if (positionals.length !== 1) {
@@ -21,7 +21,7 @@ const directory = resolve(positionals[0]);
 const runs = Math.max(1, Number(values.runs));
 const names = (await readdir(directory)).filter((name) => name.toLowerCase().endsWith('.pdf')).sort();
 
-const work = await mkdtemp(join(tmpdir(), 'dunlin-pdf-compare-'));
+const work = await mkdtemp(join(tmpdir(), 'knowledge-nest-pdf-compare-'));
 const state = join(work, 'state.sqlite');
 const setup = new DatabaseSync(state);
 setup.exec('CREATE TABLE loaded_files (id TEXT PRIMARY KEY, document TEXT NOT NULL)');
@@ -30,7 +30,7 @@ setup.close();
 async function oxide(file) {
   const request = { state, originals: join(work, 'originals'), force: true, ocrVersion: '', root: work,
     files: [{ id: 'pdf', file, objectId: file, kind: 'pdf', route: 'loader.auto' }] };
-  const { documents: [document] } = await Dunlin.loadCorpus(request, { parse: () => { throw new Error('unexpected host call'); } });
+  const { documents: [document] } = await KnowledgeNest.loadCorpus(request, { parse: () => { throw new Error('unexpected host call'); } });
   return { content: document.content, locations: document.corpus.locations ?? [] };
 }
 
@@ -67,7 +67,7 @@ function similarity(a, b) {
   return 1 - previous[y.length] / Math.max(x.length, y.length);
 }
 
-/** The previous reader: pdfjs text items, one page after another, as Dunlin read them before. */
+/** The previous reader: pdfjs text items, one page after another, as Knowledge-Nest read them before. */
 async function pdfText(bytes) {
   const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const task = getDocument({ data: new Uint8Array(bytes), verbosity: 0, isEvalSupported: false, useSystemFonts: true });

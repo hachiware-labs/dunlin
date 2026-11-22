@@ -48,7 +48,7 @@ async function start(t, args, cwd, env) {
   return new Promise((resolve, reject) => {
     child.stderr.on('data', (chunk) => {
       text += chunk;
-      const match = /Dunlin rag: (http:\/\/[^\s]+)\//u.exec(text);
+      const match = /Knowledge-Nest rag: (http:\/\/[^\s]+)\//u.exec(text);
       if (match) resolve(new URL(match[1]));
     });
     child.once('exit', (code) => reject(new Error('The server stopped (' + code + '): ' + text)));
@@ -80,15 +80,15 @@ function stable(body) {
 }
 
 test('serves HTTP like the former JavaScript server', { timeout: 180_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-serve-parity-'));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml'), DUNLIN_PARITY_TOKEN: token };
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-serve-parity-'));
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml'), KNOWLEDGE_NEST_PARITY_TOKEN: token };
   await runNode(process.execPath, [cli, 'init', 'rag', 'kb', '--no-embedding'], { cwd: root, env });
   await writeFile(join(root, 'kb', 'docs', 'guide.md'), '# 手順\n\nポンプの交換手順です。\n\n## 点検\n\n月に一度ポンプを点検します。\n');
-  const configPath = join(root, 'kb', 'Dunlinfile.yaml');
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   config.models.answerer = { provider: 'ollama', kind: 'chat', model: 'local', base_url: await model(t) };
   config.serve.access.allowed_origins = ['https://reader.example'];
-  config.serve.access.auth = { type: 'token', token_env: 'DUNLIN_PARITY_TOKEN' };
+  config.serve.access.auth = { type: 'token', token_env: 'KNOWLEDGE_NEST_PARITY_TOKEN' };
   config.serve.limits = { max_request_bytes: 2000, request_timeout_seconds: 30, max_concurrent: 4 };
   await writeFile(configPath, stringify(config));
   await runNode(process.execPath, [cli, '--project', 'kb', 'build'], { cwd: root, env });

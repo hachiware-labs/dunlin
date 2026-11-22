@@ -1,7 +1,7 @@
 
 import { join } from 'node:path';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { convertOffice } from './parsers/documents.mjs';
 import { lightonModel } from './parsers/catalog.mjs';
@@ -60,7 +60,7 @@ export async function loadCorpus(sources, paths, skipped, warnings, db, force, r
   progress(0);
   let loaded;
   try {
-    loaded = await Dunlin.loadCorpus(request, host);
+    loaded = await KnowledgeNest.loadCorpus(request, host);
   } catch (error) {
     if (error.code === 'LOAD_FAILED') throw new Error(error.message, { cause: error });
     throw error;
@@ -115,7 +115,7 @@ export function chunkCorpus({ groups, unicode }, { size, overlap, structure = fa
     let end = start;
     for (let chars = 0; end < pending.length && (end === start || chars < chunkBatchChars); end++) chars += pending[end].document.content.length;
     const batch = pending.slice(start, end);
-    const chunks = Dunlin.chunkDocuments(batch.map(({ document }) => document), options);
+    const chunks = KnowledgeNest.chunkDocuments(batch.map(({ document }) => document), options);
     const store = () => batch.forEach(({ group, index, key }, position) => {
       output[group][index] = chunks[position];
       if (key) cache.write(key, chunks[position]);

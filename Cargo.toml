@@ -1,5 +1,5 @@
 [package]
-name = "dunlin"
+name = "knowledge-nest"
 version = "0.5.0"
 edition = "2024"
 publish = false
@@ -38,7 +38,7 @@ napi = { version = "3", default-features = false, features = ["napi8", "serde-js
 napi-derive = { version = "3", optional = true }
 # Pinned: the version is part of the extraction cache key for PDFs.
 pdf_oxide = { version = "=0.3.78", default-features = false, features = ["legacy-crypto", "rendering"] }
-# OCR on CPU. ONNX Runtime is loaded at run time from the files dunlin add oar-ocr prepares.
+# OCR on CPU. ONNX Runtime is loaded at run time from the files knowledge-nest add oar-ocr prepares.
 oar-ocr = { version = "=0.10.2", default-features = false, features = ["simd"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["load-dynamic", "std"] }
 base64 = "0.23"

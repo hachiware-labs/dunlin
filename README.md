@@ -1,16 +1,16 @@
-# Dunlin
+# Knowledge-Nest
 
 [English](README.en.md)
 
 **資料のフォルダを渡すだけで、AI が「根拠を示して」答えられる知識になる。**
 
-Dunlin は、手元の資料から AI のための文書データベースを作るツールです。同じ資料から、エージェントが引く検索（MCP）、出典付きで答える API（RAG）、AI が書き育てる Wiki（LLM-Wiki）や整理されたノート（PARA）を作れます。資料も索引も手元に置いたまま、答えにはいつも出典が付きます。
+Knowledge-Nest は、手元の資料から AI のための文書データベースを作るツールです。同じ資料から、エージェントが引く検索（MCP）、出典付きで答える API（RAG）、AI が書き育てる Wiki（LLM-Wiki）や整理されたノート（PARA）を作れます。資料も索引も手元に置いたまま、答えにはいつも出典が付きます。
 
 ```text
-資料フォルダ ──→  Dunlin  ──┬─ MCP    Claude などのエージェントが、資料を引いて答える
-(Markdown、PDF、             ├─ RAG    自分のアプリが、API で出典付きの答えを受け取る
- Word、Excel …)             ├─ Wiki   AI が資料を読み、引用付きのページを書き溜める
-                            └─ PARA   AI が資料やメモを、PARA の4分類に整理する
+資料フォルダ ──→  Knowledge-Nest  ──┬─ MCP    Claude などのエージェントが、資料を引いて答える
+(Markdown、PDF、                     ├─ RAG    自分のアプリが、API で出典付きの答えを受け取る
+ Word、Excel …)                     ├─ Wiki   AI が資料を読み、引用付きのページを書き溜める
+                                    └─ PARA   AI が資料やメモを、PARA の4分類に整理する
 ```
 
 ## こんなことができます
@@ -45,14 +45,14 @@ curl http://127.0.0.1:4318/v1/responses -d '{"input":"メカニカルシール�
 モデルの準備は要りません。日本語のキーワード検索が、手元ですぐに動きます。
 
 ```sh
-dunlin init mcp ./kb --source ./manuals
+knowledge-nest init mcp ./kb --source ./manuals
 cd kb
-dunlin build
-dunlin search "ポンプの点検はいつ実施しますか"
-dunlin serve --print-config
+knowledge-nest build
+knowledge-nest search "ポンプの点検はいつ実施しますか"
+knowledge-nest serve --print-config
 ```
 
-最後のコマンドが出す設定を、Claude Desktop や Claude Code などの MCP クライアントの設定に貼れば、エージェントがあなたの資料を引けるようになります。資料を直したら `dunlin build` をもう一度。変わった文書だけが処理されます。
+最後のコマンドが出す設定を、Claude Desktop や Claude Code などの MCP クライアントの設定に貼れば、エージェントがあなたの資料を引けるようになります。資料を直したら `knowledge-nest build` をもう一度。変わった文書だけが処理されます。
 
 インストールは [こちら](#インストール)。順を追った説明は [入門](docs/getting-started.md) にあります。
 
@@ -67,7 +67,7 @@ Q1 その知識を、主に読むのは誰？
    │     │
    │     Q2 答えの文章を書くのは誰？
    │     ├─ エージェント自身（Claude など） ………………… MCP
-   │     └─ Dunlin（アプリは答えを受け取るだけ） …… RAG
+   │     └─ Knowledge-Nest（アプリは答えを受け取るだけ） …… RAG
    │
    └─ 人が、ページとして読み、育てていく
          │
@@ -102,7 +102,7 @@ Q1 その知識を、主に読むのは誰？
 | 資料の更新 | `build` で、変わった文書だけ | `build` で、変わった文書だけ | `ingress` で、ページを書き足す | `ingress` で、ノートを書き足す |
 | 提供のしかた | MCP（stdio） | HTTP（回答・検索・MCP） | ブラウザの画面 | ブラウザの画面 |
 
-- **モデルの手間**: MCP だけは、Dunlin 側にモデルが要りません。RAG は質問のたびに、Wiki と PARA は取り込むたびにモデルを呼びます。
+- **モデルの手間**: MCP だけは、Knowledge-Nest 側にモデルが要りません。RAG は質問のたびに、Wiki と PARA は取り込むたびにモデルを呼びます。
 - **迷ったら MCP から。** 資料フォルダ1つで、すぐに試せます。あとから同じ資料で RAG や Wiki を作っても、MCP はそのまま使えます。
 
 ### MCP と RAG は何が違うのか
@@ -110,20 +110,20 @@ Q1 その知識を、主に読むのは誰？
 どちらも「質問のたびに資料を検索する」形です。違うのは、**見つけた根拠から答えを書くのが誰か**です。
 
 ```text
-MCP   質問 ─→ [エージェント] ─検索を依頼─→ Dunlin ─→ 根拠（資料の該当箇所）
+MCP   質問 ─→ [エージェント] ─検索を依頼─→ Knowledge-Nest ─→ 根拠（資料の該当箇所）
                   ↑                                      │
                   └──────── 根拠を読んで、エージェントのモデルが答える ──┘
 
-RAG   質問 ─→ Dunlin ─→ 検索 ─→ 根拠 ─→ Dunlin が呼ぶモデルが答えを書く ─→ 出典付きの回答
+RAG   質問 ─→ Knowledge-Nest ─→ 検索 ─→ 根拠 ─→ Knowledge-Nest が呼ぶモデルが答えを書く ─→ 出典付きの回答
 ```
 
 | | MCP | RAG |
 |---|---|---|
 | たとえると | 司書が棚から資料を出して、調べる人に渡す | 司書が資料を読んで、答えを書いて渡す |
-| Dunlin が返すもの | 根拠（資料の該当箇所と出典） | 出典付きの回答 |
-| 答えを書くのは | エージェント側のモデル（Claude など） | Dunlin が呼ぶモデル（Ollama や API） |
+| Knowledge-Nest が返すもの | 根拠（資料の該当箇所と出典） | 出典付きの回答 |
+| 答えを書くのは | エージェント側のモデル（Claude など） | Knowledge-Nest が呼ぶモデル（Ollama や API） |
 | 呼び出す側 | MCP に対応したエージェント・アプリ | HTTP で呼べるもの（自作アプリ、OpenAI の SDK など） |
-| Dunlin 側のモデル | 要らない | 回答モデルが要る（未設定でも検索は使える） |
+| Knowledge-Nest 側のモデル | 要らない | 回答モデルが要る（未設定でも検索は使える） |
 | 質問の仕方 | エージェントが、必要に応じて言い換えて何度も引く | 質問を1回送ると、答えが1回返る |
 
 - **Claude などに資料を調べさせたい** → MCP。
@@ -134,8 +134,8 @@ RAG   質問 ─→ Dunlin ─→ 検索 ─→ 根拠 ─→ Dunlin が呼ぶ�
 
 - **準備はフォルダ1つ。** GPU も埋め込みモデルも要らず、日本語の自然文でそのまま引けます。資料は手元から出ません。
 - **答えに、行まで付いた出典。** 結果には資料名・行・見出しが付き、エージェントは `knowledge.read` で原文まで読み戻せます。
-- **つなぐのは貼るだけ。** `dunlin serve --print-config` の出力を、MCP クライアントの設定に貼ります。
-- **資料の更新に、止めずについていく。** `dunlin build` を再実行すると、変わった文書だけを処理し、動いている検索は次の質問から新しい索引を使います。
+- **つなぐのは貼るだけ。** `knowledge-nest serve --print-config` の出力を、MCP クライアントの設定に貼ります。
+- **資料の更新に、止めずについていく。** `knowledge-nest build` を再実行すると、変わった文書だけを処理し、動いている検索は次の質問から新しい索引を使います。
 
 日本語は Lindera と IPADIC で分かち書きします。「する」「こと」のような軽い語だけが合う文書は返しません。専門用語はユーザー辞書で足せます。ベクトルを足したハイブリッド検索、PDF・Office・HTML・OCR にも対応します。 [MCP と RAG](docs/mcp.md)
 
@@ -147,12 +147,12 @@ RAG   質問 ─→ Dunlin ─→ 検索 ─→ 根拠 ─→ Dunlin が呼ぶ�
 - **モデルは手元でも API でも。** ローカルの Ollama も、外部の API も選べます。外に公開するときは、トークン認証と接続制限を設定できます。
 
 ```sh
-dunlin config set llm --provider ollama --model qwen3:4b
-dunlin init rag ./rag --source ./manuals
+knowledge-nest config set llm --provider ollama --model qwen3:4b
+knowledge-nest init rag ./rag --source ./manuals
 cd rag
-dunlin build
-dunlin ask "ポンプの点検周期は？"
-dunlin serve
+knowledge-nest build
+knowledge-nest ask "ポンプの点検周期は？"
+knowledge-nest serve
 ```
 
 [MCP と RAG](docs/mcp.md)
@@ -161,19 +161,19 @@ dunlin serve
 
 - **知識が、ページとして育つ。** 質問のたびに資料を引き直す代わりに、AI が資料を読んで、整ったページに書き溜めます。資料を足すたびにページが育ちます。
 - **AI の書いた文を、1文ずつ検証。** 記述には原文の引用が付き、引用が資料と一字一句一致しない文は保存されません。
-- **何をしても戻せる。** 資料の原本は書き換えません。変更は作業ごとに記録され、`dunlin undo` で取り消せます。
-- **古くなった所を見つける。** `dunlin verify` がリンク切れや古い引用を、`--content` を付けるとページ同士の食い違いも見つけます。
+- **何をしても戻せる。** 資料の原本は書き換えません。変更は作業ごとに記録され、`knowledge-nest undo` で取り消せます。
+- **古くなった所を見つける。** `knowledge-nest verify` がリンク切れや古い引用を、`--content` を付けるとページ同士の食い違いも見つけます。
 - **ブラウザで読み、頼む。** 画面で資料・ページ・出典を並べて読み、「点検前の確認事項を箇条書きに」のようにページへ指示できます。
 
 ```sh
-dunlin config set llm --provider ollama --model qwen3:4b
-dunlin init wiki ./wiki --purpose "設備保全の手順と部品情報をまとめる"
+knowledge-nest config set llm --provider ollama --model qwen3:4b
+knowledge-nest init wiki ./wiki --purpose "設備保全の手順と部品情報をまとめる"
 cd wiki
-dunlin ingress ../manuals
-dunlin serve        # http://127.0.0.1:4319 をブラウザで開く
+knowledge-nest ingress ../manuals
+knowledge-nest serve        # http://127.0.0.1:4319 をブラウザで開く
 ```
 
-エージェントからは `dunlin query "質問" --json` でページに基づく答えを、プロジェクトの `site/` から HTML のページを読めます。Wiki の `serve` は人が使うブラウザの画面で、MCP のサーバーではありません。エージェントが MCP で引く形が欲しいときは、同じ資料で `mcp` のプロジェクトも作ります。 [Wiki・PARA の使い方](docs/wiki.md)
+エージェントからは `knowledge-nest query "質問" --json` でページに基づく答えを、プロジェクトの `site/` から HTML のページを読めます。Wiki の `serve` は人が使うブラウザの画面で、MCP のサーバーではありません。エージェントが MCP で引く形が欲しいときは、同じ資料で `mcp` のプロジェクトも作ります。 [Wiki・PARA の使い方](docs/wiki.md)
 
 ### PARA：AI が、資料とメモを整理する
 
@@ -191,26 +191,26 @@ PARA は、情報を「いま何に使うか」で4つに分ける整理法で�
 
 `init wiki` を `init para ./para` に読み替えるだけで始められます。
 
-## Dunlin を選ぶ理由
+## Knowledge-Nest を選ぶ理由
 
 - **手元で完結する。** 資料も索引もプロジェクトのフォルダに保存されます。外へ送るのは、あなたがモデルを設定したときに、その処理に要るテキストだけです。
 - **いつも出典が付く。** 検索結果も、答えも、Wiki の文も、元の資料の場所を指します。
 - **勘ではなく、数字で良くする。** 「この質問なら、この文が答え」という組を登録すると、検索が根拠を拾えている割合（回収率）を測れます。設定を変えて測り直し、比べてから選べます（MCP・RAG）。
 - **試すのが速い。** 同じ入力と同じ処理は2度実行しません。チャンクの大きさだけ変えた試しなら、資料の読み直しは起きません。だから何通りも試せます。
-- **構成が見える。** 何をどう処理するかは `Dunlinfile.yaml` に書き出され、`dunlin validate` で実行前に確かめられます。
+- **構成が見える。** 何をどう処理するかは `KnowledgeNestfile.yaml` に書き出され、`knowledge-nest validate` で実行前に確かめられます。
 
-LangChain やベクトルデータベースとの比べ方は [Dunlin が向いている構成](docs/comparison.md) にあります。
+LangChain やベクトルデータベースとの比べ方は [Knowledge-Nest が向いている構成](docs/comparison.md) にあります。
 
 ## 検索を数字で良くする（開発中の新しいコマンド）
 
 検索結果やデータを版として残し、設定の候補をまとめて測って比べる仕組みを作っています。
 
 ```sh
-dunlin eval-data import cases.json   # 質問と、答えになる引用の組を入れる
-dunlin eval                          # いまの設定で回収率を測る
-dunlin optimize tune.yaml            # 変えたい所を書いた指示から、候補を作って順に測る
-dunlin results tune                  # 候補を、回収率の高い順に並べる
-dunlin release tune/010              # 選んだ索引に、提供用の名前を付ける
+knowledge-nest eval-data import cases.json   # 質問と、答えになる引用の組を入れる
+knowledge-nest eval                          # いまの設定で回収率を測る
+knowledge-nest optimize tune.yaml            # 変えたい所を書いた指示から、候補を作って順に測る
+knowledge-nest results tune                  # 候補を、回収率の高い順に並べる
+knowledge-nest release tune/010              # 選んだ索引に、提供用の名前を付ける
 ```
 
 `results` の表示の例です（一部の列を省いています）。
@@ -228,12 +228,12 @@ Trial  Recall  To base  What
 npm への公開は準備中です。現在はソースからビルドします。Rust 1.95 以降と、Node.js 22.20 以降の 22 系または 24.12 以降の 24 系が必要です。
 
 ```sh
-git clone https://github.com/hachiware-labs/dunlin
-cd dunlin
+git clone https://github.com/hachiware-labs/knowledge-nest
+cd knowledge-nest
 npm ci
 npm run build
 npm link
-dunlin --help
+knowledge-nest --help
 ```
 
 ## ドキュメント
@@ -244,12 +244,12 @@ dunlin --help
 | 使いこなす | [使いこなす](docs/guide.md) |
 | 検索・回答・ページを使う | [MCP と RAG](docs/mcp.md) · [Wiki と PARA](docs/wiki.md) |
 | 検索を改善する | [検索評価とユーザー辞書](docs/evaluation.md) · [エージェントと試行する](docs/agents.md) · [精度を上げる手法の候補](docs/retrieval-techniques.md) |
-| コマンドや設定を調べる | [CLI](docs/cli.md) · [モジュール](docs/modules.md) · [Dunlinfile の既定値](docs/config.md) · [困ったときは](docs/troubleshooting.md) |
+| コマンドや設定を調べる | [CLI](docs/cli.md) · [モジュール](docs/modules.md) · [KnowledgeNestfile の既定値](docs/config.md) · [困ったときは](docs/troubleshooting.md) |
 | 仕組みと用途を知る | [向いている構成](docs/comparison.md) · [データ管理システム](docs/data-management.md) · [ビルドと評価の関係](docs/concepts.md) · [実装構成](docs/architecture.md) · [ベンチマーク](docs/benchmarks.md) · [PDF の抽出](docs/pdf-extraction.md) |
 | Node.js に組み込む | [Node.js API](docs/api.md) |
 | 開発・運用を確認する | [開発と変更の確認](CONTRIBUTING.md) · [変更履歴](CHANGELOG.md) · [セキュリティ](SECURITY.md) · [受け入れ確認](docs/acceptance.md) |
 | ライセンスと通知を調べる | [本体のライセンス状況](LICENSE) · [第三者の通知](THIRD_PARTY_NOTICES.md) |
-| 仕様を調べる | [Dunlin 設計仕様](docs/dunlin-spec.md) |
+| 仕様を調べる | [Knowledge-Nest 設計仕様](docs/knowledge-nest-spec.md) |
 
 ## 開発
 
@@ -268,7 +268,7 @@ npm run bench -- 1000 300
 ## 現在の状態
 
 - バージョン 0.5.0 の開発版です。コマンドや設定の形は変わる可能性があります。
-- `dunlin` は仮のパッケージ名です。npm への公開は準備中です。本体のライセンスは MIT です。
+- `knowledge-nest` は仮のパッケージ名です。npm への公開は準備中です。本体のライセンスは MIT です。
 - 動作を確認している環境は、Windows x64、Linux x64（glibc）、macOS arm64 と x64 です。
 - 版の保管と、それを使うコマンド（`list`、`results`、`optimize`、`release`）は `data-management` ブランチで実装中です。コマンドは、読む設定ファイルの形で仕組みを選びます。
 

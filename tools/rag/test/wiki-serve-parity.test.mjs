@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { chunkCorpus } from './fixtures/cli-reference/project-content.mjs';
 import { atomicWrite } from './fixtures/wiki-reference/files.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './fixtures/wiki-reference/project-wiki.mjs';
@@ -96,12 +96,12 @@ function normalizer(roots, port) {
 }
 
 test('serves the Wiki screen like the former JavaScript screen', { timeout: 300_000 }, async (t) => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'dunlin-wiki-serve-')));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'knowledge-nest-wiki-serve-')));
   const url = await model(t);
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml'), DUNLIN_TEST_SCREEN_TOKEN: 'screen-token' };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml'), KNOWLEDGE_NEST_TEST_SCREEN_TOKEN: 'screen-token' };
   await runNode(process.execPath, [cli, 'init', 'wiki', 'kb', '--purpose', '設備保全の手順'], { cwd: root, env });
   const base = join(root, 'kb');
-  const configPath = join(base, 'Dunlinfile.yaml');
+  const configPath = join(base, 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   config.models.writer.model = 'testing';
   config.models.writer.base_url = url;
@@ -120,17 +120,17 @@ test('serves the Wiki screen like the former JavaScript screen', { timeout: 300_
   // The reference screen, in this process.
   const servers = [];
   const startReference = async (settings) => {
-    const projectConfig = parse(await readFile(join(refBase, 'Dunlinfile.yaml'), 'utf8'));
-    const { plan, serveSettings } = validateWiki(projectConfig, join(refBase, 'Dunlinfile.yaml'), () => null);
-    const paths = { data: join(refBase, '.dunlin'), state: join(refBase, '.dunlin', 'state.sqlite'),
-      artifacts: join(refBase, '.dunlin', 'artifacts'), corpus: join(refBase, '.dunlin', 'corpus') };
+    const projectConfig = parse(await readFile(join(refBase, 'KnowledgeNestfile.yaml'), 'utf8'));
+    const { plan, serveSettings } = validateWiki(projectConfig, join(refBase, 'KnowledgeNestfile.yaml'), () => null);
+    const paths = { data: join(refBase, '.knowledge-nest'), state: join(refBase, '.knowledge-nest', 'state.sqlite'),
+      artifacts: join(refBase, '.knowledge-nest', 'artifacts'), corpus: join(refBase, '.knowledge-nest', 'corpus') };
     const project = { root: refBase, configRoot: refBase, config: projectConfig, paths, wikiPlan: plan, serveSettings };
     const db = new DatabaseSync(paths.state);
     db.exec('PRAGMA busy_timeout = 500');
     ensureWiki(db);
     const execute = (action, input, options = {}, id, progress) => runWiki(db, project, action, input, options, id, paths, {
       atomicWrite, warnings: [], progress,
-      open: (path, keyword) => Dunlin.open(path, { corpusBackend: 'sqlite', keywordNgrams: true, keywordBigrams: keyword.short_query === 'bigram' }),
+      open: (path, keyword) => KnowledgeNest.open(path, { corpusBackend: 'sqlite', keywordNgrams: true, keywordBigrams: keyword.short_query === 'bigram' }),
       chunk: (document) => chunkCorpus({ groups: [['docs', [document]]], unicode: 'nfkc' }, { size: 800, overlap: 100 })[0][0],
     });
     const server = await serveWiki(db, project, execute, { ...serveSettings, ...settings });
@@ -208,7 +208,7 @@ test('serves the Wiki screen like the former JavaScript screen', { timeout: 300_
   await same('empty value', (port) => form(port, { token: keys[port], action: 'query', value: ' ' }));
   await same('missing input', (port) => form(port, { token: keys[port], action: 'cite', value: '1' }));
   await same('outside file', (port) => form(port, { token: keys[port], action: 'ingress', value: '../outside.txt' }));
-  await same('hidden file', (port) => form(port, { token: keys[port], action: 'ingress', value: '.dunlin/state.sqlite' }));
+  await same('hidden file', (port) => form(port, { token: keys[port], action: 'ingress', value: '.knowledge-nest/state.sqlite' }));
   await same('folder', (port) => form(port, { token: keys[port], action: 'ingress', value: 'site' }));
   const upload = (name, content) => async (port) => {
     const data = new FormData();
@@ -239,18 +239,18 @@ test('serves the Wiki screen like the former JavaScript screen', { timeout: 300_
   await stopAll();
 
   // With a token: Basic credentials for the browser, or a bearer token.
-  for (const path of [configPath, join(refBase, 'Dunlinfile.yaml')]) {
+  for (const path of [configPath, join(refBase, 'KnowledgeNestfile.yaml')]) {
     const next = parse(await readFile(path, 'utf8'));
-    next.serve.access.auth = { type: 'token', token_env: 'DUNLIN_TEST_SCREEN_TOKEN' };
+    next.serve.access.auth = { type: 'token', token_env: 'KNOWLEDGE_NEST_TEST_SCREEN_TOKEN' };
     await writeFile(path, stringify(next));
   }
-  process.env.DUNLIN_TEST_SCREEN_TOKEN = 'screen-token';
-  t.after(() => { delete process.env.DUNLIN_TEST_SCREEN_TOKEN; });
-  [actualPort, expectedPort] = [await startActual(), await startReference({ port: 0, access: { ...config.serve.access, auth: { type: 'token', token_env: 'DUNLIN_TEST_SCREEN_TOKEN' } } })];
+  process.env.KNOWLEDGE_NEST_TEST_SCREEN_TOKEN = 'screen-token';
+  t.after(() => { delete process.env.KNOWLEDGE_NEST_TEST_SCREEN_TOKEN; });
+  [actualPort, expectedPort] = [await startActual(), await startReference({ port: 0, access: { ...config.serve.access, auth: { type: 'token', token_env: 'KNOWLEDGE_NEST_TEST_SCREEN_TOKEN' } } })];
   [actualText, expectedText] = [normalizer([base, refBase], actualPort), normalizer([refBase, base], expectedPort)];
-  const basic = 'Basic ' + Buffer.from('dunlin:screen-token').toString('base64');
+  const basic = 'Basic ' + Buffer.from('knowledge-nest:screen-token').toString('base64');
   await same('no credentials', {});
-  await same('wrong credentials', { headers: { authorization: 'Basic ' + Buffer.from('dunlin:wrong').toString('base64') } });
+  await same('wrong credentials', { headers: { authorization: 'Basic ' + Buffer.from('knowledge-nest:wrong').toString('base64') } });
   await same('other user', { headers: { authorization: 'Basic ' + Buffer.from('admin:screen-token').toString('base64') } });
   await same('basic', { headers: { authorization: basic } });
   await same('bearer', { headers: { authorization: 'Bearer screen-token' } });

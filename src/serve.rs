@@ -162,7 +162,7 @@ impl Serving {
         let Some((manifest, generation)) = row else {
             return Err(StageError::coded(
                 "BUILD_REQUIRED",
-                "No searchable build. Run dunlin build first.",
+                "No searchable build. Run knowledge-nest build first.",
                 3,
             ));
         };
@@ -219,7 +219,7 @@ impl Serving {
         {
             return Err(StageError::coded(
                 "BUILD_REQUIRED",
-                "The build index is missing. Run dunlin build first.",
+                "The build index is missing. Run knowledge-nest build first.",
                 3,
             ));
         }
@@ -421,7 +421,7 @@ impl Serving {
         let Some(model) = &self.request.model else {
             return Err(StageError::coded(
                 "MODEL_REQUIRED",
-                "Set the answer model in the Dunlinfile and restart serve.",
+                "Set the answer model in the KnowledgeNestfile and restart serve.",
                 3,
             ));
         };
@@ -799,9 +799,10 @@ impl Server {
         }
         if !authorized(header(&request, "authorization"), self.digest.as_ref()) {
             let mut reply = Reply::error(401, "AUTH_REQUIRED", "Valid authentication is required.");
-            reply
-                .headers
-                .push(("www-authenticate", r#"Bearer realm="Dunlin""#.into()));
+            reply.headers.push((
+                "www-authenticate",
+                r#"Bearer realm="Knowledge-Nest""#.into(),
+            ));
             return reply;
         }
         let limits = &self.serving.request.settings.limits;
@@ -994,7 +995,7 @@ impl Server {
             return Reply::error(
                 503,
                 "MODEL_REQUIRED",
-                "Set the answer model in the Dunlinfile and restart serve.",
+                "Set the answer model in the KnowledgeNestfile and restart serve.",
             );
         };
         if requested.is_some_and(|requested| requested != model.model) {
@@ -1144,7 +1145,7 @@ impl Server {
                     .filter(|version| SUPPORTED.contains(version))
                     .unwrap_or(SUPPORTED[0]);
                 Ok(format!(
-                    r#"{{"protocolVersion":"{version}","capabilities":{{"tools":{{"listChanged":true}}}},"serverInfo":{{"name":"dunlin","version":"{}"}}}}"#,
+                    r#"{{"protocolVersion":"{version}","capabilities":{{"tools":{{"listChanged":true}}}},"serverInfo":{{"name":"knowledge-nest","version":"{}"}}}}"#,
                     env!("CARGO_PKG_VERSION")
                 ))
             }

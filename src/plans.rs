@@ -110,7 +110,7 @@ impl PlanStore {
         let _file_lock = self
             .directory
             .acquire_lock(&Lock {
-                filepath: ".dunlin-plan.lock".into(),
+                filepath: ".knowledge-nest-plan.lock".into(),
                 is_blocking: false,
             })
             .map_err(|error| match error {

@@ -45,10 +45,10 @@ pub struct LoadRequest {
     /// `oar-ocr`, read here, or `lightonocr`, read by the host.
     #[serde(default = "lightonocr")]
     pub ocr_tool: String,
-    /// The folder `dunlin add oar-ocr` prepared.
+    /// The folder `knowledge-nest add oar-ocr` prepared.
     #[serde(default)]
     pub ocr_home: Option<String>,
-    /// The runtime `dunlin add lightonocr` prepared, or none when it is not prepared.
+    /// The runtime `knowledge-nest add lightonocr` prepared, or none when it is not prepared.
     #[serde(default)]
     pub lighton: Option<crate::lighton::Lighton>,
     /// The project root, where external commands run.
@@ -577,7 +577,7 @@ fn load_one(
         let home = request
             .ocr_home
             .as_deref()
-            .ok_or("oar-ocr is not prepared. Run dunlin add ocr.")?;
+            .ok_or("oar-ocr is not prepared. Run knowledge-nest add ocr.")?;
         let version = request
             .ocr_version
             .strip_prefix("oar-ocr@")

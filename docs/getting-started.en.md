@@ -15,7 +15,7 @@ If you already know what you want to build, start at its section. If you are uns
 
 ## 1 What you need
 
-- Dunlin installed. For now it is built from source; see [Install in the README](../README.en.md#install). You are ready when `dunlin --help` prints.
+- Knowledge-Nest installed. For now it is built from source; see [Install in the README](../README.en.md#install). You are ready when `knowledge-nest --help` prints.
 - A folder of documents. This page uses [examples/manuals](../examples/manuals/maintenance.md), which ships with the repository: a short Markdown file on pump maintenance (in Japanese).
 
 Start the commands from the root of the repository.
@@ -23,24 +23,24 @@ Start the commands from the root of the repository.
 ## 2 Let an agent search your documents
 
 ```sh
-dunlin init mcp ./kb --source ./examples/manuals
+knowledge-nest init mcp ./kb --source ./examples/manuals
 cd kb
-dunlin build
-dunlin search "ポンプの点検はいつ実施しますか"
+knowledge-nest build
+knowledge-nest search "ポンプの点検はいつ実施しますか"
 ```
 
 ("When is the pump inspected?") It worked if the result shows "ポンプの点検は毎月最初の営業日に行う。" (the pump is inspected on the first business day of every month) with its source.
 
 | Command | What happens |
 |---|---|
-| `init mcp ./kb --source ...` | Makes a project in `./kb`. The settings are written to `Dunlinfile.yaml` |
+| `init mcp ./kb --source ...` | Makes a project in `./kb`. The settings are written to `KnowledgeNestfile.yaml` |
 | `build` | Reads the documents, splits them into units of search (chunks), and builds a keyword index |
 | `search` | Searches with a plain sentence and shows results with sources |
 
 Now connect an agent:
 
 ```sh
-dunlin serve --print-config
+knowledge-nest serve --print-config
 ```
 
 Paste the `mcpServers` entry it prints into your MCP client's settings (`claude_desktop_config.json` for Claude Desktop, `.mcp.json` for Claude Code, and so on). Restart the client and ask:
@@ -54,41 +54,41 @@ Claude   On the first business day of every month. Before inspecting, stop the p
 
 (The exchange is an illustration; the wording depends on the agent.)
 
-The agent finds passages with Dunlin's `knowledge.search` and reads the original with `knowledge.read`. The agent's own model writes the answer, so Dunlin needs no model.
+The agent finds passages with Knowledge-Nest's `knowledge.search` and reads the original with `knowledge.read`. The agent's own model writes the answer, so Knowledge-Nest needs no model.
 
-If `build` stops because some files are not supported, check the list. If they can be skipped, run `dunlin build --skip-unsupported`.
+If `build` stops because some files are not supported, check the list. If they can be skipped, run `knowledge-nest build --skip-unsupported`.
 
 ## 3 Update the documents
 
-After adding or editing documents, run `dunlin build` again.
+After adding or editing documents, run `knowledge-nest build` again.
 
 - Only the changed documents are processed.
 - A running `serve` uses the new index from the next question. There is no need to stop it.
-- To see what would change first, run `dunlin build --dry-run`.
+- To see what would change first, run `knowledge-nest build --dry-run`.
 
 ## 4 What was made
 
-`Dunlinfile.yaml` in `kb` describes what Dunlin does and how.
+`KnowledgeNestfile.yaml` in `kb` describes what Knowledge-Nest does and how.
 
 ```text
 document folder → extracted text → chunks → index → search
    (source)          (source)     (transform) (index) (search)
 ```
 
-To change the chunk size, read PDFs, and so on, edit this file. `dunlin validate` checks it before you run, and `dunlin modules list` shows the parts you can use. [Dunlinfile defaults](config.md) (Japanese)
+To change the chunk size, read PDFs, and so on, edit this file. `knowledge-nest validate` checks it before you run, and `knowledge-nest modules list` shows the parts you can use. [KnowledgeNestfile defaults](config.md) (Japanese)
 
 ## 5 Return answers to your app (RAG)
 
-With MCP, the agent wrote the answer. With RAG, Dunlin calls a model and writes the answer, with sources, itself. The difference is explained in the [README](../README.en.md#how-mcp-and-rag-differ).
+With MCP, the agent wrote the answer. With RAG, Knowledge-Nest calls a model and writes the answer, with sources, itself. The difference is explained in the [README](../README.en.md#how-mcp-and-rag-differ).
 
 Here a running Ollama with `qwen3:4b` is used. Start from the root of the repository.
 
 ```sh
-dunlin init rag ./rag --source ./examples/manuals --llm-provider ollama --llm-model qwen3:4b
+knowledge-nest init rag ./rag --source ./examples/manuals --llm-provider ollama --llm-model qwen3:4b
 cd rag
-dunlin build
-dunlin ask "ポンプの点検はいつ実施しますか"
-dunlin serve
+knowledge-nest build
+knowledge-nest ask "ポンプの点検はいつ実施しますか"
+knowledge-nest serve
 ```
 
 `ask` numbers the sources in its answer and shows the file and lines of each. `serve` offers answers (`/v1/responses`), search (`/v1/search`), and MCP (`/mcp`) on `127.0.0.1:4318`. With the OpenAI SDK, set `baseURL` to `http://127.0.0.1:4318/v1` and call it. [MCP and RAG](mcp.md) (Japanese)
@@ -98,24 +98,24 @@ dunlin serve
 In a Wiki, an AI reads your documents and writes pages with citations. PARA works the same way and sorts notes into Projects, Areas, Resources, and Archives. The model is the same as for RAG. If `serve` is running, stop it, and start from the root of the repository.
 
 ```sh
-dunlin init wiki ./wiki --purpose "Summarize pump maintenance procedures" --llm-provider ollama --llm-model qwen3:4b
+knowledge-nest init wiki ./wiki --purpose "Summarize pump maintenance procedures" --llm-provider ollama --llm-model qwen3:4b
 cd wiki
-dunlin ingress ../examples/manuals
-dunlin serve
+knowledge-nest ingress ../examples/manuals
+knowledge-nest serve
 ```
 
 Open `http://127.0.0.1:4319` in a browser: documents and pages on the left, text and sources in the middle, questions and actions on the right. For PARA, read `init para ./para` instead.
 
 - Every sentence on a page carries a citation to the source. A sentence whose citation does not match the source word for word is not saved.
-- Originals are never rewritten. Every change is recorded as a job, and `dunlin undo <job-id>` takes it back.
-- `dunlin verify` checks citations and links; `dunlin verify --content` checks for contradictions between pages.
-- Ask with `dunlin query`, change a page with `dunlin instruct`, check a citation with `dunlin cite`.
+- Originals are never rewritten. Every change is recorded as a job, and `knowledge-nest undo <job-id>` takes it back.
+- `knowledge-nest verify` checks citations and links; `knowledge-nest verify --content` checks for contradictions between pages.
+- Ask with `knowledge-nest query`, change a page with `knowledge-nest instruct`, check a citation with `knowledge-nest cite`.
 
 [Wiki and PARA](wiki.md) (Japanese)
 
 ## 7 Next: keep versions and measure by numbers (new commands)
 
-From here on are the new commands, still in development. They keep what Dunlin makes as versions and measure, as a number, how well search finds the answers. For now they support text and Markdown with keyword search, and `serve` does not yet serve their indexes.
+From here on are the new commands, still in development. They keep what Knowledge-Nest makes as versions and measure, as a number, how well search finds the answers. For now they support text and Markdown with keyword search, and `serve` does not yet serve their indexes.
 
 ### Write the configuration and build
 
@@ -128,7 +128,7 @@ mkdir docs
 cp ../examples/manuals/*.md docs/
 ```
 
-Create `Dunlinfile.yaml`. Each section (`extract`, `transform`, `index`) lists its steps from top to bottom, and the last `tag` names the result.
+Create `KnowledgeNestfile.yaml`. Each section (`extract`, `transform`, `index`) lists its steps from top to bottom, and the last `tag` names the result.
 
 ```yaml
 extract:
@@ -149,9 +149,9 @@ search:
 ```
 
 ```sh
-dunlin build
-dunlin search "ポンプの点検はいつ実施しますか"
-dunlin list
+knowledge-nest build
+knowledge-nest search "ポンプの点検はいつ実施しますか"
+knowledge-nest list
 ```
 
 `build` shows which sections ran and what changed among the documents. Run `build` again with nothing changed and it prints `Nothing ran: every result was there already.` and rebuilds nothing. `list` shows the named versions: documents, chunks, indexes, evaluation data, and evaluation results.
@@ -188,8 +188,8 @@ eval:
 ```
 
 ```sh
-dunlin eval-data import cases.json
-dunlin eval
+knowledge-nest eval-data import cases.json
+knowledge-nest eval
 ```
 
 ```text
@@ -204,8 +204,8 @@ Add `--json` to a failed command to see `code` and `message` under `errors`.
 
 | Symptom | What to do |
 |---|---|
-| `dunlin` is not found | Run `npm link` and add the folder from `npm prefix -g` to `PATH` |
-| `PROJECT_REQUIRED` | Run in the folder with `Dunlinfile.yaml`, or add `--project <directory>` |
+| `knowledge-nest` is not found | Run `npm link` and add the folder from `npm prefix -g` to `PATH` |
+| `PROJECT_REQUIRED` | Run in the folder with `KnowledgeNestfile.yaml`, or add `--project <directory>` |
 | `SOURCE_MISSING` | Check that `--source`, or `path` of `source.filesystem`, points at a folder that exists |
 | `MODEL_REQUIRED`, or the model cannot be reached | Check that Ollama is running and the model has been pulled |
 | `... is not on the new store yet.` | That module is not in the new commands yet. Use it in the form `init` writes ([appendix](#appendix-the-two-forms-of-configuration)) |
@@ -225,8 +225,8 @@ The search commands (`mcp` and `rag`) pick their mechanism by the form of the co
 
 | Form of the file | Example | Mechanism | Commands |
 |---|---|---|---|
-| The `modules:` and `use:` form | What `dunlin init mcp` and `init rag` write (sections 2–5) | The earlier builds | `build`, `search`, `eval`, `eval-data`, `source`, `transform`, `index`, `status`, `use`, `tag`, `serve`, `ask` |
-| Sections as lists of steps (`- source.filesystem: ...` under `extract:`) | The file in section 7 | The versioned store (`.dunlin/store`) | `build`, `search`, `eval`, `eval-data import`, `list`, `results`, `optimize`, `release` |
+| The `modules:` and `use:` form | What `knowledge-nest init mcp` and `init rag` write (sections 2–5) | The earlier builds | `build`, `search`, `eval`, `eval-data`, `source`, `transform`, `index`, `status`, `use`, `tag`, `serve`, `ask` |
+| Sections as lists of steps (`- source.filesystem: ...` under `extract:`) | The file in section 7 | The versioned store (`.knowledge-nest/store`) | `build`, `search`, `eval`, `eval-data import`, `list`, `results`, `optimize`, `release` |
 
 | Feature | The form `init` writes | Lists of steps |
 |---|---|---|

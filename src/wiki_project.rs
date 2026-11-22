@@ -1159,7 +1159,7 @@ fn original_reference(archive: &str, digest: &str, name: &str) -> ConfigValue {
         ("sha256", text(digest)),
         (
             "uri",
-            text(&format!("dunlin://original/{archive}/{digest}")),
+            text(&format!("knowledge-nest://original/{archive}/{digest}")),
         ),
     ])
 }

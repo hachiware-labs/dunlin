@@ -31,7 +31,7 @@ pub struct OptimizeRequest<'a> {
     /// The instruction, as YAML.
     pub instruction: &'a str,
     /// The folder of the project: the base configuration is read from it, and the files of the
-    /// trials are written below `.dunlin/trials` in it.
+    /// trials are written below `.knowledge-nest/trials` in it.
     pub project: &'a Path,
     /// Where the directories of indexes are made.
     pub indexes: &'a Path,
@@ -606,7 +606,7 @@ pub fn optimize(store: &Store, request: &OptimizeRequest<'_>) -> StoreResult<Opt
 
     // The base is always tried, and first, so that what a trial is compared with is measured
     // the same way.
-    let folder = format!(".dunlin/trials/{}", request.name);
+    let folder = format!(".knowledge-nest/trials/{}", request.name);
     let mut candidates = Vec::new();
     let mut chosen: Vec<Vec<usize>> = vec![Vec::new()];
     chosen.extend(combinations(&instruction.axes));

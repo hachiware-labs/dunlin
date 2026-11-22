@@ -1,8 +1,8 @@
-# Dunlin 設計仕様 統合版
+# Knowledge-Nest 設計仕様 統合版
 
 Nov 14, 2026 · @北田成秀
 
-Dunlin は、ひとつ入れるだけで手元の資料からすぐに立ち上げられるナレッジ基盤である。本書は、RAG/MCP側とLLM Wiki/PARA側の2系統について、これまでの検討で決めたコマンド体系と動作をひとつにまとめる。
+Knowledge-Nest は、ひとつ入れるだけで手元の資料からすぐに立ち上げられるナレッジ基盤である。本書は、RAG/MCP側とLLM Wiki/PARA側の2系統について、これまでの検討で決めたコマンド体系と動作をひとつにまとめる。
 
 ## 1 この文書について
 
@@ -34,7 +34,7 @@ Dunlin は、ひとつ入れるだけで手元の資料からすぐに立ち上�
 
 | 軸 | 内容 | 設計に課される条件 |
 | --- | --- | --- |
-| 最速で構築できる | Dunlin は最速で構築できるナレッジ基盤である | 設定を書かなくても、資料を指定するだけで検索まで届く。3コマンドで到達できる |
+| 最速で構築できる | Knowledge-Nest は最速で構築できるナレッジ基盤である | 設定を書かなくても、資料を指定するだけで検索まで届く。3コマンドで到達できる |
 | 入れれば解決 | 他の道具をいくつも入れさせない。MCPとRAGを提供し、LLM WikiとPARAも支える | 1つのパッケージで完結する。別のデータベースや検索サーバーを立てさせない |
 | 評価・改善・文書更新まで | RAG/MCPは、評価、改善、文書更新までを設定ファイルで支える | 検索の品質を測り、設定を変えて比べ、文書の変更に追従できる。これらを宣言的な設定で扱う |
 
@@ -42,7 +42,7 @@ Dunlin は、ひとつ入れるだけで手元の資料からすぐに立ち上�
 
 - **速さは測れる形で約束する**: 「インストールから検索まで数分、3コマンド」を受け入れ条件にする。
 - **本体は軽く、重い機能は後付け**: キーワード検索は標準構成だけで動く。OCR、埋め込み、再ランク付けは設定したときだけ使う。
-- **違いは3つ目の軸が担う**: 1コマンドで検索を立てる道具は多い。立ち上げた後も測って良くし続けられることが、Dunlin の特徴である。
+- **違いは3つ目の軸が担う**: 1コマンドで検索を立てる道具は多い。立ち上げた後も測って良くし続けられることが、Knowledge-Nest の特徴である。
 - **対象は手元の資料**: 個人、小さなチーム、エージェントが手元で使う道具であり、大規模な分散検索サービスではない。
 
 ### 前提とする実装方針
@@ -50,13 +50,13 @@ Dunlin は、ひとつ入れるだけで手元の資料からすぐに立ち上�
 設計方針で採用済みの次の点を前提とする。
 
 - 標準構成を1つの npm パッケージで提供する。中核は Rust の単一 crate で実装し、Node.js との接続は NAPI-RS を第一候補とする。
-- 設定ファイルは `Dunlinfile.yaml` とする。
+- 設定ファイルは `KnowledgeNestfile.yaml` とする。
 - 共通機能はライブラリAPIに置き、CLI、MCP、画面は薄い層とする。
 - 人とコーディングエージェントの両方を操作者とし、すべての操作に非対話の経路を用意する。
 
 ## 3 全体構成
 
-Dunlin は、取り込みの入り口から分かれた2つの系統で構成する。系統は `init` で選び、作業ディレクトリも系統ごとに分ける。
+Knowledge-Nest は、取り込みの入り口から分かれた2つの系統で構成する。系統は `init` で選び、作業ディレクトリも系統ごとに分ける。
 
 &#91;embedded content: 全体構成 · 2系統と共有する内部部品\]
 
@@ -71,7 +71,7 @@ Dunlin は、取り込みの入り口から分かれた2つの系統で構成す
 | 確かめる | `eval-data` → `eval` | `verify` |
 | 整理する | なし | `archive` |
 | 提供する | `serve`（MCPサーバー） | `serve`（ブラウザ向けの画面） |
-| 書き手 | Dunlin（決定的な処理） | AI（設定したモデル） |
+| 書き手 | Knowledge-Nest（決定的な処理） | AI（設定したモデル） |
 | 調整するもの | チャンク、索引、検索方式 | 目的と範囲、運用の決まり |
 | 評価 | あり | なし |
 
@@ -99,28 +99,28 @@ Dunlin は、取り込みの入り口から分かれた2つの系統で構成す
 ### 4.1 初期化と作業ディレクトリ
 
 ```bash
-dunlin init mcp ./kb --source ~/manuals
-dunlin init rag ./qa --source ~/manuals
-dunlin init wiki ./wiki
-dunlin init para ./notes
+knowledge-nest init mcp ./kb --source ~/manuals
+knowledge-nest init rag ./qa --source ~/manuals
+knowledge-nest init wiki ./wiki
+knowledge-nest init para ./notes
 ```
 
 種別は4つあり、それぞれ「引く」ためのコマンドが決まっている。
 
 | 種別 | 系統 | 引くコマンド | 返すもの | モデル | 生成される初期設定 |
 | --- | --- | --- | --- | --- | --- |
-| `mcp` | RAG/MCP側 | `search` | 根拠となる文脈と出典 | 不要 | [MCP の YAML](#mcp-の-dunlinfileyaml) |
-| `rag` | RAG/MCP側 | `ask` | 回答の文章と出典 | 回答用のモデルが必要 | [RAG の YAML](#rag-の-dunlinfileyaml) |
-| `wiki` | LLM Wiki/PARA側 | `query` | ページに基づく回答と出典 | 執筆用のモデルが必要 | [Wiki の YAML](#wiki-の-dunlinfileyaml) |
-| `para` | LLM Wiki/PARA側 | `query` | ノートに基づく回答と出典 | 執筆用のモデルが必要 | [PARA の YAML](#para-の-dunlinfileyaml) |
+| `mcp` | RAG/MCP側 | `search` | 根拠となる文脈と出典 | 不要 | [MCP の YAML](#mcp-の-knowledgenestfileyaml) |
+| `rag` | RAG/MCP側 | `ask` | 回答の文章と出典 | 回答用のモデルが必要 | [RAG の YAML](#rag-の-knowledgenestfileyaml) |
+| `wiki` | LLM Wiki/PARA側 | `query` | ページに基づく回答と出典 | 執筆用のモデルが必要 | [Wiki の YAML](#wiki-の-knowledgenestfileyaml) |
+| `para` | LLM Wiki/PARA側 | `query` | ノートに基づく回答と出典 | 執筆用のモデルが必要 | [PARA の YAML](#para-の-knowledgenestfileyaml) |
 
-`mcp` と `rag` は、構築から評価までの仕組みを共有する。違いは、回答を作るのが誰かである。`mcp` では根拠を受け取ったエージェントが回答を作り、`rag` では Dunlin が回答を作る。`rag` は `mcp` の設定に回答生成の区切りを足したものなので、`mcp` で始めて後から `rag` に広げられる。
+`mcp` と `rag` は、構築から評価までの仕組みを共有する。違いは、回答を作るのが誰かである。`mcp` では根拠を受け取ったエージェントが回答を作り、`rag` では Knowledge-Nest が回答を作る。`rag` は `mcp` の設定に回答生成の区切りを足したものなので、`mcp` で始めて後から `rag` に広げられる。
 
 - `init` で系統を選ぶ。選んだ種別は設定ファイルに記録され、そのディレクトリで使えるサブコマンドが決まる。
 - 作業ディレクトリは系統ごとに分ける。同じディレクトリで両方の系統のコマンドを使うことはない。
 - `serve` は両側にあるが、意味は種別で変わる。RAG/MCP側はMCPサーバー、Wiki/PARA側はブラウザ向けの画面である。異なる系統のコマンドを実行した場合は、種別が違うことを表示して終了する。
 - 初期化は、モデルのダウンロード、外部APIの呼び出し、構築を行わない。既存のプロジェクトや同名ファイルを上書きしない。
-- コマンドは、現在のディレクトリから親方向に `Dunlinfile.yaml` を探してプロジェクトを特定する。別の場所からは `--project <dir>` で指定する。
+- コマンドは、現在のディレクトリから親方向に `KnowledgeNestfile.yaml` を探してプロジェクトを特定する。別の場所からは `--project <dir>` で指定する。
 
 #### 初期化時のモデル指定
 
@@ -131,12 +131,12 @@ dunlin init para ./notes
 | 埋め込み | `--embedding-model <name>`、`--embedding-provider <provider>` | `mcp`、`rag` | `ollama`、`openai` |
 | 回答・執筆 | `--llm-model <name>`、`--llm-provider <provider>` | `rag`、`wiki`、`para` | `ollama`、`openai`、`strata` |
 
-頻繁に使う組み合わせは `dunlin config set <embedding|llm> --provider <provider> --model <name>` でユーザーごとに保存する。`dunlin config list` で確認し、`dunlin config unset <embedding|llm>` で解除する。保存先は `~/.dunlin/config.yaml` とし、`DUNLIN_GLOBAL_CONFIG` で変更できる。
+頻繁に使う組み合わせは `knowledge-nest config set <embedding|llm> --provider <provider> --model <name>` でユーザーごとに保存する。`knowledge-nest config list` で確認し、`knowledge-nest config unset <embedding|llm>` で解除する。保存先は `~/.knowledge-nest/config.yaml` とし、`KNOWLEDGE_NEST_GLOBAL_CONFIG` で変更できる。
 
 - `init mcp` は埋め込みを明示した場合にモデルを設定する。RAG は `init` の指定、ユーザー設定、標準値の順に優先する。プロバイダーを変えた場合、以前のプロバイダーのモデル名は引き継がない。
 - `--no-embedding`、`--no-llm` で、それぞれのユーザー設定をその初期化だけ適用しない。同じ用途のモデル・プロバイダー指定との併用はエラーにする。
 - プロバイダーの標準値は Ollama。OpenAI を選ぶと、認証用の環境変数名 `OPENAI_API_KEY` を生成する設定に書く。キー本体は保存しない。
-- モデルの設定と、必要なモジュール・引数を `Dunlinfile.yaml` に書く。以後の実行は、そのプロジェクトの設定を使う。ユーザー設定の変更は次回以降の初期化に適用する。
+- モデルの設定と、必要なモジュール・引数を `KnowledgeNestfile.yaml` に書く。以後の実行は、そのプロジェクトの設定を使う。ユーザー設定の変更は次回以降の初期化に適用する。
 
 #### 初期化時の OCR 指定
 
@@ -147,24 +147,24 @@ OCR の実行方式は次の2つから選ぶ。
 | `oar-ocr`（標準） | PaddleOCR のモデルを ONNX Runtime で動かす。Rust から直接呼ぶ | GPU のない環境を含む、すべての環境 |
 | `lightonocr` | LightOnOCR の視覚言語モデルを、管理された Python の実行環境で動かす。Rust から別プロセスとして起動する | GPU があり、精度を優先する環境 |
 
-`dunlin config set ocr` で OCR をユーザー設定に登録する。`--tool oar-ocr` または `--tool lightonocr` で方式を選ぶ。`--tool` を省いた場合は `oar-ocr` を登録する。以前に登録した `tool: lightonocr` はそのまま有効である。`dunlin config list` で確認し、`dunlin config unset ocr` で解除する。登録内容はモデルの既定値と同じ `~/.dunlin/config.yaml` に保存する。
+`knowledge-nest config set ocr` で OCR をユーザー設定に登録する。`--tool oar-ocr` または `--tool lightonocr` で方式を選ぶ。`--tool` を省いた場合は `oar-ocr` を登録する。以前に登録した `tool: lightonocr` はそのまま有効である。`knowledge-nest config list` で確認し、`knowledge-nest config unset ocr` で解除する。登録内容はモデルの既定値と同じ `~/.knowledge-nest/config.yaml` に保存する。
 
 `init mcp` は `--ocr` を明示すると OCR を有効にする。ほかの種別は `init` のオプション、ユーザー設定、組み込みの既定値（無効）の順で優先する。`init --ocr-tool <oar-ocr|lightonocr>` で、その初期化に限って方式を選べる。方式は `--ocr-tool`、ユーザー設定、`oar-ocr` の順で決める。
 
-OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に選んだ方式の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `dunlin add ocr` を実行して準備する。`dunlin add ocr` は、`tools` に記録された方式を準備し、記録がなければ `oar-ocr` を準備して記録する。
+OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に選んだ方式の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `knowledge-nest add ocr` を実行して準備する。`knowledge-nest add ocr` は、`tools` に記録された方式を準備し、記録がなければ `oar-ocr` を準備して記録する。
 
 - PDF のテキスト層は先に読み、テキスト層のないページと画像だけを OCR にかける。テキスト層は `pdf_oxide` で読み、テキスト層のないページも `pdf_oxide` で長辺 1540 ピクセルの画像にしてから OCR にかける。
 - 1つのプロジェクトで使う OCR は1つとする。`tools` に2つの方式を書いた場合は検証エラーにする。
-- 方式を切り替えるには、`dunlin remove` で今の方式を外し、`dunlin add` で別の方式を足してから `dunlin build` を実行する。抽出結果の再利用のキーには方式と版を含めるので、OCR にかけた文書だけが読み直される。
+- 方式を切り替えるには、`knowledge-nest remove` で今の方式を外し、`knowledge-nest add` で別の方式を足してから `knowledge-nest build` を実行する。抽出結果の再利用のキーには方式と版を含めるので、OCR にかけた文書だけが読み直される。
 - 以前のプロジェクトの `tools` にある `name: ocr` は、`lightonocr` の旧名として読む。
 
 #### 初期化で作成する項目
 
 | 作成物 | 内容 |
 | --- | --- |
-| `Dunlinfile.yaml` | 編集可能な設定の正本 |
-| `.dunlin/state.sqlite` | データ、設定の記録、派生成果物、実行履歴、タグ |
-| `.dunlin/artifacts/` | 原本キャッシュ、大きなバイナリ、索引ファイル |
+| `KnowledgeNestfile.yaml` | 編集可能な設定の正本 |
+| `.knowledge-nest/state.sqlite` | データ、設定の記録、派生成果物、実行履歴、タグ |
+| `.knowledge-nest/artifacts/` | 原本キャッシュ、大きなバイナリ、索引ファイル |
 | `.gitignore` | DB、キャッシュ、秘密情報のファイルを既定で除外 |
 
 ### 4.2 設定ファイルの方針
@@ -203,7 +203,7 @@ OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `
 
 **標準構成が新しくなったとき**
 
-設定にすべて書いてあるので、Dunlin を更新しても挙動は黙って変わらない。その代わり、標準構成の改善は既存のプロジェクトに届かない。自分の設定と現在の標準構成の差分を表示し、選んで取り込める操作を用意する。変えるかどうかは利用者が選ぶ。
+設定にすべて書いてあるので、Knowledge-Nest を更新しても挙動は黙って変わらない。その代わり、標準構成の改善は既存のプロジェクトに届かない。自分の設定と現在の標準構成の差分を表示し、選んで取り込める操作を用意する。変えるかどうかは利用者が選ぶ。
 
 設定の例は、RAG/MCP側を5.5節、Wiki/PARA側を13.5節に示す。
 
@@ -259,12 +259,12 @@ RAG/MCP側は「作る」「測る」「採用する」の3つのフェーズに
 ### 5.1 最短経路
 
 ```bash
-npm install -g dunlin
-dunlin init mcp ./kb --source ~/manuals
+npm install -g knowledge-nest
+knowledge-nest init mcp ./kb --source ~/manuals
 cd kb
-dunlin build
-dunlin search "手順"
-dunlin serve
+knowledge-nest build
+knowledge-nest search "手順"
+knowledge-nest serve
 ```
 
 `init`、`build`、`search` の3コマンドで検索に到達する。評価データやLLMの設定がなくても、キーワード検索とMCPでの提供まで動く。
@@ -304,21 +304,21 @@ dunlin serve
 
 ### 5.5 設定ファイルの例
 
-次の2例は、グローバル設定にモデルと OCR の登録がなく、`init` に追加のオプションを渡さない場合に生成する `Dunlinfile.yaml` の全文である。入力ディレクトリの既定は `./docs`。`--source` を指定すると、`source.filesystem` の `with.path` にプロジェクトから見た指定先のパスが入る。
+次の2例は、グローバル設定にモデルと OCR の登録がなく、`init` に追加のオプションを渡さない場合に生成する `KnowledgeNestfile.yaml` の全文である。入力ディレクトリの既定は `./docs`。`--source` を指定すると、`source.filesystem` の `with.path` にプロジェクトから見た指定先のパスが入る。
 
 標準の `search` は、Lindera + IPADIC で分かち書きし、Tantivy の BM25 でキーワード検索する。MCP は `serve` で stdio を使う。RAG は `ask` と HTTP の `serve` を備え、回答を生成するには `models.answerer.model` にモデル名を設定する。検索はモデル名が `null` のまま使える。 [HTTP の提供設定](#273-種別-rag-の-serve)
 
 `--embedding-model` または RAG のグローバル設定で埋め込みモデルを指定すると、`models.embedder` と `index.vector` が加わる。`search` には `retrieval.vector`（`top_k: 10`）と `fusion.rrf`（`k: 60`）が加わり、キーワードとベクトルを組み合わせて検索する。 [初期化時のモデル指定](#初期化時のモデル指定)
 
-#### MCP の Dunlinfile.yaml
+#### MCP の KnowledgeNestfile.yaml
 
-`dunlin init mcp ./mcp`
+`knowledge-nest init mcp ./mcp`
 
 ```yaml
 init:
   version: 1
   type: mcp
-# Additional parser: loader.ocr (requires dunlin add ocr).
+# Additional parser: loader.ocr (requires knowledge-nest add ocr).
 # Scan and extract documents. Optional OCR requires a loader.ocr module.
 source:
   modules:
@@ -373,15 +373,15 @@ serve:
   transport: stdio
 ```
 
-#### RAG の Dunlinfile.yaml
+#### RAG の KnowledgeNestfile.yaml
 
-`dunlin init rag ./rag`
+`knowledge-nest init rag ./rag`
 
 ```yaml
 init:
   version: 1
   type: rag
-# Additional parser: loader.ocr (requires dunlin add ocr).
+# Additional parser: loader.ocr (requires knowledge-nest add ocr).
 # Scan and extract documents. Optional OCR requires a loader.ocr module.
 source:
   modules:
@@ -516,13 +516,13 @@ eval:
 ### 6.2 build
 
 ```bash
-dunlin build
-dunlin build --dry-run
-dunlin build --from transform
-dunlin build --until transform
-dunlin build --force
-dunlin build --skip-unsupported
-dunlin build --from transform --config candidates/trial-3.yaml --tag trial-3
+knowledge-nest build
+knowledge-nest build --dry-run
+knowledge-nest build --from transform
+knowledge-nest build --until transform
+knowledge-nest build --force
+knowledge-nest build --skip-unsupported
+knowledge-nest build --from transform --config candidates/trial-3.yaml --tag trial-3
 ```
 
 | 指定 | 動作 |
@@ -673,8 +673,8 @@ source:
 #### 再利用と検証
 
 - 工程キー（7.1）には、モジュール名と出力互換性バージョン、影響が「結果」の引数、`version` か `version_command` の出力、原本の内容ハッシュを入れる。`timeout_ms` と `concurrency` を変えても抽出はやり直さない。
-- `version` も `version_command` もない場合は、外部ツールを更新しても検出できない。`dunlin validate` で警告し、更新したときは `build --force` で作り直すよう案内する。
-- `dunlin validate` は次を検査する。
+- `version` も `version_command` もない場合は、外部ツールを更新しても検出できない。`knowledge-nest validate` で警告し、更新したときは `build --force` で作り直すよう案内する。
+- `knowledge-nest validate` は次を検査する。
   - `command` の実行ファイルが見つかること
   - 置き換え記号が正しく、`input` の指定と矛盾しないこと
   - `version` と `version_command` を同時に指定していないこと
@@ -933,12 +933,12 @@ source:
 評価は、指定したビルドと検索設定に対して、評価データの根拠をどれだけ拾えたかを測る。結果は上書きしない実行記録として残す。
 
 ```bash
-dunlin eval
-dunlin eval --build trial-3 --tag trial-3
-dunlin eval --build trial-3 --split test --tag trial-3-test
-dunlin report show trial-3
-dunlin report list
-dunlin report compare baseline trial-3
+knowledge-nest eval
+knowledge-nest eval --build trial-3 --tag trial-3
+knowledge-nest eval --build trial-3 --split test --tag trial-3-test
+knowledge-nest report show trial-3
+knowledge-nest report list
+knowledge-nest report compare baseline trial-3
 ```
 
 ### 10.1 実行の規則
@@ -1013,16 +1013,16 @@ dunlin report compare baseline trial-3
 
 ## 11 試行、採用、外部エージェントによる最適化
 
-設定違いの試行は、設定ファイルを少し変え、途中の段階から構築し直し、評価して比べる繰り返しで行う。探索の判断は外部エージェント（または人）が担い、Dunlin は実行と測定を担う。
+設定違いの試行は、設定ファイルを少し変え、途中の段階から構築し直し、評価して比べる繰り返しで行う。探索の判断は外部エージェント（または人）が担い、Knowledge-Nest は実行と測定を担う。
 
 ### 11.1 繰り返しの流れ
 
 ```bash
 # 候補の設定ファイルを作る（本体の設定はそのまま）
-dunlin validate --config candidates/trial-3.yaml --json
-dunlin build --from transform --config candidates/trial-3.yaml --tag trial-3 --json
-dunlin eval --build trial-3 --tag trial-3 --json
-dunlin report compare baseline trial-3 --json
+knowledge-nest validate --config candidates/trial-3.yaml --json
+knowledge-nest build --from transform --config candidates/trial-3.yaml --tag trial-3 --json
+knowledge-nest eval --build trial-3 --tag trial-3 --json
+knowledge-nest report compare baseline trial-3 --json
 ```
 
 1. 評価レポートを読み、品質や速度の弱点を特定する。
@@ -1038,17 +1038,17 @@ dunlin report compare baseline trial-3 --json
 `candidates/dict.yaml` は基準の設定から作った候補設定とする。相対パスは候補設定の位置に合わせる。`selected.csv` は利用者が選んだ辞書の行、`BASELINE_BUILD_ID` は `report show dict-baseline` に表示されるビルド ID とする。
 
 ```bash
-dunlin eval --tag dict-baseline
-dunlin dictionary suggest --report dict-baseline
-dunlin dictionary add selected.csv --config candidates/dict.yaml
-dunlin build --from index --input BASELINE_BUILD_ID --config candidates/dict.yaml --tag dict
-dunlin eval --build dict --tag dict-eval
-dunlin report compare dict-baseline dict-eval
+knowledge-nest eval --tag dict-baseline
+knowledge-nest dictionary suggest --report dict-baseline
+knowledge-nest dictionary add selected.csv --config candidates/dict.yaml
+knowledge-nest build --from index --input BASELINE_BUILD_ID --config candidates/dict.yaml --tag dict
+knowledge-nest eval --build dict --tag dict-eval
+knowledge-nest report compare dict-baseline dict-eval
 ```
 
 - 辞書の変更は索引段階に反映する。`--from index --input` で、基準ビルドに保存された抽出とチャンク化の結果を再利用する。比較する評価データ、検索設定、評価方法はそろえる。
 - `report compare` では、質問ごとに根拠回収率の変化を示し、回収できるようになった質問、悪化した質問、未回収が残った質問を確認できるようにする。候補ごとに生成した2つの問い合わせでも、基準と試行を `search --build <ref> --json` で指定し、同じ検索件数で根拠を含む結果の `rank` を見比べる。上位に現れなければ「上位 k 件に含まれない」と記録する。
-- 根拠の回収と部分語での検索への影響を確認したうえで、11.3節の手順に沿って `dunlin use dict` で採用する。
+- 根拠の回収と部分語での検索への影響を確認したうえで、11.3節の手順に沿って `knowledge-nest use dict` で採用する。
 
 ### 11.2 試行は提供内容を変えない
 
@@ -1066,9 +1066,9 @@ dunlin report compare dict-baseline dict-eval
 ### 11.3 採用
 
 ```bash
-dunlin eval --build trial-3 --split test --tag trial-3-test
-dunlin use trial-3
-dunlin status
+knowledge-nest eval --build trial-3 --split test --tag trial-3-test
+knowledge-nest use trial-3
+knowledge-nest status
 ```
 
 - `use` は、試行のビルドと検索設定の組を提供に使う構成として採用し、候補の設定を本体の設定ファイルへ反映する。変更前の設定も記録する。
@@ -1085,7 +1085,7 @@ dunlin status
 - 各試行は、使った評価データと評価方法のIDを記録する。
 - 改善試行では調整用だけを使い、最終確認用は選んだ候補の確認まで使わない。
 - 抽出方法を変えた試行でも、同じ評価データを使う。引用は評価対象のコーパス上で照合し直し、対応できなかった根拠は未回収として数える。
-- 実際の改変防止は、ファイル権限や承認手順と組み合わせる。Dunlin 単独で完全な改変防止は保証しない。
+- 実際の改変防止は、ファイル権限や承認手順と組み合わせる。Knowledge-Nest 単独で完全な改変防止は保証しない。
 
 ### 11.5 試行の上限
 
@@ -1101,7 +1101,7 @@ dunlin status
 | 実行の記録 | 検索、統合、文脈の組み立ての各段で何が起きたか |
 | 検証の診断 | 誤った設定、欠けている成果物、不整合の理由 |
 
-Dunlin の中に、エージェント固有の計画処理や会話履歴の管理は持たない。値の組み合わせをまとめて試す組み込みの一括試行は、初期の範囲に含めない（20章）。
+Knowledge-Nest の中に、エージェント固有の計画処理や会話履歴の管理は持たない。値の組み合わせをまとめて試す組み込みの一括試行は、初期の範囲に含めない（20章）。
 
 ## 12 文書の更新と提供内容への反映
 
@@ -1115,9 +1115,9 @@ Dunlin の中に、エージェント固有の計画処理や会話履歴の管�
 ### 12.1 文書が変わったとき
 
 ```bash
-dunlin build --dry-run
-dunlin build
-dunlin status
+knowledge-nest build --dry-run
+knowledge-nest build
+knowledge-nest status
 ```
 
 - 追加、内容の更新、削除を区別して検出する。走査や取得に失敗した場合は不完全な走査として扱い、削除を確定しない。
@@ -1182,11 +1182,11 @@ Wiki/PARA側は、資料を読んで知識をページやノートに蓄積し�
 | 役割 | 担い手 |
 | --- | --- |
 | 資料を選んで渡す、質問する、指示する | 人 |
-| 資料を読む、ページやノートを書く、書き直す | AI（Dunlin が設定したモデルで実行する） |
-| 引用の検証、保存、版の管理、作業の記録 | Dunlin |
+| 資料を読む、ページやノートを書く、書き直す | AI（Knowledge-Nest が設定したモデルで実行する） |
+| 引用の検証、保存、版の管理、作業の記録 | Knowledge-Nest |
 | 読む | 人。HTMLとして読む |
 
-- **実行役**: 指示を実行するのは、Dunlin が設定したモデルで行う方式を標準とする。画面だけで完結し、「入れれば解決」の軸に合う。
+- **実行役**: 指示を実行するのは、Knowledge-Nest が設定したモデルで行う方式を標準とする。画面だけで完結し、「入れれば解決」の軸に合う。
 - **作業として記録する**: 指示はすべて「作業」として記録する。記録の部分を共通にしておくことで、実行役を後から外部エージェントに差し替えられる。
 - **人は直接編集しない**: ページを直接編集する画面は置かない。修正も指示で行う。編集画面と引用検証の整合を考えずに済む。
 - **画面とコマンドは同じ操作**: 画面でできることは、すべてコマンドでもできる。画面は同じ操作を呼ぶだけにする。
@@ -1210,13 +1210,13 @@ Wiki/PARA側は、資料を読んで知識をページやノートに蓄積し�
 
 ### 13.5 設定ファイルの例
 
-次の2例は、グローバル設定にモデルと OCR の登録がなく、`init` に追加のオプションを渡さない場合に生成する `Dunlinfile.yaml` の全文である。`about.title` にはプロジェクトのディレクトリ名が入る。`--purpose` を指定すると、その文が `about.purpose` に入る。取り込みを始めるには目的と `models.writer.model` を設定する。`--llm-model` やグローバル設定から執筆モデルを指定できる。 [初期化時のモデル指定](#初期化時のモデル指定)
+次の2例は、グローバル設定にモデルと OCR の登録がなく、`init` に追加のオプションを渡さない場合に生成する `KnowledgeNestfile.yaml` の全文である。`about.title` にはプロジェクトのディレクトリ名が入る。`--purpose` を指定すると、その文が `about.purpose` に入る。取り込みを始めるには目的と `models.writer.model` を設定する。`--llm-model` やグローバル設定から執筆モデルを指定できる。 [初期化時のモデル指定](#初期化時のモデル指定)
 
 Wiki は `wiki.write` でページを書き、PARA は `para.write` でノートを書く。PARA の分類は Projects、Areas、Resources、Archives の4つで、`init para` が `site/` の下に各ディレクトリを作る。
 
-#### Wiki の Dunlinfile.yaml
+#### Wiki の KnowledgeNestfile.yaml
 
-`dunlin init wiki ./wiki`
+`knowledge-nest init wiki ./wiki`
 
 ```yaml
 init:
@@ -1300,9 +1300,9 @@ serve:
   pages: ./site
 ```
 
-#### PARA の Dunlinfile.yaml
+#### PARA の KnowledgeNestfile.yaml
 
-`dunlin init para ./para`
+`knowledge-nest init para ./para`
 
 ```yaml
 init:
@@ -1391,9 +1391,9 @@ serve:
 ### 14.1 ingress
 
 ```bash
-dunlin ingress ./papers/maintenance-manual-v3.pdf
-dunlin ingress ./inbox/
-dunlin ingress --dry-run ./inbox/
+knowledge-nest ingress ./papers/maintenance-manual-v3.pdf
+knowledge-nest ingress ./inbox/
+knowledge-nest ingress --dry-run ./inbox/
 ```
 
 `ingress` は次の順で進む。
@@ -1415,7 +1415,7 @@ dunlin ingress --dry-run ./inbox/
 ### 14.2 query
 
 ```bash
-dunlin query "フィルターの交換周期は"
+knowledge-nest query "フィルターの交換周期は"
 ```
 
 - ページやノートを対象に検索し、出典付きの回答を返す。出典は、ページと、そのページが引用する原本の版と範囲まで辿れる。
@@ -1433,8 +1433,8 @@ dunlin query "フィルターの交換周期は"
 | 内容の検査 | ページ同士の矛盾、新しい資料と既存ページの食い違い、同じ事柄の重複記述 | 必要 | 指摘の候補。誤検出がある |
 
 ```bash
-dunlin verify
-dunlin verify --content
+knowledge-nest verify
+knowledge-nest verify --content
 ```
 
 - **既定は機械的な検査だけ**: 速くて費用がかからないので、`ingress` のたびに走らせられる。内容の検査は明示的に指定したときだけ実行する。
@@ -1446,8 +1446,8 @@ dunlin verify --content
 ### 14.4 archive
 
 ```bash
-dunlin archive <ページ>
-dunlin archive --restore <ページ>
+knowledge-nest archive <ページ>
+knowledge-nest archive --restore <ページ>
 ```
 
 WikiとPARAの両方で使う。アーカイブの意味は次のとおり。
@@ -1485,8 +1485,8 @@ Wiki/PARA側の `serve` は、構築したサイトをブラウザで読み、�
 | 構成 | 各区分に何が入っているかを1行ずつ | AI。取り込みやアーカイブのたびに更新する |
 | 元になっている資料 | 取り込んだ資料の件数、種類、最終取り込み日 | AI |
 | 使い方 | 質問と指示のしかた | 固定の案内 |
-| 状態 | 未反映の資料の件数、未対応の指摘の件数 | Dunlin |
-| 最近の更新 | 最近更新されたページ | Dunlin |
+| 状態 | 未反映の資料の件数、未対応の指摘の件数 | Knowledge-Nest |
+| 最近の更新 | 最近更新されたページ | Knowledge-Nest |
 
 - **説明はAIへの方針を兼ねる**: 目的と範囲は、人向けの紹介であると同時に、AIが作業するときの基準になる。取り込み時の範囲の判断、区分の判断、範囲外の質問への応答に使う。人が読む説明とAIが従う方針を同じ文章にすることで、両者がずれない。
 - **状態は次の行動への入口**: 未反映があれば取り込み、指摘があれば確認、と開いた時点で次にすべきことが分かる。件数から一覧へ移れる。
@@ -1590,7 +1590,7 @@ Wiki/PARA側の `serve` は、構築したサイトをブラウザで読み、�
 
 `loader.command`（6.7）は、設定ファイルに書かれたコマンドを構築のたびに実行する。
 
-- `Dunlinfile.yaml` は、実行するスクリプトと同じ信頼度で扱う。他人から受け取った設定で `build` する前に `source` を確認するよう、文書で案内する。`build --dry-run` は外部コマンドを起動せず、実行予定のコマンドを表示する。
+- `KnowledgeNestfile.yaml` は、実行するスクリプトと同じ信頼度で扱う。他人から受け取った設定で `build` する前に `source` を確認するよう、文書で案内する。`build --dry-run` は外部コマンドを起動せず、実行予定のコマンドを表示する。
 - シェルを通さず、引数の配列のまま起動する。ファイル名に記号が含まれていても、コマンドとして解釈されない。
 - 原本は一時ファイルの写しか標準入力で渡し、外部コマンドに原本を書き換えさせない。
 - 画面や HTTP など、外部から届くファイルに対しては実行しない。このため、`loader.command` は Wiki/PARA の `ingress` では使えない。
@@ -1603,16 +1603,16 @@ Wiki/PARA側の `serve` は、構築したサイトをブラウザで読み、�
 ### 18.1 最初の5分: 手元のマニュアルをエージェントから引けるようにする
 
 ```bash
-npm install -g dunlin
-dunlin init mcp ./kb --source ~/manuals
+npm install -g knowledge-nest
+knowledge-nest init mcp ./kb --source ~/manuals
 cd kb
-dunlin build
-dunlin search "手順"
-dunlin serve
+knowledge-nest build
+knowledge-nest search "手順"
+knowledge-nest serve
 ```
 
 - 構築が終わると、文書数、飛ばしたファイル、次に打つコマンドが表示される。
-- フォルダに未対応のファイルが混ざっていた場合は、一覧と除外方法が表示され、`dunlin build --skip-unsupported` で進められる。
+- フォルダに未対応のファイルが混ざっていた場合は、一覧と除外方法が表示され、`knowledge-nest build --skip-unsupported` で進められる。
 - エージェントへの登録は、接続設定を出力するコマンドの結果を貼り付ける。
 
 ### 18.2 月曜の朝、文書が更新されている
@@ -1620,9 +1620,9 @@ dunlin serve
 マニュアルが3件改訂され、1件が削除された。
 
 ```bash
-dunlin build --dry-run
-dunlin build
-dunlin status
+knowledge-nest build --dry-run
+knowledge-nest build
+knowledge-nest status
 ```
 
 - 変更のあった4件だけが処理され、索引まで反映される。稼働中のサーバーは再起動なしで新しい索引を使う。
@@ -1633,10 +1633,10 @@ dunlin status
 「交換周期」で検索したのに、該当の節が上位に出なかった。
 
 ```bash
-dunlin search "フィルターの交換周期"
-dunlin eval-data add --question "フィルターの交換周期は" --doc manuals:maintenance.md --quote "フィルターは6か月ごとに交換する。"
-dunlin eval --tag baseline
-dunlin report show baseline
+knowledge-nest search "フィルターの交換周期"
+knowledge-nest eval-data add --question "フィルターの交換周期は" --doc manuals:maintenance.md --quote "フィルターは6か月ごとに交換する。"
+knowledge-nest eval --tag baseline
+knowledge-nest report show baseline
 ```
 
 - 外れた検索をその場で評価ケースにする。数件たまったところで評価する。
@@ -1649,16 +1649,16 @@ dunlin report show baseline
 
 ```bash
 # エージェントが繰り返す
-dunlin report show baseline --json
-dunlin validate --config candidates/trial-3.yaml --json
-dunlin build --from transform --config candidates/trial-3.yaml --tag trial-3 --json
-dunlin eval --build trial-3 --tag trial-3 --json
-dunlin report compare baseline trial-3 --json
+knowledge-nest report show baseline --json
+knowledge-nest validate --config candidates/trial-3.yaml --json
+knowledge-nest build --from transform --config candidates/trial-3.yaml --tag trial-3 --json
+knowledge-nest eval --build trial-3 --tag trial-3 --json
+knowledge-nest report compare baseline trial-3 --json
 
 # 人が確かめて採用する
-dunlin report compare baseline trial-3
-dunlin eval --build trial-3 --split test --tag trial-3-test
-dunlin use trial-3
+knowledge-nest report compare baseline trial-3
+knowledge-nest eval --build trial-3 --split test --tag trial-3-test
+knowledge-nest use trial-3
 ```
 
 - 試行の間、提供内容は変わらない。原文も固定されているので、設定の違いだけが比べられる。
@@ -1667,10 +1667,10 @@ dunlin use trial-3
 ### 18.5 資料からWikiを立ち上げる
 
 ```bash
-dunlin init wiki ./wiki
+knowledge-nest init wiki ./wiki
 cd wiki
-dunlin ingress ~/manuals/maintenance-manual.pdf
-dunlin serve
+knowledge-nest ingress ~/manuals/maintenance-manual.pdf
+knowledge-nest serve
 ```
 
 - 作成時に、目的と範囲を1〜2行で指定する。
@@ -1734,7 +1734,7 @@ dunlin serve
 
 | 項目 | 扱い |
 | --- | --- |
-| Dunlin 内の汎用的な最適化エージェント | 作らない。探索は外部エージェントが担う |
+| Knowledge-Nest 内の汎用的な最適化エージェント | 作らない。探索は外部エージェントが担う |
 | 包括的なエージェントの枠組み | 作らない。Wiki/PARA側のチャット欄も、決まった操作に限る |
 | 値の組み合わせをまとめて試す組み込みの一括試行 | 初期の範囲に含めない。途中からの構築と評価を外から繰り返す |
 | 提供構成の検証必須化 | しない。評価は鮮度の表示であり、関門ではない |
@@ -1788,7 +1788,7 @@ dunlin serve
 | 運用の決まりの初期値 | 何をどこまで書くか。最初の既定をどう用意するか |
 | 使うモデルの設定 | 取り込み、質問、検査で同じモデルを使うか、分けられるようにするか |
 | RAG/MCP側とのつながり | 作業中に、RAG/MCP側で作った索引も引けるようにするか |
-| 外部エージェントによる実行 | 標準はDunlinによる実行。作業を外部エージェントが取りに来て実行する経路をいつ用意するか |
+| 外部エージェントによる実行 | 標準はKnowledge-Nestによる実行。作業を外部エージェントが取りに来て実行する経路をいつ用意するか |
 | 取り込みの規模 | 1回に渡せる資料の量と、1作業で書き換えられるページ数の上限 |
 | 画面の接続範囲 | 自分のPC以外から読めるようにする場合の認証 |
 
@@ -1874,12 +1874,12 @@ dunlin serve
 
 | 以前の案 | 現在の決定 | 理由 |
 | --- | --- | --- |
-| 名前は durlin、コマンドは `durlin rag ...` | 名前は Dunlin、コマンドは最上位に平らに置く | 正式名の確定。系統は `init` の種別で決まるため、用途名を毎回付けなくてよい |
+| 名前は durlin、コマンドは `durlin rag ...` | 名前は Knowledge-Nest、コマンドは最上位に平らに置く | 正式名の確定。系統は `init` の種別で決まるため、用途名を毎回付けなくてよい |
 | RAGを設定違いでたくさん試すためのCLI | 最速で構築できるナレッジ基盤。MCPとRAGに加え、LLM WikiとPARAも支える | 位置づけの確定（3つの軸） |
 | 共通の構築を4つの用途が共有する | 取り込みの入り口から2系統に分ける。共有するのは内部部品だけ | 「索引を作る」と「読んでページに反映する」は性質が違う |
 | `init` で用途を1つ選び、同じコーパスを共用する | 作業ディレクトリを系統ごとに分ける。同じ資料は両方に渡す | 入り口を分ける決定に合わせた |
 | 標準構成は設定に書かず、変えたい箇所だけを書く | 標準構成でも、使うモジュールと引数をすべて書き出す。区切りごとにモジュールと引数を並べる | 中が見えない箱にしない。分からない利用者は触らず、分かる利用者は踏み込める |
-| RAG/MCP側の種別は rag の1つ | mcp と rag に分ける。mcp は search、rag は ask、wiki と para は query を使う | 回答を作るのがエージェントか Dunlin かを、種別で区別するため |
+| RAG/MCP側の種別は rag の1つ | mcp と rag に分ける。mcp は search、rag は ask、wiki と para は query を使う | 回答を作るのがエージェントか Knowledge-Nest かを、種別で区別するため |
 
 ### 23.2 RAG/MCP側
 
@@ -1893,7 +1893,7 @@ dunlin serve
 | 最終検証を通った構成だけを公開する（`verify`、`publish`、release） | 評価は関門にしない。試行は `use` で採用する | 文書更新のたびに評価を通すのは重すぎる |
 | 提供構成は索引そのものを固定する | 固定するのは設定。索引の中身は文書に追従する | 文書の変更をすぐ提供に反映するため |
 | サーバーは起動時のビルドを使い続け、更新は再起動 | 設定は固定し、新しい索引には要求の合間に切り替える | 文書更新のたびの再起動は不便 |
-| 組み込みの最適化（`optimize`）、後に一括試行（`sweep`） | 初期の範囲に含めない。外部エージェントが途中からの構築と評価を繰り返す | 探索の判断は外に置き、Dunlinは実行と測定に徹する |
+| 組み込みの最適化（`optimize`）、後に一括試行（`sweep`） | 初期の範囲に含めない。外部エージェントが途中からの構築と評価を繰り返す | 探索の判断は外に置き、Knowledge-Nestは実行と測定に徹する |
 | 一時上書き `--set` | 候補の設定ファイルを `--config` で指定する | 試行の設定をファイルとして残し、本体を書き換え続けないため |
 | チャンク単位の指標（recall、nDCG） | 根拠単位の指標。文脈量をそろえて比べる | チャンク設定が違うと公平に比べられない |
 | 根拠はあいまい一致で照合する | 採点は確定した位置で行い、あいまい一致は候補探しにだけ使う | 似た文章や定型文の誤認を避ける |
@@ -1908,7 +1908,7 @@ dunlin serve
 
 | 以前の案 | 現在の決定 | 理由 |
 | --- | --- | --- |
-| ページを書くのは外部エージェント。DunlinはMCPで編集機能を提供する | 標準はDunlinが設定したモデルで実行する。指示は作業として記録する | 画面のチャット欄から指示して完結させるため |
+| ページを書くのは外部エージェント。Knowledge-NestはMCPで編集機能を提供する | 標準はKnowledge-Nestが設定したモデルで実行する。指示は作業として記録する | 画面のチャット欄から指示して完結させるため |
 | `serve` はMCPで編集機能を提供する | `serve` はブラウザ向けの画面を提供する | 読むことと指示することを1か所で行う |
 | 取り込みはMCPの操作として置き、CLIには置かない | CLIに `ingress` を置く | 入り口を系統ごとに分ける決定 |
 | チャット欄をトップの最上部に置く2列構成 | 左に階層、中央にコンテンツ、右にチャット欄の3列構成 | ページを読みながら指示できる |
@@ -1992,13 +1992,13 @@ dunlin serve
 - **必要なものを宣言する**: モデルや他のモジュールへの依存を持つ。満たされていない場合は、何を足せばよいかを示す。
 - **出力互換性バージョンを持つ**: 出力が変わる変更でこの番号を上げ、再利用の判定に使う（7章）。
 - **一覧と説明をコマンドで返す**: 名前、役割、引数と既定値、入出力の型、必要なものを、人向けと機械可読の両方で出力する。
-- **モデルを使うモジュールの実行方式は未決**: 文字認識、埋め込み、再ランク付けはモデルを必要とする。外部の実行環境やAPIに任せるか、Dunlin が自分でモデルを取得して動かすかを決める必要がある（21章）。
+- **モデルを使うモジュールの実行方式は未決**: 文字認識、埋め込み、再ランク付けはモデルを必要とする。外部の実行環境やAPIに任せるか、Knowledge-Nest が自分でモデルを取得して動かすかを決める必要がある（21章）。
 
 評価のモジュール（根拠の回収率、速度）と、Wiki/PARA側のモジュール（執筆、引用の検証、各種の検査）は、5.5節と13.5節の設定例に現れるものを出発点とし、別途一覧にする。
 
 ## 25 標準の保存先とツールの追加
 
-標準の保存先と索引は本体に同梱し、導入した時点で動くようにする。それ以外への切り替えは、後から `dunlin add` でツールを足して行う。
+標準の保存先と索引は本体に同梱し、導入した時点で動くようにする。それ以外への切り替えは、後から `knowledge-nest add` でツールを足して行う。
 
 ### 25.1 標準の構成
 
@@ -2011,7 +2011,7 @@ dunlin serve
 ベクトル検索を総当たりで自作する理由は次のとおり。
 
 - **作る量が小さい**: 必要なのは、ベクトルを並べたファイル、距離の計算、上位の選別だけである。
-- **Dunlin の決まりをそのまま実現できる**: 索引を別ファイルの不変な成果物にする、差分だけ更新する、同じ入力なら同じ結果になる、といった決まりを、外部の部品の都合に合わせずに済む。
+- **Knowledge-Nest の決まりをそのまま実現できる**: 索引を別ファイルの不変な成果物にする、差分だけ更新する、同じ入力なら同じ結果になる、といった決まりを、外部の部品の都合に合わせずに済む。
 - **評価が素直になる**: 総当たりは正確なので、検索結果の違いを設定の違いだけで説明できる。近似による揺れが混ざらない。
 - **配布が楽になる**: 依存が増えず、事前にビルドした本体を配りやすい。
 
@@ -2031,26 +2031,26 @@ dunlin serve
 
 ### 25.3 差し替えを簡単にする前提
 
-- **差し替えられるのは索引だけ**: 原文、抽出結果、チャンク、評価データは、常に Dunlin 自身の保存領域に置く。
+- **差し替えられるのは索引だけ**: 原文、抽出結果、チャンク、評価データは、常に Knowledge-Nest 自身の保存領域に置く。
 - **索引はいつでも作り直せる**: 索引はチャンクから再構築できるので、保存先を切り替えてもデータの移行は要らない。
 - **決まった口を通して呼ぶ**: 索引の作成と検索は、内部の決まった口を通す。標準の実装も、その口の1つとして作る。
 
-### 25.4 dunlin add
+### 25.4 knowledge-nest add
 
 ```bash
-dunlin add --list
-dunlin add hannoy
-dunlin add ocr          # tools に記録された OCR の方式を準備する
-dunlin add oar-ocr
-dunlin add lightonocr
-dunlin remove hannoy
+knowledge-nest add --list
+knowledge-nest add hannoy
+knowledge-nest add ocr          # tools に記録された OCR の方式を準備する
+knowledge-nest add oar-ocr
+knowledge-nest add lightonocr
+knowledge-nest remove hannoy
 ```
 
 - **1つのツールが複数のモジュールを提供する**: 追加すると、そのツールのモジュールが一覧に現れ、設定ファイルで使えるようになる。
 - **設定ファイルに記録する**: 追加したツールの名前と版を設定ファイルに書く。使うものをすべて書き出す方針と同じで、別の環境でも同じ構成を再現できる。
 - **構成の書き換えは利用者が行う**: 追加しただけでは構成は変わらない。該当する区切りに書くべき内容を表示する。
 - **入手元を限定する**: 外部のコードを実行することになるので、最初は公式の一覧にあるものだけを対象にする。版を固定し、取得したものの整合性を検証する。
-- **モデルを使う機能も同じ経路で足す案**: 文字認識、埋め込み、再ランク付けの実行環境も、`dunlin add` で追加する形を候補とする。本体は軽いままで、別の道具を自分で導入する必要もなくなる。
+- **モデルを使う機能も同じ経路で足す案**: 文字認識、埋め込み、再ランク付けの実行環境も、`knowledge-nest add` で追加する形を候補とする。本体は軽いままで、別の道具を自分で導入する必要もなくなる。
 
 設定ファイルへの記録と、切り替え後の区切りの例を示す。名前とキーは案である。
 
@@ -2071,7 +2071,7 @@ index:
         model: local-embed
 ```
 
-設定を書き換えた後、`dunlin build --from index` を実行すれば、索引だけが作り直される。試行として構築して評価し、標準の索引と比べてから採用することもできる。
+設定を書き換えた後、`knowledge-nest build --from index` を実行すれば、索引だけが作り直される。試行として構築して評価し、標準の索引と比べてから採用することもできる。
 
 ### 25.5 切り替えの目安
 
@@ -2230,7 +2230,7 @@ struct ChunkLengthArgs {
 
 | コード | 状況 | 添える案内 |
 | --- | --- | --- |
-| `MODULE_UNKNOWN` | 登録表にない名前 | 近い名前の候補。追加ツールのモジュールなら `dunlin add` の案内 |
+| `MODULE_UNKNOWN` | 登録表にない名前 | 近い名前の候補。追加ツールのモジュールなら `knowledge-nest add` の案内 |
 | `MODULE_WRONG_STAGE` | その区切りでは使えないモジュール | 使える区切り |
 | `ARG_UNKNOWN` | 定義にない引数 | 近い引数名の候補、使える引数の一覧 |
 | `ARG_MISSING` | 既定値のない必須の引数がない | 引数の型と例 |
@@ -2261,11 +2261,11 @@ struct ChunkLengthArgs {
 ```text
 設定に2件の誤りがあります。処理は開始していません。
 
-Dunlinfile.yaml:21  transform > chunk.lenght
+KnowledgeNestfile.yaml:21  transform > chunk.lenght
   MODULE_UNKNOWN  この名前のモジュールはありません。
   候補: chunk.length
 
-Dunlinfile.yaml:35  search > retrieval.keyword > top_k
+KnowledgeNestfile.yaml:35  search > retrieval.keyword > top_k
   ARG_TYPE  整数が必要ですが、文字列 "ten" が書かれています。
   期待: 1 以上の整数
 ```
@@ -2281,7 +2281,7 @@ Dunlinfile.yaml:35  search > retrieval.keyword > top_k
   "errors": [
     {
       "code": "MODULE_UNKNOWN",
-      "file": "Dunlinfile.yaml",
+      "file": "KnowledgeNestfile.yaml",
       "line": 21,
       "section": "transform",
       "module": "chunk.lenght",
@@ -2289,7 +2289,7 @@ Dunlinfile.yaml:35  search > retrieval.keyword > top_k
       "received": "chunk.lenght",
       "expected": "登録済みのモジュール名",
       "suggestions": ["chunk.length"],
-      "hint": "dunlin modules list で使えるモジュールを確認できます"
+      "hint": "knowledge-nest modules list で使えるモジュールを確認できます"
     }
   ]
 }
@@ -2325,7 +2325,7 @@ Dunlinfile.yaml:35  search > retrieval.keyword > top_k
 
 ### 26.10 追加ツールとの関係
 
-`dunlin add` で足したツールも、「説明、生成、実行」の3つを提供する。別のプロセスで動くツールは、この3つをやり取りする変換役を間に置く。エンジンからは、標準のモジュールと区別なく扱える。
+`knowledge-nest add` で足したツールも、「説明、生成、実行」の3つを提供する。別のプロセスで動くツールは、この3つをやり取りする変換役を間に置く。エンジンからは、標準のモジュールと区別なく扱える。
 
 外部のツールとの技術的な接続方式は、今は決めない。標準のモジュールを数個作ってから、何を外に開くべきかを決める。
 
@@ -2424,8 +2424,8 @@ Dunlinfile.yaml:35  search > retrieval.keyword > top_k
     "total_tokens": 1274
   },
   "metadata": {
-    "dunlin_build_id": "bld-example",
-    "dunlin_search_config_id": "sc-example"
+    "knowledge_nest_build_id": "bld-example",
+    "knowledge_nest_search_config_id": "sc-example"
   }
 }
 ```
@@ -2434,12 +2434,12 @@ Dunlinfile.yaml:35  search > retrieval.keyword > top_k
 - **版と範囲の詳細**: 標準の注釈には、原文上の範囲を入れる欄がない。版と範囲は、拡張の欄で返す。どの欄に入れるかと、既存のクライアントが未知の欄を許容するかは、実物で確かめて決める（未決）。
 - **使ったビルドと検索設定**: `metadata` に入れて返す。評価の記録と照らし合わせられる。
 - **根拠が見つからない場合**: 設定に従い、答えられない旨を回答文として返す。注釈は空になる。
-- **コマンドでの表示**: `dunlin ask` は、既定では回答文と出典を読みやすく表示する。`--json` では、共通の外枠の `data` に上の形式を入れる。
+- **コマンドでの表示**: `knowledge-nest ask` は、既定では回答文と出典を読みやすく表示する。`--json` では、共通の外枠の `data` に上の形式を入れる。
 
 ### 27.3 種別 rag の serve
 
 ```bash
-dunlin serve
+knowledge-nest serve
 ```
 
 | 口 | 形式 | 内容 |
@@ -2486,7 +2486,7 @@ serve:
 
 種別 `rag` でも、MCPで検索を提供できる。内容は種別 `mcp` の `serve` と同じで、検索の道具が `search` と同じJSONを返す。
 
-- **1つのサーバーで同時に提供する**: `dunlin serve` を1回実行すると、1つのポートでHTTPの2つの口とMCPの口が同時に立ち上がる。MCPはHTTPを使う接続方式で提供する。
+- **1つのサーバーで同時に提供する**: `knowledge-nest serve` を1回実行すると、1つのポートでHTTPの2つの口とMCPの口が同時に立ち上がる。MCPはHTTPを使う接続方式で提供する。
 - **MCPで提供するのは検索だけ**: `ask` はMCPには出さない。エージェントは自分で回答を作れるので、根拠があれば足りる。
 - **どの口も同じ結果を返す**: 同じプロセスが同じビルドと検索設定を使うので、HTTPの `search`、MCPの検索の道具、`ask` の中の検索が、同じ問い合わせに同じ根拠を返す。文書更新後の索引の切り替えも、3つの口で同時に起きる。
 - **プロセスを起動する方式にも対応する**: 標準入出力でしか接続できないエージェントのために、標準入出力のMCPだけを起動する指定も用意する。種別 `mcp` の既定はこちらである。
@@ -2521,7 +2521,7 @@ serve:
 - **宛先名と送信元を確かめる**: `allowed_hosts` にない宛先名の要求と、`allowed_origins` にない送信元からのブラウザの要求は拒否する。ブラウザで開いた別のページが、自分のPCのサーバーに要求を送る経路を塞ぐためである。
 - **矛盾する指定はエラーにする**: `transport` が `stdio` のときに `host`、`port`、`endpoints`、`access`、`limits` を書いた場合は `ARG_CONFLICT` とする。種別にない口を `endpoints` に書いた場合は `ARG_RANGE` とする。
 - **ポートが使用中なら止まる**: 別のポートに黙って移らず、実行エラー（終了コード1）にする。接続する側の設定がずれるのを防ぐ。
-- **一時的な上書き**: `dunlin serve --host` と `--port` で、その起動に限って値を変えられる。上書き後の値にも上の検査を適用し、実際に使った値を起動時に表示する。
+- **一時的な上書き**: `knowledge-nest serve --host` と `--port` で、その起動に限って値を変えられる。上書き後の値にも上の検査を適用し、実際に使った値を起動時に表示する。
 - **結果には影響しない**: `serve` の値は、ビルドIDと検索設定IDには含めない。ポートを変えても、再ビルドや再評価は要らない。
 - **書き込みを伴う画面はより慎重に扱う**: 種別 `wiki` と `para` の画面は `ingress` や `archive` の指示を受け付ける。外に開く場合の認証の必須は同じとし、指示を出した接続の情報を作業の記録に残す。
 
@@ -2532,7 +2532,7 @@ serve:
 
 ## 28 実装の境界とデータの持ち方
 
-2章の「前提とする実装方針」のとおり、Dunlin の中核は Rust の単一 crate で作る。モジュールのエンジン（登録表と実行口）と各モジュールも、26.5〜26.7節のとおり Rust で作る。JavaScript（Node.js）で作るのは、npm から起動する入口と、どうしても JavaScript でないと使えないライブラリを使う部分だけとする。
+2章の「前提とする実装方針」のとおり、Knowledge-Nest の中核は Rust の単一 crate で作る。モジュールのエンジン（登録表と実行口）と各モジュールも、26.5〜26.7節のとおり Rust で作る。JavaScript（Node.js）で作るのは、npm から起動する入口と、どうしても JavaScript でないと使えないライブラリを使う部分だけとする。
 
 0.5 の開発中は、モジュールの登録表と多くのモジュールを JavaScript で作り、遅い処理から順に Rust へ移した。その結果、この方針から実装がずれ、データが言語の境界を往復する継ぎ目と、同じ本文を何か所にも持つ状態が残った。この章は、ずれを戻す移行の範囲と順序を決める。移行は段階を分けて進め、利用者から見える結果は変えない。
 
@@ -2568,7 +2568,7 @@ serve:
 | `@ast-grep/napi` と言語の文法 | コードの宣言の位置 | 旧形式の設定の取り込みでだけ使っていたので、その経路とともに外した（段階2a）。コードの宣言の位置を使う機能を作るときは、`ast-grep-core` などの crate を直接使う |
 | `cheerio` | HTML から本文を取り出す | Rust の `scraper` に置き換えた（段階6a）。cheerio は比べるテストの基準にだけ開発用の依存として残す |
 | `markdown-it` | Wiki/PARA のページを HTML にする | Rust の `pulldown-cmark` に置き換えた（段階5a）。markdown-it は、比べるテストの基準にだけ開発用の依存として残す |
-| `yaml` | `Dunlinfile.yaml` と設定の読み書き | 読み込み（段階1）と書き出し（段階6b）を Rust に置き換えた。yaml は比べるテストの基準にだけ開発用の依存として残す |
+| `yaml` | `KnowledgeNestfile.yaml` と設定の読み書き | 読み込み（段階1）と書き出し（段階6b）を Rust に置き換えた。yaml は比べるテストの基準にだけ開発用の依存として残す |
 | `zod` | 引数と設定の検証 | Rust の検査に置き換えた（段階1、Wiki/PARA は段階6c）。zod は比べるテストの基準にだけ開発用の依存として残す |
 | `sqlite-vec` | ベクトル索引の保存先の1つ | 使われていなかった JavaScript のベクトル検索とともに外した（段階6）。ベクトル索引は標準の総当たり検索と hannoy が受け持つ |
 
@@ -2606,7 +2606,7 @@ serve:
 
 ### 28.5 Node.js API の範囲
 
-Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのまま公開する口とする。CLI と同じエンジンの機能を、Node.js から呼べるようにする。CLI にしかない処理を JavaScript に持たない。
+Node.js API（`knowledge-nest` パッケージ）は、Rust のエンジンをそのまま公開する口とする。CLI と同じエンジンの機能を、Node.js から呼べるようにする。CLI にしかない処理を JavaScript に持たない。
 
 - いまの Node.js API にある上位機能（`evaluate`、`optimize`、検索方式の切替、`explore`、`wiki.*`、`addSource` と `syncSource`）は、外さずに CLI と同じエンジンの機能へまとめる。仕様（9〜16章）に合う方の動作を残し、もう一方は消す。
 - 口の名前と引数は、移行の中で CLI のコマンドと対応が取れる形に整える。npm での公開前なので、非推奨の期間を置かずに変えてよい。公開後に変える場合は、1つのマイナー版で非推奨を表示してから変える。
@@ -2618,7 +2618,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 | 段階 | 内容 | 主に解消する継ぎ目 |
 | --- | --- | --- |
-| 1 | 登録表、引数の定義と検証、説明、`Dunlinfile.yaml` の読み込みを Rust に移す。`validate` と `modules` は Rust の口を呼ぶだけにする | 登録表とモジュールが JavaScript にある |
+| 1 | 登録表、引数の定義と検証、説明、`KnowledgeNestfile.yaml` の読み込みを Rust に移す。`validate` と `modules` は Rust の口を呼ぶだけにする | 登録表とモジュールが JavaScript にある |
 | 2 | 構築の段階（`source`、`transform`、`index`）の進行と記録を Rust に移す。JavaScript で実装するパーサは、Node.js の呼び出し口から呼ぶ。原本と抽出結果をコーパスに置き、本文の写しを減らす | 原本の往復、チャンクの往復、本文の多重保存、取り込みの二重化 |
 | 3 | 検索モジュール、文脈の組み立て、返却形式、回答の生成と並べ替えのモデル呼び出し、HTTP と MCP のサーバーを Rust に移す | 登録表とモジュールが JavaScript にある |
 | 4 | 評価データ、評価、レポートと比較、試行と採用を Rust に移し、`evaluate.rs` とまとめる | 評価の二重化 |
@@ -2675,7 +2675,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 - PDF の文字層の抽出は `pdf_oxide` を標準とする。文字の並べ方や改行の入れ方が pdfjs と違い、抽出結果が変わり得る。抽出結果のキャッシュのキーに PDF だけパーサの名前と版（`pdf_oxide@<版>`）を加えるので、切り替え後の最初の構築では PDF だけが読み直される。版は固定し、上げると PDF を読み直す。
 - 日本語の PDF（横書き、縦書き、表、段組み）で pdfjs と抽出結果を比べ、差のある文書の数と内容、ページ位置の一致、処理時間を記録として `docs/pdf-extraction.md` に残す。比較の結果は、標準を決める条件にはしない。
-- `oar-ocr` は ONNX Runtime とモデルを使う。どちらも本体には含めず、`dunlin add oar-ocr` で準備する（25.4節）。日本語のスキャン文書で認識の精度と速度を測り、標準の方式として十分かを確かめる。
+- `oar-ocr` は ONNX Runtime とモデルを使う。どちらも本体には含めず、`knowledge-nest add oar-ocr` で準備する（25.4節）。日本語のスキャン文書で認識の精度と速度を測り、標準の方式として十分かを確かめる。
 - `lightonocr` は、今の管理された Python の実行環境とサーバーを、Rust から別プロセスとして起動する。
 
 #### 埋め込みモデルの呼び出し（2b）
@@ -2688,7 +2688,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 - `index` 段は Rust で実行する。キーワード索引、ベクトル索引（`exact` と hannoy）、埋め込みのキャッシュ（`embeddings` 表）、ビルドの記録（`builds`、`build_runs`、`index_outputs`、`build_search`、`build_config`）を Rust が書く。`--tag` を付けた構築のタグの記録と、採用中のビルドの切り替え（`project`、`serving_generations`）も同じトランザクションで行う。
 - ビルドID、設定ID、`builds` の JSON、`vectors.json`、`vectors.f32`、hannoy のスロットの割り当ては JavaScript の実装と同じにする。既存のビルドはそのまま再利用でき、差分の更新（前のビルドのキーワード索引の写しと hannoy のグラフ）も続けて使える。
-- JavaScript は設定から決まる値だけを渡す。キーワードとベクトルの引数、埋め込みの接続先、検索の設定、ビルドに保存する設定である。構築中に設定ファイルが変わったかの確認、hannoy の版と完全性の検査、試行の上限の計数は、Rust から JavaScript に問い合わせる。hannoy の検査は、道具の管理（`dunlin add`）を Rust に移すときに合わせて移す。
+- JavaScript は設定から決まる値だけを渡す。キーワードとベクトルの引数、埋め込みの接続先、検索の設定、ビルドに保存する設定である。構築中に設定ファイルが変わったかの確認、hannoy の版と完全性の検査、試行の上限の計数は、Rust から JavaScript に問い合わせる。hannoy の検査は、道具の管理（`knowledge-nest add`）を Rust に移すときに合わせて移す。
 - 単独の `tag` コマンドは 2d で Rust に移した。`use` コマンドは設定ファイルの書き換え（`yaml`、段階6）と評価の状態の確認（段階4）を伴うので、それらとともに移す。
 
 #### コマンドの進行（2d）
@@ -2728,10 +2728,10 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 - Rust の口は、ビルドの記録、検索のモジュールの設定、問い合わせ、上書きの指定（`limit`、`budget_chars`、`source_ids`）を受け取り、27.1節の返却形式を返す。`search` コマンド、`serve`、評価（`eval`）は同じ口を使う。評価そのものは段階4で移すが、検索は 3a から Rust で動く。
 - 埋め込みモデルの接続先、並べ替えのモデルの設定は、段階2と同じく JavaScript が `models` から解決して渡す。`search_config_id` の計算に入る値も同じものを使う。
-- `hannoy.search` は、索引の道具（`dunlin add hannoy`）を Rust から別プロセスとして呼ぶ。いまと同じく検索ごとに1回起動し、道具の検査（版と完全性）も同じ規則で行う。
+- `hannoy.search` は、索引の道具（`knowledge-nest add hannoy`）を Rust から別プロセスとして呼ぶ。いまと同じく検索ごとに1回起動し、道具の検査（版と完全性）も同じ規則で行う。
 - `rerank.model` は、2a の JavaScript のパーサと同じく、番号を付けた要求で JavaScript に渡す。候補の本文は Rust が読んで渡す。
 - 試行の上限（モデルへの要求の数と送信量）は、段階2と同じく送る前に JavaScript に問い合わせて数える。
-- 検索は開いた索引の口（Node.js API の `searchProject`）で行う。`vectors.json` は開いた索引ごとに一度だけ読み、索引を閉じると捨てる。`search_config_id` も Rust の計算（`Dunlin.searchConfigId`）を `status`、`tag`、`use` が使う。
+- 検索は開いた索引の口（Node.js API の `searchProject`）で行う。`vectors.json` は開いた索引ごとに一度だけ読み、索引を閉じると捨てる。`search_config_id` も Rust の計算（`KnowledgeNest.searchConfigId`）を `status`、`tag`、`use` が使う。
 - 評価は、返却形式の `results` の根拠と、文脈の各抜粋の根拠、文脈が止まった理由（`budget` などの内部の値）を受け取って、これまでと同じ記録を作る。
 - `rerank.model` のモデルの設定は、`search_config_id` に入るため検索を始める前に解決する。設定が正しくない場合のエラーは、これまでと同じ番号と文言だが、モジュール名（`rerank.model`）が付かない。
 - 旧実装を写した基準（テストの `search-reference.mjs`）と、同じビルドと問い合わせで比べる。キーワード、`exact` のベクトル、hannoy、統合、並べ替え、上書きの指定、エラーについて、返却の JSON の文字列（値とキーの順）が一致することを確かめる。
@@ -2743,7 +2743,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - 評価データの生成（`eval-data generate`）と Wiki/PARA の執筆も生成モデルを使うが、それぞれ段階4と段階5で移す。それまでは JavaScript の実装が残る。
 - 接続先の URL、API キー、`max_input_bytes` は、埋め込みモデルと同じく JavaScript が `models` から解決して渡す。解決に失敗したモデルは、そのモジュールを動かすときに同じエラーで止まる。
 - `rerank.model` は、候補の本文の先頭 800 単位（UTF-16 の単位）をモデルに渡す。サロゲートペアの途中で切れた場合も、JavaScript と同じエスケープ（`\ud83d` など）で送る。
-- 回答は Node.js API の `Dunlin.answerQuestion` で作る。応答の `id` と `created_at` は呼び出しごとに変わる。
+- 回答は Node.js API の `KnowledgeNest.answerQuestion` で作る。応答の `id` と `created_at` は呼び出しごとに変わる。
 - `serve` で要求が時間切れになると、JavaScript はその要求の呼び出しをすぐに終える（`fetch` を中断したときと同じ）。Rust 側のモデルへの要求も、すぐ後に止まる。
 - 接続できない場合と、応答が JSON でない場合のメッセージ（`<提供元> request failed: ...` と `<提供元> returned invalid JSON`）は、`fetch` のメッセージと文言が違う。
 - 比較のテストは、テスト用のモデルのサーバーが受け取った要求の本文がバイト単位で一致すること、応答が `id` と `created_at` を除いて一致することを確かめる。Ollama、OpenAI、Strata の3つの形式の回答と並べ替え、引用の有無、文脈がない場合、範囲外の引用、JSON でない出力、要求の大きさの上限を含む。
@@ -2753,7 +2753,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - MCP は公式の Rust SDK（`rmcp`）を使い、stdio と HTTP の2つの接続方式を出す。HTTP は `rmcp` が使う非同期の実行環境（tokio）と HTTP のライブラリで受ける。どのライブラリを使うかは、配布物の大きさと構築の時間を測ってから決める。
 - 27.3節の `/v1/responses` と `/v1/search` も同じ HTTP のサーバーで受ける。接続先と送信元の確認、合言葉、要求の大きさの上限は、いまの JavaScript の実装（`project-serving.mjs`）と同じ規則にする。
 - Wiki/PARA の `serve` も同じ HTTP の部品を使うが、画面の配信とあわせて段階5で移す。それまでは JavaScript の実装が残る。
-- Node.js API の `serveMcp` は Rust のサーバーを起動する口にした。`createMcpHttpHandler` は外し、プロジェクトの提供には `Dunlin.serveProject` を足した（28.5節）。
+- Node.js API の `serveMcp` は Rust のサーバーを起動する口にした。`createMcpHttpHandler` は外し、プロジェクトの提供には `KnowledgeNest.serveProject` を足した（28.5節）。
 - 3c は2回に分ける。先に stdio の MCP（MCP 種別の `serve` と、Node.js API の `serveMcp`）を移し、次に HTTP のサーバー（`/v1/search`、`/v1/responses`、`/mcp`）と提供中のビルドの切り替えを移す。
 - stdio の MCP は `rmcp` と tokio で動かす。追加した依存で、配布物は約 2.4 MB（2.5%）大きくなった。
 - MCP 種別の `serve` では、HTTP を移すまでは、`knowledge.search` と `knowledge.read` が JavaScript の検索と読み出し（提供中のビルドの切り替えと、以前のビルドからの読み出し）を呼ぶ。Node.js API の `serveMcp` で検索を渡さない場合は、4つの道具（`knowledge.search`、`knowledge.read`、`knowledge.explore`、`knowledge.wiki_get`）を Rust が索引に対して実行する。
@@ -2762,7 +2762,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - 3c の後半では、`serve` のすべてを Rust で行う。提供中のビルドの切り替え（起動時の採用の世代で置き換わったビルドを、キーワードとベクトルの設定が同じあいだ使う。索引はビルドごとに一度だけ開き、使わなくなったら閉じる）、プロジェクトの検索と回答、以前のビルドからの読み出し、HTTP のサーバーが含まれる。JavaScript は、設定とモデルの解決（ビルドごとに Rust から問い合わせる）と、待ち受けた場所の表示だけを行う。
 - HTTP のサーバーは hyper と tokio で動かす。配布物はさらに約 0.6 MB 大きくなった（3c 全体で約 3.0 MB、3.1%）。接続先と送信元の確認、CORS、合言葉、同時接続の上限、要求の大きさの上限、時間切れ、エラーの本文は、旧サーバーと同じ規則にした。応答は `Content-Length` 付きで返し、旧サーバーの `Transfer-Encoding: chunked` とは違う。
 - `/mcp` は、TypeScript SDK の状態を持たない方式と同じに答える。要求ごとに結果を1つのイベントとする server-sent events で返し、受け付ける形式、`Content-Type`、JSON の誤り、空の一括要求、プロトコルの版の誤りには、同じ状態コードと JSON-RPC のエラーを返す。
-- 開いた索引ごとに、Node.js の `diagnostics_channel` の `dunlin:index-open` に `{ path }` を知らせる。購読者がいないときは何もしない。
+- 開いた索引ごとに、Node.js の `diagnostics_channel` の `knowledge-nest:index-open` に `{ path }` を知らせる。購読者がいないときは何もしない。
 - 旧サーバーを写した基準（テストの `rag-http-reference.mjs`）を同じプロジェクトで並べて起動し、49通りの要求（検索、回答、MCP、接続先・送信元・合言葉・パス・大きさの誤り、CORS の事前確認）に、同じ状態コード、ヘッダー、本文で答えることを確かめる。
 
 ### 28.11 段階4の進め方
@@ -2791,15 +2791,15 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - 試行の打ち切り（`eval --build`、`eval --config`）は、試行の中断を Rust の呼び出しの中断として渡す。打ち切られた評価はレポートを保存しない。試行の記録は 4c までは JavaScript に残る。
 - `evidence-map` の `create`、`import`、`confirm` は、確認した範囲を `evidence_overrides` に保存し、新しい対応表を作る。`list`、`show`、`export` は保存済みの対応表を読む。
 - 旧実装を写した基準（テストの `eval-reference.mjs`）と、同じプロジェクトで比べる。一意に見つかる引用、見つからない引用と近い候補、複数に一致する引用、前後の文字列、ページと見出しの手がかり、文書がない根拠、保存済みと確認済みの位置、調整用と最終確認用の分割、`--tag` の重複について、保存したレポートと対応表の JSON が遅延を除いて一致することを確かめる。
-- 評価は Node.js API の `evaluateProject`（開いたビルドの索引の口）で行い、根拠の対応表は `evidenceMap`（`create`、`import`、`confirm`）と `Dunlin.evidenceMaps`（`list`、`show`）で扱う。`export` は `show` の結果を JavaScript がファイルに書く。表示と書き出しは段階6で移す。
+- 評価は Node.js API の `evaluateProject`（開いたビルドの索引の口）で行い、根拠の対応表は `evidenceMap`（`create`、`import`、`confirm`）と `KnowledgeNest.evidenceMaps`（`list`、`show`）で扱う。`export` は `show` の結果を JavaScript がファイルに書く。表示と書き出しは段階6で移す。
 - 書記素のまとまりは `unicode-segmentation`、NFKC は `icu_normalizer` で求める。Node.js の `Intl.Segmenter` と `String.prototype.normalize` とは Unicode の版が違い得るので、まれな文字の並びで範囲の端が変わる可能性がある。位置のキーは文書の本文から作るので、範囲が変わっても保存済みの位置と確認済みの範囲はそのまま使われる。
 - `eval-data` の管理（4e）と辞書の提案（4b）は、同じ位置対応を JavaScript の実装のまま使う。どちらも移すときに JavaScript の実装を消す。
 - 差分テストでは、同じプロジェクトを写した2つで、CLI と基準に同じ手順（調整用と最終確認用の評価、対応表の作成、確認、取り込み、確認済みの範囲を使う再評価、誤りの入力）を行い、保存した記録と出力が一致することを確かめた。確認の時刻は比べない。
 
 #### レポートと状態（4b）
 
-- `report show`、`report list`、`report compare` は Node.js API の `Dunlin.evaluationReports` を呼ぶ。評価の状態は `Dunlin.evaluationStatus` で、`status` と `use` が使う。どちらも `state.sqlite` を読むだけなので、同期の呼び出しにした。`state.sqlite` は WAL なので、`use` の書き込みのトランザクションの中で読んでも待たない。
-- 辞書の提案は、使うレポートと評価データを `Dunlin.dictionaryEvaluation` で選び、取りこぼした根拠と前後の行を開いたビルドの `dictionaryMisses` で読む。提案の組み立て（Lindera の解析）は JavaScript に残り、レポートの検査のあとで取りこぼしを読む順も変えない。
+- `report show`、`report list`、`report compare` は Node.js API の `KnowledgeNest.evaluationReports` を呼ぶ。評価の状態は `KnowledgeNest.evaluationStatus` で、`status` と `use` が使う。どちらも `state.sqlite` を読むだけなので、同期の呼び出しにした。`state.sqlite` は WAL なので、`use` の書き込みのトランザクションの中で読んでも待たない。
+- 辞書の提案は、使うレポートと評価データを `KnowledgeNest.dictionaryEvaluation` で選び、取りこぼした根拠と前後の行を開いたビルドの `dictionaryMisses` で読む。提案の組み立て（Lindera の解析）は JavaScript に残り、レポートの検査のあとで取りこぼしを読む順も変えない。
 - `report list` の並びは、評価データと評価方法の識別子を符号位置の順で比べる。識別子は共通の接頭辞と小文字の16進数なので、`localeCompare` の順と同じである。
 - 比較の信頼区間は、JavaScript と同じ乱数の種と線形合同法で1000回引き直すので、同じ値になる。
 - 旧実装を写した基準（テストの `report-reference.mjs`）と同じプロジェクトを読み、表示、一覧（調整用と最終確認用）、比較（比べられる組、文脈の予算が違う組、分割が違う組、最終確認用どうし、根拠ごとの記録がない旧形式のレポート）、評価の状態、辞書の提案に使う取りこぼしが一致することを確かめた。
@@ -2810,8 +2810,8 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - モデルへの要求の数と送信量は、送る前に Rust で数える。JavaScript への問い合わせ（`charge`）はなくなり、Node.js API の `runTransform` と `answerQuestion` の `host` の引数と `TransformStageHost` の型も外した。
 - 試行の行は Rust の口を呼んだときに作るので、その前の JavaScript の準備（モデルの設定の解決、評価のビルドを開くこと）で失敗した場合は、試行の行を残さない。以前は準備も試行に含め、回数の上限をその前に確かめていた。
 - 時間の上限に達したとき、JavaScript で変換中の Office 文書があれば、その変換が終わってから止まる。以前は変換にも中断を伝えていた。
-- `status` の試行の使用量は `Dunlin.trialUsage` で読む。
-- `use` の記録（採用の履歴、提供中のビルド、世代）は `Dunlin.adoptBuild` で、1つのトランザクションとして Rust が書く。設定ファイルは、トランザクションの途中で JavaScript が書く（YAML は段階6まで JavaScript）。書いたあとで失敗したら、Rust がトランザクションを戻し、JavaScript が前のファイルに戻す。評価の状態も同じ口で求める。設定の組み合わせと検証は JavaScript に残る。
+- `status` の試行の使用量は `KnowledgeNest.trialUsage` で読む。
+- `use` の記録（採用の履歴、提供中のビルド、世代）は `KnowledgeNest.adoptBuild` で、1つのトランザクションとして Rust が書く。設定ファイルは、トランザクションの途中で JavaScript が書く（YAML は段階6まで JavaScript）。書いたあとで失敗したら、Rust がトランザクションを戻し、JavaScript が前のファイルに戻す。評価の状態も同じ口で求める。設定の組み合わせと検証は JavaScript に残る。
 - 評価データの生成（4e で移す）は試行の中で動かないので、`trialCheckpoint` は何もしない関数として 4e まで残す。
 - 試行の上限の既存のテスト（回数、要求の数と送信量、時間、使用量）に加え、評価の試行の上限と、`use` の途中の失敗で設定ファイルと記録が元に戻ることをテストで確かめた。
 
@@ -2820,12 +2820,12 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 - `evaluate` と `optimize` は残し、指標を根拠単位（10章）に変えた。評価セットは、質問と根拠の引用（`doc` は `ソースID:資料の相対パス`、`quote`、手がかりの `prefix`、`suffix`、`page`、`heading`）を並べたもので、`eval-data import` と同じく引用が1つなら直接書ける。文書単位の `relevant` と Recall@K・nDCG@K はやめた。
 - 引用の位置対応と被覆の判定は、`eval` と同じ部品（`evidence_match`）を使う。上位 `limit` 件の結果が引用の範囲を覆えば回収とし（短い引用は全体、長い引用は `minCoverage`）、質問ごとの回収率の平均を `evidenceRecallAtK` として方式ごとに返す。見つからない引用は回収できなかったものとして数え、件数を返す。文脈の組み立てはこの API の検索にないので、`@context` の指標はない。
 - `optimize` は、遅延の予算内の方式を `evidenceRecallAtK`、P95 の順で比べて選ぶ。保存したプランの評価は記録として持つだけにし、以前の版で保存した文書単位のレポートのプランも開ける。
-- 評価データの保存、レポート、試行は、Dunlinfile のプロジェクト（CLI）だけにある。直接開いた索引の評価は、比べた結果を返すだけで保存しない。
+- 評価データの保存、レポート、試行は、KnowledgeNestfile のプロジェクト（CLI）だけにある。直接開いた索引の評価は、比べた結果を返すだけで保存しない。
 
 #### 評価データの管理（4e）
 
 - 4e は2回に分ける。先に `generate` 以外（`list`、`tag`、`show`、`diff`、`use`、`export`、`split`、`review`、`sync`、`add`、`import`）を移し、次に生成モデルを使う `generate` を移す。
-- `eval-data` のコマンドは Node.js API の `Dunlin.evalData` を呼ぶ。文書を読むコマンド（`add`、`import`、`sync`、確認済みにする `review`）は、提供中のビルドを開いて `evalData` を呼ぶ。`review` は引数を確かめてから文書を読むので、`BUILD_NEEDED` を返したときにビルドを開いて呼び直す。
+- `eval-data` のコマンドは Node.js API の `KnowledgeNest.evalData` を呼ぶ。文書を読むコマンド（`add`、`import`、`sync`、確認済みにする `review`）は、提供中のビルドを開いて `evalData` を呼ぶ。`review` は引数を確かめてから文書を読むので、`BUILD_NEEDED` を返したときにビルドを開いて呼び直す。
 - ケースの検査と保存の形（引用の位置対応、文書の解決、グループと分割、ケースIDと評価データIDの計算、キーの順）は以前と同じである。グループの既定値に使う文書名の並べ替えは、JavaScript と同じく UTF-16 の順にした。
 - 取り込むファイルの読み込み、書き出し、評価データを選んだときの設定ファイルの書き換えは JavaScript に残す。Rust は選ぶ評価データを `select` で返す。
 - 旧実装を写した基準（テストの `eval-data-reference.mjs`）と、写した2つのプロジェクトで同じコマンドを実行し、出力、エラー、選ばれた評価データ、保存した評価データとタグが一致することを確かめた。時刻と、写したプロジェクトごとに違う文書の版は、出てきた順の記号に置き換えて比べる。
@@ -2859,7 +2859,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 #### コマンド（5a）
 
-- Wiki/PARA のコマンドは Node.js API の `Dunlin.wiki` を呼ぶ。JavaScript は、設定の検証（`validateWiki`。段階6で移す）、参照される対話用モデルの設定の解決（設定か、使えない理由）、OCR の実行環境の解決、HTML と Office のパースを受け持つ。
+- Wiki/PARA のコマンドは Node.js API の `KnowledgeNest.wiki` を呼ぶ。JavaScript は、設定の検証（`validateWiki`。段階6で移す）、参照される対話用モデルの設定の解決（設定か、使えない理由）、OCR の実行環境の解決、HTML と Office のパースを受け持つ。
 - 作業の記録（`wiki_work` の順番待ち、実行中の段階と件数、結果やエラー）と実行の排他（`execution.lock`）も Rust で行う。作業の行は排他を取る前に記録するので、排他が取れないときも失敗した作業として残る。進行状況の行は Rust が標準エラーに書く。
 - 取り込みは、パスの解決とフォルダの走査、資料ごとの ID、パーサの振り分け、読み込み（段階2の `source_load`）、キーワード索引（`wiki-keyword`）への登録を Rust で行う。チャンクの設定（800 文字、重なり 100、NFKC）も以前と同じである。
 - Markdown の HTML 化は、`pulldown-cmark` の出来事を markdown-it 15（`html: false`）と同じ形で書き出す。改行の位置、`<hr>` と `<br>`、表、リンクの検査（`javascript:` などを断る）、URL の符号化（punycode を含む）、生の HTML を文字として書くことを合わせた。104 通りの Markdown で markdown-it と同じ HTML になることを確かめた。HTML のブロックとして読める行は、markdown-it と違って段落の中の Markdown を解釈せず、文字のまま段落にする。`~~~a~~~` のように `~` が3つ並ぶ書き方は、markdown-it と違って取り消し線にしない。
@@ -2870,7 +2870,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 #### 画面（5b）
 
-- `serve` は Node.js API の `Dunlin.wikiServe` を呼ぶ。HTTP は段階3cの hyper と tokio の部品（接続先と送信元の確認、合言葉、同時接続と大きさの上限、時間切れ）を使い、画面に要る規則（自分の Origin を許す、Basic 認証、`Access-Control-Allow-Credentials`）を加えた。
+- `serve` は Node.js API の `KnowledgeNest.wikiServe` を呼ぶ。HTTP は段階3cの hyper と tokio の部品（接続先と送信元の確認、合言葉、同時接続と大きさの上限、時間切れ）を使い、画面に要る規則（自分の Origin を許す、Basic 認証、`Access-Control-Allow-Credentials`）を加えた。
 - フォーム（URL エンコードと multipart）の解釈、アップロードの名前の検査と保存、指示から作業への変換、ページの HTML は旧実装と同じにした。指示は作業として記録し、1つずつ順に実行する。止めるときは、受け付けた作業を終えてから戻る。
 - アップロードの名前は、旧実装と同じく実行環境の `path.basename` の規則で取り出す。Windows では `a:b.txt` のドライブ名を落として `b.txt` にする。
 - 応答に `Connection: keep-alive` を付けない。HTTP/1.1 の既定と同じなので、接続の扱いは変わらない。
@@ -2879,8 +2879,8 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 #### Node.js API の Wiki（5c）
 
-- Node.js API の `wiki.*` は、直接開いた索引の 2〜32 件の資料から抜粋でページを作り、同期のときに作り直し、MCP の `knowledge.wiki_get` で読むものだった。これは仕様（13〜16章）の Wiki と違うので、28.5節に従って仕様に合う CLI のエンジンを残し、`wiki.*`、`syncSource` と `syncDocuments` の結果の `wiki`、`knowledge.wiki_get`、エラーの番号 `WIKI_NOT_FOUND` と `WIKI_ERROR`、索引の `.dunlin-wiki-v1` への保存をなくした。npm での公開前なので、非推奨の期間は置かない。
-- Node.js からは、CLI と同じエンジンを `Dunlin.wiki`（コマンド）と `Dunlin.wikiServe`（画面）で呼べる。以前の索引に残る `.dunlin-wiki-v1` は読まない。
+- Node.js API の `wiki.*` は、直接開いた索引の 2〜32 件の資料から抜粋でページを作り、同期のときに作り直し、MCP の `knowledge.wiki_get` で読むものだった。これは仕様（13〜16章）の Wiki と違うので、28.5節に従って仕様に合う CLI のエンジンを残し、`wiki.*`、`syncSource` と `syncDocuments` の結果の `wiki`、`knowledge.wiki_get`、エラーの番号 `WIKI_NOT_FOUND` と `WIKI_ERROR`、索引の `.knowledge-nest-wiki-v1` への保存をなくした。npm での公開前なので、非推奨の期間は置かない。
+- Node.js からは、CLI と同じエンジンを `KnowledgeNest.wiki`（コマンド）と `KnowledgeNest.wikiServe`（画面）で呼べる。以前の索引に残る `.knowledge-nest-wiki-v1` は読まない。
 
 #### 段階5の終わり
 
@@ -2913,9 +2913,9 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 #### コマンド（6c）
 
-- npm の入口（`tools/rag/cli.mjs`）は、Node.js API の `Dunlin.runCli` を呼ぶだけにした。引数を Rust に渡して終了コードを返し、サーバーが動いている間だけ SIGINT と SIGTERM でサーバーを止める。`dunlin:index-open` の通知も入口から出す。使用法の一覧は `Dunlin.cliCommands()` で読める。
+- npm の入口（`tools/rag/cli.mjs`）は、Node.js API の `KnowledgeNest.runCli` を呼ぶだけにした。引数を Rust に渡して終了コードを返し、サーバーが動いている間だけ SIGINT と SIGTERM でサーバーを止める。`knowledge-nest:index-open` の通知も入口から出す。使用法の一覧は `KnowledgeNest.cliCommands()` で読める。
 - 引数の解釈は Node.js の `util.parseArgs`（strict）と同じ規則とエラーの文言にした。出力（JSON の結果と文字の表示）、エラーの番号と終了コード、診断と警告の表示も以前と同じである。以前と同じく、メッセージを持たない警告（設定の検査の警告）は、文字の表示で `undefined` と出る。
-- Wiki/PARA の設定の検査（以前の zod のスキーマ）、プロジェクトの読み込み、候補の設定と試行の上限、`init` の雛形とコメント、利用者設定（`~/.dunlin/config.yaml`）、ツールの追加と削除（hannoy の検査と導入、oar-ocr と lightonocr の取得、GPU の判定）も Rust で行う。取得は ureq で行い、Node.js の fetch と同じく転送先に従い、プロキシの環境変数は使わない。通信に失敗したときの文言は変わる。
+- Wiki/PARA の設定の検査（以前の zod のスキーマ）、プロジェクトの読み込み、候補の設定と試行の上限、`init` の雛形とコメント、利用者設定（`~/.knowledge-nest/config.yaml`）、ツールの追加と削除（hannoy の検査と導入、oar-ocr と lightonocr の取得、GPU の判定）も Rust で行う。取得は ureq で行い、Node.js の fetch と同じく転送先に従い、プロキシの環境変数は使わない。通信に失敗したときの文言は変わる。
 - 以前は `node:sqlite` で行っていた `state.sqlite` の操作（表の作成、ビルドとタグの読み出し、状態の集計）も Rust で行う。使用中のときの待ち時間（500 ミリ秒）と `DB_BUSY` は以前と同じである。
 - 旧実装の CLI を写した基準（テストの `cli-reference`）と Rust の CLI で、同じフォルダで順に 115 のコマンドを実行し、標準出力、標準エラー、終了コードと、書き出す 10 のファイルが一致することを確かめた（テストの `cli-parity`）。初期化と利用者設定、検査と診断、構築と候補での試行、検索、タグと採用、評価データ、評価とレポート、根拠の対応表、辞書、`serve --print-config`、Wiki/PARA のコマンド、引数とプロジェクトの誤りを含む。実行 ID、時刻、所要時間、時刻を含む評価データ・レポート・対応表の ID、索引の大きさは置き換えて比べる。構築、検索、評価、試行、辞書、Wiki、`serve` の既存のテストも、Rust の CLI でそのまま通る。
 - その後、利用者が試した結果から、`--json` を付けないときの表示を人が読む短い文に変えた（`status`、`build`、`search`、`eval`、`report` など）。ヘルプにはコマンドの説明を加え、`--version` と、打ち間違えたコマンド・オプション・動作の候補を示すようにした。`serve --print-config` は `mcpServers` の項目を表示する。`--json` の結果は変えていない。`cli-parity` は、表示を変えた 31 のコマンドで終了コードともう一方の出力を比べ、新しい表示は Rust の側で確かめる。
@@ -2958,7 +2958,7 @@ Node.js API（`dunlin` パッケージ）は、Rust のエンジンをそのま�
 
 2つのファイルは分けたままにする。
 
-- コーパスはエンジンの一部である。各ビルドの索引（`KnowledgeBase`）は共有のコーパスを開き、Node.js API の `Dunlin.open` は、`state.sqlite` を持たない索引ディレクトリに自分のコーパス（`.dunlin-corpus-v1`）を作る。まとめると、エンジンがプロジェクトの記録の形を知る必要があり、単独の索引には別の形が残る。
+- コーパスはエンジンの一部である。各ビルドの索引（`KnowledgeBase`）は共有のコーパスを開き、Node.js API の `KnowledgeNest.open` は、`state.sqlite` を持たない索引ディレクトリに自分のコーパス（`.knowledge-nest-corpus-v1`）を作る。まとめると、エンジンがプロジェクトの記録の形を知る必要があり、単独の索引には別の形が残る。
 - SQLite は1つのファイルに同時に1つしか書き込めない。`source` 段はコーパスに最大 64 MB ずつ本文を書き、`transform` 段はチャンク集合を書く。`state.sqlite` は段階の記録、タグ、採用、評価、Wiki の状態を短い処理で書き、CLI は 500 ミリ秒待って使用中なら `DB_BUSY` を返す。まとめると、構築の大きな書き込みが状態の短い更新を待たせる。
 - 大きさと扱いが違う。コーパスは資料の本文を持ち、資料とともに大きくなる。`state.sqlite` は記録と埋め込みのキャッシュ（`embeddings` 表）を持つ。キーワード検索だけなら小さい（`docs/` の17件で、`state.sqlite` が 184 KB、コーパスが 436 KB）。分けておくと、`status` で別々に大きさを示せ（受け入れ条件 A3）、別々に詰めたり退避したりできる。
 - ファイルをまたぐ整合は、書く順序で保っている。本文の版とチャンク集合をコーパスに書いてから、それを指す抽出の対応と段階の記録を `state.sqlite` に書く。途中で止まっても、どこからも指されない版やチャンク集合が残るだけで、記録が存在しない版を指すことはない。2つのファイルを1つの処理で更新する必要が出たら、`ATTACH` で開く。

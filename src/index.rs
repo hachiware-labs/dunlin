@@ -145,7 +145,7 @@ fn build(store: &Store, input: SnapshotId, location: &Path) -> StoreResult<usize
         };
         let input = serde_json::from_value(json!({
             "objectId": document,
-            "url": format!("dunlin://{source}/{document}"),
+            "url": format!("knowledge-nest://{source}/{document}"),
             "format": format,
             "content": content,
             "chunks": chunks,
@@ -166,7 +166,7 @@ fn build(store: &Store, input: SnapshotId, location: &Path) -> StoreResult<usize
 /// Builds the next generation of the index an information object describes, and notes where it
 /// is on the object.
 /// The longest path below the directory of an index: the journal of its database.
-const LONGEST_INSIDE: usize = "/.dunlin-corpus-v1/corpus.sqlite-journal".len();
+const LONGEST_INSIDE: usize = "/.knowledge-nest-corpus-v1/corpus.sqlite-journal".len();
 /// The longest path that is known to work on Windows, with some room left.
 const LONGEST_PATH: usize = 256;
 

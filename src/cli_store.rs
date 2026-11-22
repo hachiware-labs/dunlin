@@ -3,7 +3,7 @@
 //! `list`, `release`, `optimize` and `results` are the store's own commands. `build`, `eval`,
 //! `search` and `eval-data` are also commands of the store before it: they go to the versioned
 //! store when the configuration file is written for it, and stay as they were otherwise. The
-//! store of a project is `.dunlin/store`.
+//! store of a project is `.knowledge-nest/store`.
 
 use std::path::Path;
 
@@ -21,7 +21,7 @@ use crate::settings::{Settings, staged};
 use crate::store::{SnapshotId, Store, StoreError};
 
 /// The configuration file a command reads when none is given.
-const CONFIG: &str = "Dunlinfile.yaml";
+const CONFIG: &str = "KnowledgeNestfile.yaml";
 
 /// The options of a command that only the store before this one takes.
 fn earlier(command: &str) -> &'static [&'static str] {
@@ -222,7 +222,7 @@ fn list(store: &Store, only: Option<&str>) -> Result<(Value, String), CliError> 
         let hint = crate::cli_args::closest(only, words.iter().copied())
             .map_or(String::new(), |word| format!(" Did you mean {word}?"));
         return Err(invalid(format!(
-            "dunlin list does not know {only}.{hint} Use {}.",
+            "knowledge-nest list does not know {only}.{hint} Use {}.",
             words.join(", ")
         )));
     }
@@ -357,7 +357,7 @@ fn list(store: &Store, only: Option<&str>) -> Result<(Value, String), CliError> 
 
 fn usage(command: &str) -> CliError {
     invalid(format!(
-        "Check the arguments of dunlin {command}.\nUsage:\n{}",
+        "Check the arguments of knowledge-nest {command}.\nUsage:\n{}",
         crate::cli_args::wrapped_usage(command).unwrap_or_default()
     ))
 }
@@ -384,7 +384,7 @@ fn results(store: &Store) -> Result<(Value, String), CliError> {
     let names = optimizations(store)?;
     if !names.is_empty() {
         text.push_str(&format!(
-            "\nOptimizations: {}. dunlin results <name> shows the trials of one.",
+            "\nOptimizations: {}. knowledge-nest results <name> shows the trials of one.",
             names.join(", ")
         ));
     }
@@ -483,7 +483,7 @@ fn result(store: &Store, name: &str) -> Result<(Value, String), CliError> {
 /// Whether a command line is for the versioned store, and then the action and its argument.
 ///
 /// The store's own commands always are. A command both stores have is when the configuration
-/// file it reads is written for the versioned store: the file given, or `Dunlinfile.yaml` of
+/// file it reads is written for the versioned store: the file given, or `KnowledgeNestfile.yaml` of
 /// the project. `build` and `eval` then get the file as their argument.
 pub fn route(
     command: &str,
@@ -540,7 +540,7 @@ pub fn route(
     if !staged(&text) {
         if argued {
             return Err(invalid(format!(
-                "{file} is not written as a list of modules for each of extract, transform and index, so dunlin {command} does not take it as an argument."
+                "{file} is not written as a list of modules for each of extract, transform and index, so knowledge-nest {command} does not take it as an argument."
             )));
         }
         return Ok(None);
@@ -561,7 +561,7 @@ pub fn route(
             Ok(Some((action, Some((*file).to_owned()))))
         }
         ("eval-data", _) => Err(invalid(
-            "With a configuration file of this form, dunlin eval-data takes import <file> [--tag <name>].",
+            "With a configuration file of this form, knowledge-nest eval-data takes import <file> [--tag <name>].",
         )),
         _ => Err(usage(command)),
     }
@@ -579,8 +579,8 @@ pub fn command(
     say: &dyn Fn(&str),
 ) -> Result<(Value, String), CliError> {
     let project = Path::new(project);
-    let indexes = project.join(".dunlin/indexes");
-    let store = Store::open(&project.join(".dunlin/store")).map_err(failed)?;
+    let indexes = project.join(".knowledge-nest/indexes");
+    let store = Store::open(&project.join(".knowledge-nest/store")).map_err(failed)?;
 
     match action {
         "build" | "eval" => {

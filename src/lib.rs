@@ -150,7 +150,7 @@ pub struct KnowledgeBase {
 impl KnowledgeBase {
     /// Inspects the current keyword index without creating a knowledge base.
     pub fn inspect_index(path: &Path, cancel: &Cancellation) -> Result<Option<IndexStatus>> {
-        KeywordIndex::inspect(&path.join(".dunlin-index-v1"), cancel)
+        KeywordIndex::inspect(&path.join(".knowledge-nest-index-v1"), cancel)
     }
 
     pub fn open(path: &Path, cancel: &Cancellation) -> Result<Self> {
@@ -173,17 +173,17 @@ impl KnowledgeBase {
         cancel: &Cancellation,
     ) -> Result<Self> {
         cancel.check()?;
-        let index_path = path.join(".dunlin-index-v1");
+        let index_path = path.join(".knowledge-nest-index-v1");
         std::fs::create_dir_all(&index_path)
             .map_err(|_| Error::Io("Could not create the index directory"))?;
         let index = KeywordIndex::open(
             &index_path,
-            corpus_path.unwrap_or(&path.join(".dunlin-corpus-v1")),
+            corpus_path.unwrap_or(&path.join(".knowledge-nest-corpus-v1")),
             backend,
             keyword,
             cancel,
         )?;
-        let plans = PlanStore::open(&path.join(".dunlin-plans-v1"))?;
+        let plans = PlanStore::open(&path.join(".knowledge-nest-plans-v1"))?;
         cancel.check()?;
         Ok(Self { index, plans })
     }

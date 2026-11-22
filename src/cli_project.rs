@@ -1,4 +1,4 @@
-//! Projects of the CLI (spec 28.13 step 6c): finding `Dunlinfile.yaml`, reading and checking it,
+//! Projects of the CLI (spec 28.13 step 6c): finding `KnowledgeNestfile.yaml`, reading and checking it,
 //! the plan of each stage, builds, and the errors commands report, as `project.mjs` did.
 
 use std::path::Path;
@@ -10,7 +10,7 @@ use crate::registry::ModuleInfo;
 use crate::source_load::sha256_hex;
 use crate::transform_stage::StageError;
 
-pub const CONFIG_NAME: &str = "Dunlinfile.yaml";
+pub const CONFIG_NAME: &str = "KnowledgeNestfile.yaml";
 pub const PROJECT_TYPES: [&str; 4] = ["mcp", "rag", "wiki", "para"];
 pub const STAGES: [&str; 3] = ["source", "transform", "index"];
 
@@ -83,7 +83,7 @@ pub struct Paths {
 }
 
 pub fn project_paths(root: &str) -> Paths {
-    let data = node_path::join(root, &[".dunlin"]);
+    let data = node_path::join(root, &[".knowledge-nest"]);
     Paths {
         state: node_path::join(&data, &["state.sqlite"]),
         artifacts: node_path::join(&data, &["artifacts"]),
@@ -103,7 +103,7 @@ pub fn exists(path: &str) -> Result<bool, CliError> {
     }
 }
 
-/// `findProject(directory)`: the Dunlinfile of an explicit directory, or the nearest one above
+/// `findProject(directory)`: the KnowledgeNestfile of an explicit directory, or the nearest one above
 /// the working directory.
 pub fn find_project(directory: Option<&str>, cwd: &str) -> Result<Option<String>, CliError> {
     if let Some(directory) = directory {
@@ -724,7 +724,7 @@ pub fn validate_wiki(config: &ConfigValue, file: &str, parsed: &Parsed) -> Check
                 key("ocr"),
             ],
             text("The ocr tool"),
-            "Run dunlin add ocr.",
+            "Run knowledge-nest add ocr.",
         );
     }
     let content = sequence(
@@ -898,7 +898,7 @@ pub fn load_project(
         return Err(CliError::new(
             3,
             "PROJECT_REQUIRED",
-            "No Dunlinfile.yaml found. Run dunlin init <mcp|rag|wiki|para> <directory>.",
+            "No KnowledgeNestfile.yaml found. Run knowledge-nest init <mcp|rag|wiki|para> <directory>.",
         ));
     };
     let root = node_path::dirname(config_path);
@@ -910,7 +910,7 @@ pub fn load_project(
         CliError::new(
             2,
             "INVALID_CONFIG",
-            "Could not read a valid Dunlinfile.yaml",
+            "Could not read a valid KnowledgeNestfile.yaml",
         )
     };
     let input = std::fs::read(&file).map_err(|_| invalid())?;
@@ -960,8 +960,7 @@ pub fn load_project(
     ]
     .contains(&command);
     if !PROJECT_TYPES.contains(&kind.as_str()) {
-        let message =
-            "Expected init.type in the Dunlinfile. Generate a new standard file with dunlin init.";
+        let message = "Expected init.type in the KnowledgeNestfile. Generate a new standard file with knowledge-nest init.";
         return Err(
             CliError::new(2, "SECTION_MISSING", message).with_diagnostics(vec![object(vec![
                 ("code", text("SECTION_MISSING")),
@@ -1012,7 +1011,7 @@ pub fn load_project(
             return Err(CliError::new(
                 2,
                 "INVALID_CONFIG",
-                "Fix trial_limits in the project Dunlinfile.",
+                "Fix trial_limits in the project KnowledgeNestfile.",
             ));
         }
     }
@@ -1073,7 +1072,7 @@ pub fn load_project(
             ("code", text("EVAL_CONDITIONS_PINNED")),
             (
                 "message",
-                text("This evaluation uses the dataset and method from the project Dunlinfile."),
+                text("This evaluation uses the dataset and method from the project KnowledgeNestfile."),
             ),
         ]));
     }
@@ -1096,7 +1095,9 @@ pub fn load_project(
         return Err(CliError::new(
             3,
             "STATE_REQUIRED",
-            format!("Project state is missing. Initialize a project with dunlin init {kind}."),
+            format!(
+                "Project state is missing. Initialize a project with knowledge-nest init {kind}."
+            ),
         ));
     }
     if is_search_project(&kind)
@@ -1335,7 +1336,7 @@ pub fn current_build(
             3,
             "BUILD_NOT_FOUND",
             format!(
-                "Unknown build: {reference}. Pass a build tag or ID; dunlin status shows the current build."
+                "Unknown build: {reference}. Pass a build tag or ID; knowledge-nest status shows the current build."
             ),
         ));
     }
@@ -1343,7 +1344,7 @@ pub fn current_build(
         return Err(CliError::new(
             3,
             "BUILD_REQUIRED",
-            "No searchable build. Run dunlin build first.",
+            "No searchable build. Run knowledge-nest build first.",
         ));
     }
     Ok(None)
@@ -1362,7 +1363,7 @@ pub fn open_build(paths: &Paths, build: &ConfigValue) -> Result<crate::Knowledge
         return Err(CliError::new(
             3,
             "BUILD_REQUIRED",
-            "The build index is missing. Run dunlin build first.",
+            "The build index is missing. Run knowledge-nest build first.",
         ));
     }
     let keyword = build.get("keyword");

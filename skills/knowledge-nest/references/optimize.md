@@ -7,21 +7,21 @@ reuses whatever two trials share, and measures all of them the same way.
 
 ## Before you start
 
-1. The base configuration is built: `dunlin build`.
-2. Evaluation data exists: `dunlin eval-data import cases.json` (`references/evaluation.md`).
-3. You know the base's recall: `dunlin eval`. If it is already 1.000 on a handful of cases,
+1. The base configuration is built: `knowledge-nest build`.
+2. Evaluation data exists: `knowledge-nest eval-data import cases.json` (`references/evaluation.md`).
+3. You know the base's recall: `knowledge-nest eval`. If it is already 1.000 on a handful of cases,
    the data cannot show an improvement. Add harder cases first.
 
 Every trial uses the documents as they are in the store at that moment. The folder is not
 scanned again, so that trials differ in their settings and in nothing else. If documents
-changed, run `dunlin build` before optimizing.
+changed, run `knowledge-nest build` before optimizing.
 
 ## The instruction
 
 ```yaml
 # tune.yaml
 optimize:
-  base: Dunlinfile.yaml
+  base: KnowledgeNestfile.yaml
   vary:
     - name: chunking
       options:
@@ -86,7 +86,7 @@ run.
 ## Run
 
 ```sh
-dunlin optimize tune.yaml
+knowledge-nest optimize tune.yaml
 ```
 
 Progress goes to standard error, one block per trial. The name of the optimization is the
@@ -100,7 +100,7 @@ Trial  Recall  To base  Ran                   Time  What
 003    0.800   +0.080   transform+index+eval  0.3s  chunking=length(size=400),search=top10
 002    0.640   -0.080   eval                  0.1s  chunking=as-is,search=top5
 009    -       -        -                     -     chunking=..., (invalid: index.vector is not on the new store yet.)
-The files of the trials are in .dunlin/trials/tune.
+The files of the trials are in .knowledge-nest/trials/tune.
 Every trial used the documents docs, version 6 (6 documents).
 ```
 
@@ -110,7 +110,7 @@ Every trial used the documents docs, version 6 (6 documents).
   failures in a row the rest are not tried.
 
 Running the same instruction again does no work and gives the same table. See it later with
-`dunlin results tune`; from another terminal this also shows a run in progress.
+`knowledge-nest results tune`; from another terminal this also shows a run in progress.
 
 ## Look into trials
 
@@ -118,9 +118,9 @@ Each trial has one name, `<optimization>/<number>`, shared by its chunks, its in
 result.
 
 ```sh
-dunlin results tune/007                       # which cases trial 007 found and missed
-dunlin search "<question>" --index tune/007   # what a user would get from it
-dunlin eval .dunlin/trials/tune/007.yaml      # run one trial again by hand
+knowledge-nest results tune/007                       # which cases trial 007 found and missed
+knowledge-nest search "<question>" --index tune/007   # what a user would get from it
+knowledge-nest eval .knowledge-nest/trials/tune/007.yaml      # run one trial again by hand
 ```
 
 A trial that only changed `search` has no index of its own: it used the base's.
@@ -130,7 +130,7 @@ A trial that only changed `search` has no index of its own: it used the base's.
 Do not pick on the first decimal. Before recommending a trial:
 
 - **Is the difference more than a case or two?** With 25 cases, one case is 0.04.
-- **Which cases changed?** Compare `dunlin results tune/000` with the candidate. A trial
+- **Which cases changed?** Compare `knowledge-nest results tune/000` with the candidate. A trial
   that fixes three cases and breaks two is a different thing from one that fixes one.
 - **What does it cost?** Smaller chunks mean more chunks and a larger index; a larger
   `top_k` means more text for whatever reads the results.
@@ -141,20 +141,20 @@ Then confirm on `test` once (`references/evaluation.md`), and report both number
 ## Apply the chosen trial
 
 A trial's settings live in its file, not in the project's configuration. Until they are
-copied over, the next `dunlin build` uses the old settings.
+copied over, the next `knowledge-nest build` uses the old settings.
 
-1. Open `.dunlin/trials/<name>/<number>.yaml`.
-2. Copy its `transform`, `index` and `search` sections into `Dunlinfile.yaml`, replacing
+1. Open `.knowledge-nest/trials/<name>/<number>.yaml`.
+2. Copy its `transform`, `index` and `search` sections into `KnowledgeNestfile.yaml`, replacing
    the ones there.
 3. In the copied sections, change each `- tag: <name>/<number>` back to the project's own
    tag, or remove the line.
-4. Leave `extract`, `eval` and `serve` of `Dunlinfile.yaml` as they are. Do not copy the
+4. Leave `extract`, `eval` and `serve` of `KnowledgeNestfile.yaml` as they are. Do not copy the
    trial's `extract` (`- from: ...`): the project scans its folder.
-5. Run `dunlin eval`. It should report the trial's recall, and reuse the trial's chunks and
+5. Run `knowledge-nest eval`. It should report the trial's recall, and reuse the trial's chunks and
    index if the documents have not changed.
-6. Release when the user agrees: `dunlin release <the project's index tag, or default>`.
+6. Release when the user agrees: `knowledge-nest release <the project's index tag, or default>`.
 
-Editing `Dunlinfile.yaml` changes the project's settings for good. Show the user the diff
+Editing `KnowledgeNestfile.yaml` changes the project's settings for good. Show the user the diff
 and the numbers before you do it, unless they already asked you to apply the winner.
 
 ## Not there yet

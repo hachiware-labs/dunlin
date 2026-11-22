@@ -2,7 +2,7 @@ export interface OperationOptions {
   signal?: AbortSignal | undefined;
 }
 
-/** Where the CLI runs, for `Dunlin.runCli`. */
+/** Where the CLI runs, for `KnowledgeNest.runCli`. */
 export interface CliRunOptions {
   /** `process.execPath` and the launcher script, which `serve --print-config` reports. */
   execPath: string;
@@ -96,7 +96,7 @@ export interface LineRange {
   endLine: number;
 }
 
-/** A file for Dunlin.loadCorpus. */
+/** A file for KnowledgeNest.loadCorpus. */
 export interface LoadCorpusFile {
   id: string;
   file: string;
@@ -161,9 +161,9 @@ export interface LoadCorpusRequest {
   ocrVersion: string;
   /** `oar-ocr`, run in Rust, or `lightonocr` (the default), run as a separate process. */
   ocrTool?: 'oar-ocr' | 'lightonocr';
-  /** The folder `dunlin add oar-ocr` prepared. */
+  /** The folder `knowledge-nest add oar-ocr` prepared. */
   ocrHome?: string;
-  /** The runtime `dunlin add lightonocr` prepared. */
+  /** The runtime `knowledge-nest add lightonocr` prepared. */
   lighton?: LightonRuntime;
   /** The project root, for `{root}` in loader.command arguments. */
   root: string;
@@ -188,7 +188,7 @@ export interface LightonRuntime {
   model: string;
 }
 
-/** A parser route for `Dunlin.routeFiles` and `Dunlin.runSource`. */
+/** A parser route for `KnowledgeNest.routeFiles` and `KnowledgeNest.runSource`. */
 export interface ParserRoute {
   name: string;
   category: string;
@@ -255,7 +255,7 @@ export type TransformStageOutcome =
 export interface IndexStageRequest {
   /** state.sqlite of the project. */
   state: string;
-  /** `.dunlin/artifacts`: build directories and dictionary snapshots. */
+  /** `.knowledge-nest/artifacts`: build directories and dictionary snapshots. */
   artifacts: string;
   /** The shared corpus directory. */
   corpus: string;
@@ -335,7 +335,7 @@ export type BuildCommandOutcome =
   | { status: 'done'; output: Record<string, unknown>; warnings: { code: string; message: string }[] }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } };
 
-/** `dunlin tag`: names a build (the serving build when `reference` is absent). */
+/** `knowledge-nest tag`: names a build (the serving build when `reference` is absent). */
 export interface TagBuildRequest {
   state: string;
   name: string;
@@ -558,7 +558,7 @@ export interface ConfigIssue {
   hint: string;
 }
 
-/** Dunlin.validateConfig: diagnostics, and the module plan for each stage. */
+/** KnowledgeNest.validateConfig: diagnostics, and the module plan for each stage. */
 export interface ConfigValidation {
   errors: ConfigDiagnostic[];
   warnings: ConfigDiagnostic[];
@@ -567,12 +567,12 @@ export interface ConfigValidation {
   evalSettings: unknown;
 }
 
-/** Dunlin.parseConfig: the configuration and value lines, or a syntax error. */
+/** KnowledgeNest.parseConfig: the configuration and value lines, or a syntax error. */
 export type ParsedConfig =
   | { config: unknown; lines: [(string | number)[], number][]; syntaxError?: undefined }
   | { syntaxError: { line: number | null; message: string }; config?: undefined; lines?: undefined };
 
-/** How dunlin modules describe prints one module argument. */
+/** How knowledge-nest modules describe prints one module argument. */
 export interface ModuleArgInfo {
   type?: string;
   default?: unknown;
@@ -600,7 +600,7 @@ export interface ModuleDescription {
   args: Record<string, ModuleArgInfo>;
 }
 
-/** One argument read by Dunlin.readModuleArgs. */
+/** One argument read by KnowledgeNest.readModuleArgs. */
 export interface ModuleArgResult {
   key: string;
   /** Absent for an optional argument that was not given, and for invalid values. */
@@ -611,7 +611,7 @@ export interface ModuleArgResult {
   expected: ModuleArgInfo;
 }
 
-/** A file read by Dunlin.readSourceFiles: its bytes, or why it could not be read. */
+/** A file read by KnowledgeNest.readSourceFiles: its bytes, or why it could not be read. */
 export interface SourceFileRead {
   bytes?: Buffer | null;
   modifiedAtMs?: number | null;
@@ -631,7 +631,7 @@ export interface EvidenceExcerpt {
   locations: SourceLocation[];
 }
 
-/** A document for Dunlin.chunkDocuments. */
+/** A document for KnowledgeNest.chunkDocuments. */
 export interface ChunkDocument {
   content: string;
   /** Use Markdown headings as chunk titles. */
@@ -869,7 +869,7 @@ export interface ServeProjectHost {
   opened?(directory: string): void;
 }
 
-export type DunlinErrorCode =
+export type KnowledgeNestErrorCode =
   | 'LOAD_FAILED'
   | 'INVALID_ARGUMENT'
   | 'IO_ERROR'
@@ -885,9 +885,9 @@ export type DunlinErrorCode =
   | 'NATIVE_UNAVAILABLE'
   | 'MCP_UNAVAILABLE';
 
-export class DunlinError extends Error {
-  constructor(readonly code: DunlinErrorCode, message: string) {
+export class KnowledgeNestError extends Error {
+  constructor(readonly code: KnowledgeNestErrorCode, message: string) {
     super(message);
-    this.name = 'DunlinError';
+    this.name = 'KnowledgeNestError';
   }
 }

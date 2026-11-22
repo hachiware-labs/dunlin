@@ -4,7 +4,7 @@
 
 「検索が外れる気がする。チャンクを小さくすれば良くなる？」——その答えを、勘ではなく数字で出すための文書です。
 
-検索の良し悪しは、見た目では分かりません。ある質問で良くなった設定が、別の質問を外していることもあります。Dunlin では、質問と答えの組を登録しておけば、設定を変えるたびに「何問中何問の答えを拾えたか」を測れます。しかも、変えた所から後ろしか作り直さないので、試すのは速く、何通りでも比べられます。
+検索の良し悪しは、見た目では分かりません。ある質問で良くなった設定が、別の質問を外していることもあります。Knowledge-Nest では、質問と答えの組を登録しておけば、設定を変えるたびに「何問中何問の答えを拾えたか」を測れます。しかも、変えた所から後ろしか作り直さないので、試すのは速く、何通りでも比べられます。
 
 [入門](getting-started.md#7-次の段階版として残し数字で測る新しいコマンド) の7章で `build` と `eval` が動いた人を想定しています。
 
@@ -17,7 +17,7 @@
       (文書)     (チャンク)   (索引)   (検索)   (結果)
 ```
 
-- 段階の結果は、版として保管に残ります（`.dunlin/store`）。同じ入力と同じ処理なら、2度は実行されません。
+- 段階の結果は、版として保管に残ります（`.knowledge-nest/store`）。同じ入力と同じ処理なら、2度は実行されません。
 - 設定を変えると、**変えた段階から後ろだけ**が動きます。たとえば `transform` を変えても、文書の読み取りは再利用されます。
 - 結果には名前を付けられます。名前は種類ごと（文書、チャンク、索引、評価データ、評価の結果）に別の棚にあります。
 - 改善は、基準を測り、1か所を変えて測り、比べて選ぶ、という繰り返しです。
@@ -36,8 +36,8 @@
 ```
 
 ```sh
-dunlin eval-data import cases.json
-dunlin eval-data import cases.json --tag v2
+knowledge-nest eval-data import cases.json
+knowledge-nest eval-data import cases.json --tag v2
 ```
 
 - `source` と `document` は、文書の場所です。`source` は `source.filesystem` の `id`（省略時はフォルダ名）、`document` はそのフォルダの中の位置です。
@@ -58,8 +58,8 @@ eval:
 ```
 
 ```sh
-dunlin eval
-dunlin results
+knowledge-nest eval
+knowledge-nest results
 ```
 
 `eval` は、必要な段階を作ってから測り、回収率を表示します。
@@ -68,10 +68,10 @@ dunlin results
 Recall: 0.667 (2 of 3 cases)
 ```
 
-`dunlin results` は、名前の付いた評価の結果を、回収率の高い順に並べます。結果の名前を渡すと、ケースごとの順位が見えます。
+`knowledge-nest results` は、名前の付いた評価の結果を、回収率の高い順に並べます。結果の名前を渡すと、ケースごとの順位が見えます。
 
 ```sh
-dunlin results trial-400
+knowledge-nest results trial-400
 ```
 
 ```text
@@ -83,7 +83,7 @@ missed    filter       フィルターの交換
 ```
 
 - `Found at` は、正解の引用が検索結果の何番目に入っていたかです。`missed` は入っていなかった質問で、先頭に並びます。
-- 外れた質問を `dunlin search "<質問>"` で再現し、原因を探します。
+- 外れた質問を `knowledge-nest search "<質問>"` で再現し、原因を探します。
 
 | 外れ方 | 試すこと |
 |---|---|
@@ -93,7 +93,7 @@ missed    filter       フィルターの交換
 
 ## 4 1か所を変えて比べる（手で）
 
-基準の `Dunlinfile.yaml` をコピーし、変えたい段階だけを書き換えます。基準の名前を動かさないよう、変えた段階にはタグを付け直し、文書は基準の名前から始めます（`from`）。
+基準の `KnowledgeNestfile.yaml` をコピーし、変えたい段階だけを書き換えます。基準の名前を動かさないよう、変えた段階にはタグを付け直し、文書は基準の名前から始めます（`from`）。
 
 ```yaml
 # candidate.yaml
@@ -117,12 +117,12 @@ eval:
 ```
 
 ```sh
-dunlin eval candidate.yaml
-dunlin results
+knowledge-nest eval candidate.yaml
+knowledge-nest results
 ```
 
 - `extract` の `from: docs` は、フォルダを走査せず、`docs` という名前の文書の版を使います。基準と同じ文書で測れます。
-- 結果は `trial-400` の名前で残ります。`dunlin results` に基準の結果と並ぶので、回収率を比べます。
+- 結果は `trial-400` の名前で残ります。`knowledge-nest results` に基準の結果と並ぶので、回収率を比べます。
 - 評価の方法とデータが同じでなければ、比べても意味がありません。`eval.evidence` の `data` と `split` をそろえます。
 
 ## 5 チャンクに文脈を持たせる
@@ -148,12 +148,12 @@ transform:
 
 ## 6 たくさんの設定を、まとめて試す（optimize）
 
-候補を手で1つずつ作る代わりに、変えるところを指示に書くと、Dunlin が候補を作って順に測ります。
+候補を手で1つずつ作る代わりに、変えるところを指示に書くと、Knowledge-Nest が候補を作って順に測ります。
 
 ```yaml
 # tune.yaml
 optimize:
-  base: Dunlinfile.yaml
+  base: KnowledgeNestfile.yaml
   vary:
     - name: chunking
       options:
@@ -178,7 +178,7 @@ optimize:
 ```
 
 ```sh
-dunlin optimize tune.yaml
+knowledge-nest optimize tune.yaml
 ```
 
 ```text
@@ -208,17 +208,17 @@ Trial  Recall  To base  Ran                  Time   What
 結果を見直すときは、次のコマンドです。
 
 ```sh
-dunlin results            # 評価の結果と、最適化の名前の一覧
-dunlin results tune       # 最適化 tune の試行の表
-dunlin results tune/010   # 1つの試行のケースごとの結果
+knowledge-nest results            # 評価の結果と、最適化の名前の一覧
+knowledge-nest results tune       # 最適化 tune の試行の表
+knowledge-nest results tune/010   # 1つの試行のケースごとの結果
 ```
 
 `--name` を付けないときの最適化の名前は、指示のファイル名（拡張子なし）です。
 
-試行ごとの設定ファイルは `.dunlin/trials/<名前>/<番号>.yaml` に書かれます。気になる試行だけをやり直すには、そのファイルを指定します。
+試行ごとの設定ファイルは `.knowledge-nest/trials/<名前>/<番号>.yaml` に書かれます。気になる試行だけをやり直すには、そのファイルを指定します。
 
 ```sh
-dunlin eval .dunlin/trials/tune/010.yaml
+knowledge-nest eval .knowledge-nest/trials/tune/010.yaml
 ```
 
 > 軸にできるのは、いまのところ `transform`、`index`、`search` です。`extract` を書き換える選択肢、回収率以外の指標、前の結果から次の値を選ぶ探索は、まだありません。
@@ -226,14 +226,14 @@ dunlin eval .dunlin/trials/tune/010.yaml
 ## 7 リリースする
 
 ```sh
-dunlin list indexes
-dunlin release tune/010
-dunlin release main --name release
+knowledge-nest list indexes
+knowledge-nest release tune/010
+knowledge-nest release main --name release
 ```
 
 - `release <索引> [--name <名前>]` は、索引を提供用の名前に付けます。名前の既定は `release` です。
 - 名前に別の索引を付けると、置き換えたことが表示されます。前の索引に戻すには、もう一度その索引を `release` します。記録は消えません。
-- `dunlin list indexes` に、どの索引がどの名前で提供されているかが出ます。
+- `knowledge-nest list indexes` に、どの索引がどの名前で提供されているかが出ます。
 - 設定の `build --release` は、`build` で作った索引をそのまま提供用の名前にします。
 
 > `serve` は、この提供用の名前をまだ読みません。MCP や HTTP で提供するときは、従来の流れを使います。
@@ -255,14 +255,14 @@ extract:
 
 ## 9 従来の流れで使うもの
 
-次のものは、新しい流れではまだ使えません。`dunlin init` が作る従来の設定で使います。
+次のものは、新しい流れではまだ使えません。`knowledge-nest init` が作る従来の設定で使います。
 
 | やりたいこと | 従来のコマンド・文書 |
 |---|---|
 | ベクトル検索、ハイブリッド検索、リランク | 埋め込みの設定と `index.vector`、`fusion.rrf`。[MCP と RAG](mcp.md) · [モジュール](modules.md) |
 | ユーザー辞書 | `dictionary suggest` と `dictionary add`。[検索評価とユーザー辞書](evaluation.md) |
 | 質問の自動生成と確認 | `eval-data generate` と `eval-data review`。[検索評価とユーザー辞書](evaluation.md) |
-| PDF、Office、HTML、OCR | `loader.auto` と `dunlin add ocr`。[PDF の抽出](pdf-extraction.md) |
+| PDF、Office、HTML、OCR | `loader.auto` と `knowledge-nest add ocr`。[PDF の抽出](pdf-extraction.md) |
 | MCP・HTTP での提供、`ask` | `serve`、`ask`。[MCP と RAG](mcp.md) |
 | エージェントとの調整 | [エージェントと試行する](agents.md) |
 
@@ -272,17 +272,17 @@ extract:
 
 Wiki と PARA は検索の知識とは別の仕組みで、この文書の版の保管には載っていません。使い方は [Wiki・PARA の使い方](wiki.md) にあります。要点です。
 
-- 取り込みは `dunlin ingress <資料>` です。引用が資料と一字一句一致しない記述は保存されず、`CITATION_REJECTED` の警告で示されます。
-- `dunlin verify` で引用・原本の版・リンクを、`dunlin verify --content` でモデルを使ってページ間の食い違いを調べます。
-- ページへの指示は `dunlin instruct <ページ> "指示"`、今後も使う決まりは `dunlin instruct --persistent "決まり"` です。
-- 変更は作業単位で記録されます。望ましくなければ `dunlin undo <作業ID>` で戻せます。原本は書き換えられません。
-- 長い取り込みは `dunlin progress <作業ID>` で進み具合を確認できます。
+- 取り込みは `knowledge-nest ingress <資料>` です。引用が資料と一字一句一致しない記述は保存されず、`CITATION_REJECTED` の警告で示されます。
+- `knowledge-nest verify` で引用・原本の版・リンクを、`knowledge-nest verify --content` でモデルを使ってページ間の食い違いを調べます。
+- ページへの指示は `knowledge-nest instruct <ページ> "指示"`、今後も使う決まりは `knowledge-nest instruct --persistent "決まり"` です。
+- 変更は作業単位で記録されます。望ましくなければ `knowledge-nest undo <作業ID>` で戻せます。原本は書き換えられません。
+- 長い取り込みは `knowledge-nest progress <作業ID>` で進み具合を確認できます。
 
 ## 11 チェックリスト
 
 - [ ] 評価データが、実際の質問に近い言い回しで10件以上ある
-- [ ] 基準を `dunlin eval` で測り、結果に名前がある
+- [ ] 基準を `knowledge-nest eval` で測り、結果に名前がある
 - [ ] 試行は、評価の方法とデータを基準とそろえた
 - [ ] 平均だけでなく、外れた質問（`missed`）がどう変わったかを見た
 - [ ] 採用の前に、`split: test` で測った
-- [ ] `release` した索引を、`dunlin list indexes` で確かめた
+- [ ] `release` した索引を、`knowledge-nest list indexes` で確かめた

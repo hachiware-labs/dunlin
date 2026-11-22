@@ -15,14 +15,14 @@ const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const runNode = promisify(execFile);
 
 test('initializes the four project types through the public CLI', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-init-types-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-init-types-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   for (const type of ['mcp', 'rag', 'wiki', 'para']) {
     const searchProject = ['mcp', 'rag'].includes(type);
     const purpose = searchProject ? [] : ['--purpose', '運用手順を整理する'];
     await run('init', type, type, ...purpose);
-    const config = parse(await readFile(join(root, type, 'Dunlinfile.yaml'), 'utf8'));
+    const config = parse(await readFile(join(root, type, 'KnowledgeNestfile.yaml'), 'utf8'));
     assert.deepEqual(config.init, { version: 1, type });
     if (searchProject) {
       assert.deepEqual(config.source.modules[0], { use: 'source.filesystem', with: { path: './docs', exclude: [] } });
@@ -44,7 +44,7 @@ test('initializes the four project types through the public CLI', async (t) => {
       assert.equal(config.models.writer.model, null);
     }
   }
-  const legacyPath = join(root, 'mcp', 'Dunlinfile.yaml');
+  const legacyPath = join(root, 'mcp', 'KnowledgeNestfile.yaml');
   const legacy = parse(await readFile(legacyPath, 'utf8'));
   legacy.init.type = 'rag';
   await writeFile(legacyPath, stringify(legacy));
@@ -58,13 +58,13 @@ test('initializes the four project types through the public CLI', async (t) => {
 });
 
 test('copies global model defaults into new projects and accepts explicit overrides', { timeout: 30_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-global-config-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-global-config-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const path = join(root, 'settings', 'config.yaml');
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: path, OPENAI_API_KEY: '' };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: path, OPENAI_API_KEY: '' };
   const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run(...args, '--json')).stdout);
-  const read = (project) => readFile(join(root, project, 'Dunlinfile.yaml'), 'utf8');
+  const read = (project) => readFile(join(root, project, 'KnowledgeNestfile.yaml'), 'utf8');
   assert.deepEqual((await json('config', 'list')).data, { path, version: 1 });
   await json('config', 'set', 'embedding', '--model', 'local-embed');
   await json('config', 'set', 'llm', '--provider', 'openai', '--model', 'answer-model');
@@ -128,14 +128,14 @@ test('copies global model defaults into new projects and accepts explicit overri
 });
 
 test('copies the global OCR selection into each project type and accepts init overrides', { timeout: 30_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-global-ocr-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-global-ocr-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const path = join(root, 'global.yaml');
   const ocrHome = join(root, 'ocr');
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: path, DUNLIN_OCR_HOME: ocrHome };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: path, KNOWLEDGE_NEST_OCR_HOME: ocrHome };
   const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run(...args, '--json')).stdout);
-  const read = async (name) => parse(await readFile(join(root, name, 'Dunlinfile.yaml'), 'utf8'));
+  const read = async (name) => parse(await readFile(join(root, name, 'KnowledgeNestfile.yaml'), 'utf8'));
   const loader = (config) => (config.source ?? config.ingress).modules.find(({ use }) => use === 'loader.auto');
 
   await json('config', 'set', 'llm', '--model', 'local-writer');
@@ -187,7 +187,7 @@ test('copies the global OCR selection into each project type and accepts init ov
   assert.deepEqual((await json('config', 'set', 'ocr')).data.ocr, { tool: 'oar-ocr' });
 
   // The former tool name stays valid, and a project uses one OCR tool.
-  const configPath = join(root, 'enabled', 'Dunlinfile.yaml');
+  const configPath = join(root, 'enabled', 'KnowledgeNestfile.yaml');
   const text = await readFile(configPath, 'utf8');
   await writeFile(configPath, text.replace(/tools:[\s\S]*$/u, `tools:
   - name: ocr
@@ -206,14 +206,14 @@ test('copies the global OCR selection into each project type and accepts init ov
 });
 
 test('searches Japanese questions and pins the user dictionary to its build', { timeout: 35_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-japanese-search-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-japanese-search-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   await run('init', 'mcp', 'kb');
   const docs = join(root, 'kb', 'docs');
-  const configPath = join(root, 'kb', 'Dunlinfile.yaml');
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const compound = '超伝導異常監視モジュール';
   await writeFile(join(docs, 'guide.txt'), '保守手順\nメカニカルシールは6か月ごとに交換してください。\nポンプは毎月の第1営業日に点検を実施します。\n');
   await writeFile(join(docs, 'module.txt'), compound + 'を交換します。\n');
@@ -259,12 +259,12 @@ test('searches Japanese questions and pins the user dictionary to its build', { 
 });
 
 test('runs only the selected stages and indexes the saved chunk ranges', { timeout: 30_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-stages-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-stages-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   await run('init', 'mcp', 'kb');
-  const path = join(root, 'kb', 'Dunlinfile.yaml');
+  const path = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const doc = join(root, 'kb', 'docs', 'guide.txt');
   await writeFile(doc, '準備の案内\n作業手順はこちら\n後片付け\n');
   await assert.rejects(json('transform'), { code: 3 });
@@ -304,15 +304,15 @@ test('runs only the selected stages and indexes the saved chunk ranges', { timeo
     assert.equal(error.code, 2);
     const result = JSON.parse(error.stdout);
     assert.deepEqual(result.errors.map(({ code }) => code), ['ARG_TYPE', 'ARG_UNKNOWN']);
-    assert.ok(result.errors.every(({ file, line }) => file.endsWith('Dunlinfile.yaml') && line > 0));
+    assert.ok(result.errors.every(({ file, line }) => file.endsWith('KnowledgeNestfile.yaml') && line > 0));
     return true;
   });
 });
 
 test('shares immutable segment files while preserving the previous build', { timeout: 30_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-index-segments-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-index-segments-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   const json = async (...args) => JSON.parse((await runNode(process.execPath, [cli, ...args, '--json'],
     { cwd: root, env, encoding: 'utf8', timeout: 10_000 })).stdout);
   await json('init', 'rag', '.');
@@ -323,8 +323,8 @@ test('shares immutable segment files while preserving the previous build', { tim
   const original = (await json('search', '交換周期')).data;
   assert.match(original.context.text, /6か月/u);
 
-  const artifacts = join(root, '.dunlin', 'artifacts');
-  const prior = join(artifacts, initial.run_id, '.dunlin-index-v1');
+  const artifacts = join(root, '.knowledge-nest', 'artifacts');
+  const prior = join(artifacts, initial.run_id, '.knowledge-nest-index-v1');
   const files = await readdir(prior);
   const segment = files.find((name) => /^[0-9a-f]{32}\.idx$/u.test(name));
   assert.ok(segment);
@@ -340,7 +340,7 @@ test('shares immutable segment files while preserving the previous build', { tim
 
   await writeFile(document, '交換周期は3か月です。\n');
   const updated = await json('build');
-  const next = join(artifacts, updated.run_id, '.dunlin-index-v1');
+  const next = join(artifacts, updated.run_id, '.knowledge-nest-index-v1');
   const [oldFile, newFile] = await Promise.all([stat(priorIndex, { bigint: true }), stat(join(next, segment), { bigint: true })]);
   if (supportsLinks) {
     assert.equal(newFile.ino, oldFile.ino);
@@ -357,7 +357,7 @@ test('shares immutable segment files while preserving the previous build', { tim
 });
 
 test('initializes, builds, searches and serves the same Japanese evidence over MCP', { timeout: 30_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-project-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-project-'));
   const client = new Client({ name: 'project-test', version: '1.0.0' });
   t.after(async () => {
     await client.close();
@@ -368,26 +368,26 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   await mkdir(docs);
   await writeFile(join(docs, 'guide.md'), '# ガイド\n作業手順を確認してください。\n');
   await writeFile(join(docs, 'notes.bin'), 'not a supported standard file');
-  const run = (cwd, ...args) => runNode(process.execPath, [cli, ...args], { cwd, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, timeout: 10_000, encoding: 'utf8' });
+  const run = (cwd, ...args) => runNode(process.execPath, [cli, ...args], { cwd, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, timeout: 10_000, encoding: 'utf8' });
   const json = async (cwd, ...args) => JSON.parse((await run(cwd, ...args, '--json')).stdout);
 
   // A missing source folder stops init; a folder removed after init stops build with its path.
   const unknown = await run(root, 'init', 'mcp', './nowhere-kb', '--source', './nowhere').catch((error) => error);
   assert.equal(unknown.code, 2);
   assert.match(unknown.stderr, /^Source folder not found: .*nowhere\. Pass an existing folder to --source\./mu);
-  await assert.rejects(stat(join(root, 'nowhere-kb', 'Dunlinfile.yaml')), { code: 'ENOENT' });
+  await assert.rejects(stat(join(root, 'nowhere-kb', 'KnowledgeNestfile.yaml')), { code: 'ENOENT' });
   await mkdir(join(root, 'removed'));
   await run(root, 'init', 'mcp', './removed-kb', '--source', './removed');
   await rm(join(root, 'removed'), { recursive: true });
   const removed = await run(join(root, 'removed-kb'), 'build').catch((error) => error);
   assert.equal(removed.code, 3);
-  assert.match(removed.stderr, /^Source folder not found: .*removed\. Create it, or set the path of source\.filesystem in Dunlinfile\.yaml\./mu);
+  assert.match(removed.stderr, /^Source folder not found: .*removed\. Create it, or set the path of source\.filesystem in KnowledgeNestfile\.yaml\./mu);
 
   await run(root, 'init', 'mcp', './knowledge', '--source', './manuals');
-  const config = await readFile(join(project, 'Dunlinfile.yaml'), 'utf8');
+  const config = await readFile(join(project, 'KnowledgeNestfile.yaml'), 'utf8');
   assert.equal(parse(config).init.type, 'mcp');
   await assert.rejects(run(root, 'init', 'mcp', './knowledge'), { code: 2 });
-  assert.equal(await readFile(join(project, 'Dunlinfile.yaml'), 'utf8'), config);
+  assert.equal(await readFile(join(project, 'KnowledgeNestfile.yaml'), 'utf8'), config);
   assert.equal((await json(project, 'status')).data.build_id, null);
   await assert.rejects(run(project, 'search', '手順', '--json'), (error) => {
     assert.equal(error.code, 3);
@@ -430,9 +430,9 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   // Without --json, print-config prints an mcpServers entry to paste into a client's settings.
   const printed = await run(root, '--project', project, 'serve', '--print-config');
   const servers = JSON.parse(printed.stdout).mcpServers;
-  assert.deepEqual(Object.keys(servers), ['dunlin-knowledge']);
+  assert.deepEqual(Object.keys(servers), ['knowledge-nest-knowledge']);
   assert.match(printed.stderr, /mcpServers/u);
-  const launch = servers['dunlin-knowledge'];
+  const launch = servers['knowledge-nest-knowledge'];
   await client.connect(new StdioClientTransport({ ...launch, cwd: root, stderr: 'ignore' }));
   const { structuredContent, isError } = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順' } });
   assert.ok(!isError);
@@ -456,7 +456,7 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   await writeFile(join(docs, 'guide.md'), '交換手順を変更しました。\n');
   const edited = parse(config);
   edited.index.modules[0].with = { tokenizer: 'word', short_query: 'none' };
-  await writeFile(join(project, 'Dunlinfile.yaml'), stringify(edited));
+  await writeFile(join(project, 'KnowledgeNestfile.yaml'), stringify(edited));
   const incompatible = (await json(project, 'build', '--skip-unsupported')).data;
   assert.notEqual(incompatible.build_id, updated.build_id);
   const pinned = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順' } });

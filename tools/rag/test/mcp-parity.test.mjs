@@ -89,21 +89,21 @@ async function compare(t, actual, expected) {
 }
 
 async function project(t) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-mcp-parity-'));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-mcp-parity-'));
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   await runNode(process.execPath, [cli, 'init', 'mcp', 'kb'], { cwd: root, env });
   // The Node API example opens an index with the default keyword settings: words.
-  const configPath = join(root, 'kb', 'Dunlinfile.yaml');
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   config.index.modules[0].with = { tokenizer: 'word', short_query: 'none' };
   await writeFile(configPath, stringify(config));
   await writeFile(join(root, 'kb', 'docs', 'guide.md'), '# Steps\n\nReplace the pump seal. See [notes](notes.md).\n\n## Checks\n\nCheck the pump monthly.\n');
   await writeFile(join(root, 'kb', 'docs', 'notes.md'), '# Notes\n\nThe pump was replaced in April.\n');
   await runNode(process.execPath, [cli, '--project', 'kb', 'build'], { cwd: root, env });
-  const state = new DatabaseSync(join(root, 'kb', '.dunlin', 'state.sqlite'), { readOnly: true });
+  const state = new DatabaseSync(join(root, 'kb', '.knowledge-nest', 'state.sqlite'), { readOnly: true });
   const build = JSON.parse(state.prepare('SELECT manifest FROM project JOIN builds ON builds.id = project.build_id').get().manifest);
   state.close();
-  return { root, env, index: join(root, 'kb', '.dunlin', 'artifacts', build.index) };
+  return { root, env, index: join(root, 'kb', '.knowledge-nest', 'artifacts', build.index) };
 }
 
 const invalidSearches = [

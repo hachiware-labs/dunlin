@@ -1,7 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { parseDocument } from 'yaml';
 
 import { atomicWrite, revision } from './authoring/files.mjs';
@@ -79,7 +79,7 @@ async function* analyzeMisses(misses, report, dictionary) {
   const batch = [];
   async function* analyzeBatch() {
     const texts = [...new Set(batch.flatMap((item) => item.context ? [item.context.query, item.context.body] : []))];
-    const analyses = texts.length ? await Dunlin.analyzeJapanese(texts, dictionary) : [];
+    const analyses = texts.length ? await KnowledgeNest.analyzeJapanese(texts, dictionary) : [];
     const tokens = new Map(texts.map((text, i) => [text, analyses[i]]));
     for (const { miss, context } of batch) {
       if (!context) {
@@ -155,7 +155,7 @@ export async function suggestDictionary(report, misses, dictionary) {
   return { report_id: report.id, build_id: report.build_id,
     counts: Object.fromEntries(Object.entries(classes).map(([key, questions]) => [key, questions.size])),
     candidates: [...candidates.values()], findings,
-    ...(findings.some(({ reason }) => reason === 'legacy_mixed_recovery') && { hint: 'Run dunlin eval again for per-evidence diagnostics.' }) };
+    ...(findings.some(({ reason }) => reason === 'legacy_mixed_recovery') && { hint: 'Run knowledge-nest eval again for per-evidence diagnostics.' }) };
 }
 
 export function dictionaryText(data) {
@@ -190,7 +190,7 @@ export async function addDictionary(project, configPath, selected) {
   if (revision(input) !== project.configDigest) {
     throw new DictionaryError(4, 'CANDIDATE_CHANGED', 'The candidate configuration changed. Retry with its latest contents.');
   }
-  const csv = await Dunlin.mergeUserDictionary(keyword.args.user_dictionary ?? undefined, resolve(selected)).catch((error) => {
+  const csv = await KnowledgeNest.mergeUserDictionary(keyword.args.user_dictionary ?? undefined, resolve(selected)).catch((error) => {
     if (error.code === 'INVALID_ARGUMENT') throw new DictionaryError(2, 'INVALID_USER_DICTIONARY',
       `Check the selected CSV ${selected}${keyword.args.user_dictionary ? ' and existing CSV ' + keyword.args.user_dictionary : ''}. ${error.message}`);
     throw error;

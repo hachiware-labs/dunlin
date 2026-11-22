@@ -96,7 +96,7 @@ export function checkCommand(values, configFile) {
   }
   if (values.version === undefined && values.version_command === undefined) {
     return { issues, warning: { field: ['version'], expected: 'version or version_command',
-      hint: 'Without a version, Dunlin cannot detect tool updates. Run dunlin build --force after updating the tool.' } };
+      hint: 'Without a version, Knowledge-Nest cannot detect tool updates. Run knowledge-nest build --force after updating the tool.' } };
   }
   return { issues };
 }
@@ -151,7 +151,7 @@ export async function parseWithCommand(route, bytes, name, { root, version, sign
     const extension = extname(name).toLowerCase();
     let input;
     if (route.args.input === 'file') {
-      directory = await mkdtemp(join(tmpdir(), 'dunlin-parse-'));
+      directory = await mkdtemp(join(tmpdir(), 'knowledge-nest-parse-'));
       input = join(directory, 'source' + (/^\.[\p{L}\p{N}_-]{1,16}$/u.test(extension) ? extension : ''));
       await writeFile(input, bytes, { flag: 'wx' });
     }

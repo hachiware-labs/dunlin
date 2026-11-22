@@ -12,10 +12,10 @@ import { promisify } from 'node:util';
 const folders = process.argv.slice(2).length ? process.argv.slice(2) : [fileURLToPath(new URL('../docs', import.meta.url))];
 const cli = fileURLToPath(new URL('../tools/rag/cli.mjs', import.meta.url));
 const temp = await realpath(tmpdir());
-const root = await realpath(await mkdtemp(join(temp, 'dunlin-storage-bench-')));
-if (dirname(root) !== temp || !basename(root).startsWith('dunlin-storage-bench-')) throw new Error('Unexpected temporary directory.');
+const root = await realpath(await mkdtemp(join(temp, 'knowledge-nest-storage-bench-')));
+if (dirname(root) !== temp || !basename(root).startsWith('knowledge-nest-storage-bench-')) throw new Error('Unexpected temporary directory.');
 const exec = promisify(execFile);
-const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'empty-global.yaml') };
+const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'empty-global.yaml') };
 async function run(cwd, ...args) {
   const { stdout } = await exec(process.execPath, [cli, ...args, '--json'], { cwd, env, maxBuffer: 64 * 1024 * 1024 });
   return JSON.parse(stdout).data;
@@ -46,7 +46,7 @@ try {
   const docs = join(project, 'docs');
   for (const folder of folders) await cp(folder, join(docs, basename(folder)), { recursive: true, filter: (path) => !/\.(png|jpe?g|svg)$/iu.test(path) });
   const build = await run(project, 'build');
-  const data = join(project, '.dunlin');
+  const data = join(project, '.knowledge-nest');
   const corpus = new DatabaseSync(await find(data, 'corpus.sqlite'), { readOnly: true });
   let chunkBytes = 0;
   let searchTextBytes = 0;
@@ -63,7 +63,7 @@ try {
   const revisions = corpus.prepare('SELECT count(*) AS count, sum(length(record)) AS bytes FROM revisions').get();
   corpus.close();
   const originals = await find(data, 'originals');
-  const index = await find(data, '.dunlin-index-v1');
+  const index = await find(data, '.knowledge-nest-index-v1');
   const store = index ? (await readdir(index)).filter((name) => name.endsWith('.store')) : [];
   let storeBytes = 0;
   for (const name of store) storeBytes += await bytes(join(index, name));

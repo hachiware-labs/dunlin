@@ -1,4 +1,4 @@
-name: Release Dunlin
+name: Release Knowledge-Nest
 
 # Builds the addon and index tool on every supported platform and assembles the npm
 # tarballs. Publishing happens only when `publish` is selected and package.json is
@@ -75,7 +75,7 @@ jobs:
       - run: npm run release:prepare -- --artifacts artifacts
       - uses: actions/upload-artifact@v4
         with:
-          name: dunlin-release
+          name: knowledge-nest-release
           path: dist/release/**/*.tgz
           if-no-files-found: error
       - name: Refuse to publish a private package

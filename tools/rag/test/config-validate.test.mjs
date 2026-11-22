@@ -45,22 +45,22 @@ const mutations = {
   argUnknown: (c) => { c.transform.modules[1].with.sise = 1; c.transform.modules[1].with.zzzzzzzzzz = 2; return c; },
   argBad: (c) => { c.transform.modules[1].with = { size: 1.5, overlap: -1, unit: 'words' }; return c; },
   argDefaulted: (c) => { c.transform.modules[1].with = {}; return c; },
-  pathEnvMissing: (c) => { c.source.modules[0].with.path = '${DUNLIN_TEST_MISSING_VAR}/docs'; return c; },
-  pathEnvPresent: (c) => { c.source.modules[0].with.path = '${DUNLIN_TEST_PRESENT_VAR}/docs'; return c; },
+  pathEnvMissing: (c) => { c.source.modules[0].with.path = '${KNOWLEDGE_NEST_TEST_MISSING_VAR}/docs'; return c; },
+  pathEnvPresent: (c) => { c.source.modules[0].with.path = '${KNOWLEDGE_NEST_TEST_PRESENT_VAR}/docs'; return c; },
   pathAbsolute: (c) => { c.source.modules[0].with.path = '../shared/./docs/'; return c; },
-  pathBlank: (c) => { c.source.modules[0].with.path = '${DUNLIN_TEST_EMPTY_VAR}'; return c; },
+  pathBlank: (c) => { c.source.modules[0].with.path = '${KNOWLEDGE_NEST_TEST_EMPTY_VAR}'; return c; },
   overlap: (c) => { c.transform.modules[1].with.overlap = 900; return c; },
   ocrWithoutTool: (c) => { c.source.modules.push({ use: 'loader.ocr' }); at(c, 'source', 'loader.auto').with.ocr = 'loader.ocr'; return c; },
   ocrWithTool: (c) => ({ ...mutations.ocrWithoutTool(c), tools: [{ name: 'ocr', version: toolsCatalog.get('ocr').version }] }),
-  commandChecks: (c) => { c.source.modules.push({ use: 'loader.command', with: { match: ['*.x'], command: ['{input}', 'a{bogus}', '{{literal}}', '{name}{ext}', '{', 'x}'], input: 'file', version: '1', version_command: ['dunlin-no-such-tool', '{input}'], env: { A: 'x\u0000', B: '${DUNLIN_TEST_MISSING_VAR}' } } }); return c; },
+  commandChecks: (c) => { c.source.modules.push({ use: 'loader.command', with: { match: ['*.x'], command: ['{input}', 'a{bogus}', '{{literal}}', '{name}{ext}', '{', 'x}'], input: 'file', version: '1', version_command: ['knowledge-nest-no-such-tool', '{input}'], env: { A: 'x\u0000', B: '${KNOWLEDGE_NEST_TEST_MISSING_VAR}' } } }); return c; },
   commandStdin: (c) => { c.source.modules.push({ use: 'loader.command', with: { match: ['*.x'], command: [process.execPath, '{input}'], input: 'stdin' } }); return c; },
   commandNoInput: (c) => { c.source.modules.push({ use: 'loader.command', with: { match: ['*.x'], command: [process.execPath, '--version'] } }); return c; },
   commandRelative: (c) => { c.source.modules.push({ use: 'loader.command', with: { match: ['*.x'], command: ['./missing-tool', '{input}'], version: '1' } }); return c; },
   hannoyWithoutTool: (c) => { c.index.modules.push({ use: 'hannoy.index', with: { model: 'embedder' } }); return c; },
   keywordTrigram: (c) => { at(c, 'index', 'index.keyword').with = { tokenizer: 'trigram' }; return c; },
   keywordBigramConflict: (c) => { at(c, 'index', 'index.keyword').with = { tokenizer: 'word', short_query: 'bigram', user_dictionary: 'dict.csv' }; return c; },
-  keywordDictionary: (c) => { at(c, 'index', 'index.keyword').with = { tokenizer: 'lindera', user_dictionary: ' ${DUNLIN_TEST_PRESENT_VAR}/dict.csv ' }; return c; },
-  keywordDictionaryMissing: (c) => { at(c, 'index', 'index.keyword').with = { tokenizer: 'lindera', user_dictionary: '${DUNLIN_TEST_MISSING_VAR}.csv' }; return c; },
+  keywordDictionary: (c) => { at(c, 'index', 'index.keyword').with = { tokenizer: 'lindera', user_dictionary: ' ${KNOWLEDGE_NEST_TEST_PRESENT_VAR}/dict.csv ' }; return c; },
+  keywordDictionaryMissing: (c) => { at(c, 'index', 'index.keyword').with = { tokenizer: 'lindera', user_dictionary: '${KNOWLEDGE_NEST_TEST_MISSING_VAR}.csv' }; return c; },
   rerank: (c) => { c.search.modules.splice(-1, 0, { use: 'rerank.model', with: { model: 'missing' } }); return c; },
   rerankOk: (c) => ({ ...mutations.rerank(c), models: { ...c.models, missing: { kind: 'chat', provider: 'ollama', model: 'm' } } }),
   answerBad: (c) => { if (c.ask) c.ask.modules[0].with.model = 'nothing'; return c; },
@@ -114,12 +114,12 @@ function comparable(result) {
 }
 
 test('validates configurations exactly as the JavaScript validation did', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-validate-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-validate-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const file = join(root, 'Dunlinfile.yaml');
-  process.env.DUNLIN_TEST_PRESENT_VAR = 'present';
-  process.env.DUNLIN_TEST_EMPTY_VAR = '   ';
-  delete process.env.DUNLIN_TEST_MISSING_VAR;
+  const file = join(root, 'KnowledgeNestfile.yaml');
+  process.env.KNOWLEDGE_NEST_TEST_PRESENT_VAR = 'present';
+  process.env.KNOWLEDGE_NEST_TEST_EMPTY_VAR = '   ';
+  delete process.env.KNOWLEDGE_NEST_TEST_MISSING_VAR;
   let compared = 0;
   for (const [templateName, template] of Object.entries(templates)) {
     for (const [mutationName, mutate] of Object.entries(mutations)) {

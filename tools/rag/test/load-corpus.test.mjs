@@ -10,7 +10,7 @@ import { loadCorpus } from './fixtures/cli-reference/project-content.mjs';
 import { defaultRoutes } from './fixtures/cli-reference/project-parsers.mjs';
 
 async function fixture(t, files) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-load-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-load-'));
   const docs = join(root, 'docs');
   await mkdir(docs);
   for (const [name, body] of files) await writeFile(join(docs, name), body);

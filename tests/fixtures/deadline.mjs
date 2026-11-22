@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { pbkdf2 } from 'node:crypto';
 import { promisify } from 'node:util';
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
-const database = await Dunlin.open(process.argv[2]);
+const database = await KnowledgeNest.open(process.argv[2]);
 try {
-  const occupyingWorker = promisify(pbkdf2)('dunlin', 'fixture', 300_000, 32, 'sha256');
+  const occupyingWorker = promisify(pbkdf2)('knowledge-nest', 'fixture', 300_000, 32, 'sha256');
   const search = assert.rejects(database.search('keyword', { latencyBudgetMs: 1 }), { code: 'TIMEOUT' });
   const timedExplore = database.explore('keyword', { timeoutMs: 1 });
   const controller = new AbortController();

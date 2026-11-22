@@ -28,19 +28,19 @@ function comparable(data, project) {
 }
 
 test('moves a project built before step 2e without parsing again and keeps its search results', { timeout: 120_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-layout-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-layout-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
-  const dunlin = async (...args) => JSON.parse((await runNode(process.execPath, [cli, '--project', 'project', ...args, '--json'],
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const knowledgeNest = async (...args) => JSON.parse((await runNode(process.execPath, [cli, '--project', 'project', ...args, '--json'],
     { cwd: root, env, encoding: 'utf8', timeout: 60_000 })).stdout);
   await runNode(process.execPath, [cli, 'init', 'mcp', 'project'], { cwd: root, env, encoding: 'utf8', timeout: 60_000 });
   const project = join(root, 'project');
-  await writeFile(join(project, 'Dunlinfile.yaml'), fixture.config);
+  await writeFile(join(project, 'KnowledgeNestfile.yaml'), fixture.config);
   for (const [name, text] of Object.entries(fixture.files)) {
     await mkdir(dirname(join(project, 'docs', name)), { recursive: true });
     await writeFile(join(project, 'docs', name), text);
   }
-  const statePath = join(project, '.dunlin', 'state.sqlite');
+  const statePath = join(project, '.knowledge-nest', 'state.sqlite');
   const state = new DatabaseSync(statePath);
   state.exec(oldTables);
   for (const [table, rows] of Object.entries(fixture.tables)) {
@@ -51,13 +51,13 @@ test('moves a project built before step 2e without parsing again and keeps its s
   }
   state.close();
 
-  const built = await dunlin('build');
+  const built = await knowledgeNest('build');
   assert.deepEqual(built.warnings.map(({ code }) => code), ['DATA_LAYOUT_MIGRATED']);
   assert.equal(built.data.documents, Object.keys(fixture.files).length);
   // Every file came from the moved extraction cache: parsing would have stored its original.
-  assert.deepEqual(await readdir(join(project, '.dunlin', 'artifacts', 'originals', 'shared')).catch(() => []), []);
+  assert.deepEqual(await readdir(join(project, '.knowledge-nest', 'artifacts', 'originals', 'shared')).catch(() => []), []);
   for (const [query, expected] of Object.entries(fixture.searches)) {
-    const { data } = await dunlin('search', query, '--limit', '5');
+    const { data } = await knowledgeNest('search', query, '--limit', '5');
     assert.deepEqual(comparable(data, project), expected, query);
   }
 
@@ -74,7 +74,7 @@ test('moves a project built before step 2e without parsing again and keeps its s
     moved.close();
   }
 
-  const again = await dunlin('build');
+  const again = await knowledgeNest('build');
   assert.deepEqual(again.warnings, []);
   assert.equal(again.data.build_id, built.data.build_id);
   assert.equal(again.data.stages.source.reused, true);

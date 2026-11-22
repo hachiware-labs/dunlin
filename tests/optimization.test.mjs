@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-plans-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-plans-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const docs = join(root, 'docs');
   await mkdir(docs);
@@ -30,7 +30,7 @@ async function fixture(t) {
 
 test('compares retrieval strategies on the same labeled cases and preserves evidence', async (t) => {
   const { store, docs, evaluationSet, jsonl } = await fixture(t);
-  const database = await Dunlin.open(store);
+  const database = await KnowledgeNest.open(store);
   try {
     await database.addSource({ id: 'docs', kind: 'filesystem', path: docs });
     const [example] = evaluationSet;
@@ -74,7 +74,7 @@ test('compares retrieval strategies on the same labeled cases and preserves evid
 
 test('saves the chosen plan, switches it after reopening, and supports rollback', async (t) => {
   const { store, docs, evaluationSet } = await fixture(t);
-  let database = await Dunlin.open(store);
+  let database = await KnowledgeNest.open(store);
   try {
     await database.addSource({ id: 'docs', kind: 'filesystem', path: docs });
     const fallback = await database.getActivePlan();
@@ -87,7 +87,7 @@ test('saves the chosen plan, switches it after reopening, and supports rollback'
     assert.equal((await database.getActivePlan()).id, fallback.id);
     await database.close();
 
-    database = await Dunlin.open(store);
+    database = await KnowledgeNest.open(store);
     const plan = await database.activatePlan(report.selectedPlanId);
     assert.equal(plan.method, 'coverage');
     assert.equal(plan.version, 1);
@@ -102,7 +102,7 @@ test('saves the chosen plan, switches it after reopening, and supports rollback'
     assert.equal((await database.search(query, { mode: 'keyword' })).planId, fallback.id);
     await database.close();
 
-    database = await Dunlin.open(store);
+    database = await KnowledgeNest.open(store);
     assert.equal((await database.getActivePlan()).id, plan.id);
     assert.equal((await database.search(query, { mode: 'auto' })).engine, 'tantivy-bm25-coverage');
     const unmet = await database.optimize({ ...options, p95LatencyBudgetMs: 1e-12 });
@@ -116,7 +116,7 @@ test('saves the chosen plan, switches it after reopening, and supports rollback'
 
     await database.activatePlan(fallback.id);
     await database.close();
-    database = await Dunlin.open(store);
+    database = await KnowledgeNest.open(store);
     assert.equal((await database.search(query)).planId, fallback.id);
   } finally {
     await database.close();

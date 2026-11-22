@@ -45,8 +45,8 @@ function normalizer() {
 }
 
 test('manages evaluation data like the former JavaScript code', { timeout: 300_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-eval-data-parity-'));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-eval-data-parity-'));
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   await runNode(process.execPath, [cli, 'init', 'rag', 'kb', '--no-embedding'], { cwd: root, env });
   const base = join(root, 'kb');
   for (const [name, content] of Object.entries(documents)) await writeFile(join(base, 'docs', name), content);
@@ -58,11 +58,11 @@ test('manages evaluation data like the former JavaScript code', { timeout: 300_0
     .then(({ stdout }) => JSON.parse(stdout), (error) => ({ exitCode: error.code, ...JSON.parse(error.stdout) }));
 
   const refBase = join(root, 'ref');
-  const paths = { data: join(refBase, '.dunlin'), state: join(refBase, '.dunlin', 'state.sqlite'),
-    artifacts: join(refBase, '.dunlin', 'artifacts'), corpus: join(refBase, '.dunlin', 'corpus') };
+  const paths = { data: join(refBase, '.knowledge-nest'), state: join(refBase, '.knowledge-nest', 'state.sqlite'),
+    artifacts: join(refBase, '.knowledge-nest', 'artifacts'), corpus: join(refBase, '.knowledge-nest', 'corpus') };
   const db = new DatabaseSync(paths.state);
   db.exec('PRAGMA busy_timeout = 500');
-  const actualDb = new DatabaseSync(join(base, '.dunlin', 'state.sqlite'), { readOnly: true });
+  const actualDb = new DatabaseSync(join(base, '.knowledge-nest', 'state.sqlite'), { readOnly: true });
   // The databases close first, which Windows needs before removing their files.
   t.after(async () => {
     db.close();
@@ -70,7 +70,7 @@ test('manages evaluation data like the former JavaScript code', { timeout: 300_0
     await rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
   const project = async () => {
-    const configPath = join(refBase, 'Dunlinfile.yaml');
+    const configPath = join(refBase, 'KnowledgeNestfile.yaml');
     const text = await readFile(configPath, 'utf8');
     return { root: refBase, config: parse(text), configPath, configDigest: sha256(text), paths };
   };
@@ -81,7 +81,7 @@ test('manages evaluation data like the former JavaScript code', { timeout: 300_0
     return referenceManageEvaluationData(db, await project(), action, positionals, values, open);
   };
   const [actualIds, expectedIds] = [normalizer(), normalizer()];
-  const selected = async (directory) => parse(await readFile(join(root, directory, 'Dunlinfile.yaml'), 'utf8'))['eval-data']?.use ?? null;
+  const selected = async (directory) => parse(await readFile(join(root, directory, 'KnowledgeNestfile.yaml'), 'utf8'))['eval-data']?.use ?? null;
 
   /** Dataset IDs by name on each side, so that commands can refer to them as `@name`. */
   const named = { kb: {}, ref: {} };

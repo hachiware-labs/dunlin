@@ -78,7 +78,7 @@ export async function referenceAnswer(project, search, query, model, signal) {
         id: 'resp_' + randomUUID(), object: 'response', created_at: Math.floor(Date.now() / 1000), status: 'completed', model: model.model,
         output: [{ id: 'msg_' + randomUUID(), type: 'message', role: 'assistant', status: 'completed',
           content: [{ type: 'output_text', text: answer, annotations, logprobs: [] }] }],
-        usage, metadata: { dunlin_build_id: input.build_id, dunlin_search_config_id: input.search_config_id }, dunlin_citations: details,
+        usage, metadata: { knowledge_nest_build_id: input.build_id, knowledge_nest_search_config_id: input.search_config_id }, knowledge_nest_citations: details,
       };
     },
   });

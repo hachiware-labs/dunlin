@@ -2,24 +2,24 @@
 
 ## Node.js ライブラリのインストール
 
-CLI と `Dunlinfile.yaml` を使わず、Node.js のアプリケーションから索引を直接扱う場合は、このライブラリ API を使います。以下の例では `Dunlin.open()` で索引を開きます。公開 API は TypeScript と JavaScript の ESM で利用できます。Rust の Tantivy が索引と検索を担い、NAPI-RS v3 で Node.js に接続します。[Tantivy](https://docs.rs/tantivy/0.27.0/tantivy/) · [NAPI-RS](https://napi.rs/docs/introduction/manual-setup)
+CLI と `KnowledgeNestfile.yaml` を使わず、Node.js のアプリケーションから索引を直接扱う場合は、このライブラリ API を使います。以下の例では `KnowledgeNest.open()` で索引を開きます。公開 API は TypeScript と JavaScript の ESM で利用できます。Rust の Tantivy が索引と検索を担い、NAPI-RS v3 で Node.js に接続します。[Tantivy](https://docs.rs/tantivy/0.27.0/tantivy/) · [NAPI-RS](https://napi.rs/docs/introduction/manual-setup)
 
 ビルド済みのバンドル版を、同じ OS と CPU アーキテクチャの Node.js プロジェクトへインストールします。
 
 ```sh
-npm install /path/to/dunlin-0.5.0.tgz
+npm install /path/to/knowledge-nest-0.5.0.tgz
 ```
 
 対象は Node.js 22.13 以降の 22 系と Node.js 24 以降です。ビルド対象は Windows x64、Linux x64 glibc、macOS arm64 と x64 です。Linux バイナリの互換性検証は Ubuntu 24.04 を基準にしています。利用側で Rust をコンパイルする必要はありません。
 
-`dunlin` は仮のパッケージ名で、npm への公開は準備中です。配布物には、OS 別に単独でインストールできるバンドル版と、ルートパッケージの `optionalDependencies` から OS 別のバイナリを取得する分割版があります。[NAPI-RS の配布方式](https://napi.rs/docs/deep-dive/release)
+`knowledge-nest` は仮のパッケージ名で、npm への公開は準備中です。配布物には、OS 別に単独でインストールできるバンドル版と、ルートパッケージの `optionalDependencies` から OS 別のバイナリを取得する分割版があります。[NAPI-RS の配布方式](https://napi.rs/docs/deep-dive/release)
 
 ## 検索と根拠取得
 
 ```ts
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
-const kb = await Dunlin.open('./knowledge');
+const kb = await KnowledgeNest.open('./knowledge');
 try {
   await kb.addSource({ id: 'docs', kind: 'filesystem', path: './docs' });
 
@@ -41,14 +41,14 @@ try {
 - `read` は現在の索引が参照する版の本文から、指定された 1 始まりの両端を含む行範囲を返します。元ファイルの編集は再登録時に反映されます。再登録によって版が変わると以前の根拠は `STALE_EVIDENCE` になり、削除後は `NOT_FOUND` になります。
 - `open`、登録・削除、検索、本文取得には `AbortSignal` を渡せます。検索の `latencyBudgetMs` はワーカー待ち時間を含み、期限超過は `TIMEOUT` で返します。キャンセルは協調的に処理され、Tantivy の検索や開始済みコミットは処理の途中で中断できません。`close` は実行中の操作にキャンセルを通知し、操作の終了とネイティブハンドルの解放を待ちます。
 
-Dunlin はローカルの信頼済み利用者を想定しています。索引ディレクトリにはコーパスと保存対象の原本が含まれるため、アクセス範囲は OS の権限で管理してください。文書単位の ACL は今後の対象です。
+Knowledge-Nest はローカルの信頼済み利用者を想定しています。索引ディレクトリにはコーパスと保存対象の原本が含まれるため、アクセス範囲は OS の権限で管理してください。文書単位の ACL は今後の対象です。
 
 ## 取得済み文書の一括登録
 
 URL や S3 などから取得・抽出した本文は、元の URL と一緒に `replaceDocuments` で登録できます。
 
 ```ts
-const kb = await Dunlin.open('./knowledge');
+const kb = await KnowledgeNest.open('./knowledge');
 try {
   await kb.replaceDocuments('web', [{
     objectId: 'guides/oauth',
@@ -72,7 +72,7 @@ try {
 
 `getCorpusDocument({ sourceId, objectId }, version)` で、索引から外れた版を含む全文とメタデータを読み出せます。`version` には検索や `getDocument` の `evidence.source.version` を使います。`parsedVersion` はパース結果を、`originalSha256` は保存した原本を識別します。`SourceDocument.corpus` にパーサー情報や `locations` を指定すると、本文と一緒に版管理されます。
 
-`Dunlin.inspectIndex(path)` は既存のキーワード索引のリビジョン、ソース別の文書数、チャンクがある文書数を返します。索引が未作成の場合は `null` を返します。
+`KnowledgeNest.inspectIndex(path)` は既存のキーワード索引のリビジョン、ソース別の文書数、チャンクがある文書数を返します。索引が未作成の場合は `null` を返します。
 
 ## 差分同期
 
@@ -137,7 +137,7 @@ if (report.selectedPlanId) {
 
 ## 複数ソースの探索
 
-複数のファイルやディレクトリを別々のソース ID で登録できます。`explore` はアクティブプランで横断検索し、検索候補を起点に Markdown のリンクを幅優先でたどります。参照形式のリンクや、別ディレクトリへの相対リンクを扱えます。ソース ID を指定するリンクは `dunlin://policies/security/authentication.md` の形式です。
+複数のファイルやディレクトリを別々のソース ID で登録できます。`explore` はアクティブプランで横断検索し、検索候補を起点に Markdown のリンクを幅優先でたどります。参照形式のリンクや、別ディレクトリへの相対リンクを扱えます。ソース ID を指定するリンクは `knowledge-nest://policies/security/authentication.md` の形式です。
 
 ```ts
 await kb.addSource({ id: 'notes', kind: 'filesystem', path: './notes' });
@@ -164,32 +164,32 @@ console.log(result.stopReason, result.issues);
 
 ## Wiki と PARA
 
-Wiki と PARA のページは、Dunlinfile のプロジェクト（`dunlin init wiki`、`dunlin init para`）で書きます。資料の取り込み、質問、検査、アーカイブ、内容への指示、画面は CLI のコマンドで行います。ページはモデルが書き、Dunlin が引用を原本の版と範囲に照らして確かめてから保存します。 [Wiki・PARA の操作](wiki.md)
+Wiki と PARA のページは、KnowledgeNestfile のプロジェクト（`knowledge-nest init wiki`、`knowledge-nest init para`）で書きます。資料の取り込み、質問、検査、アーカイブ、内容への指示、画面は CLI のコマンドで行います。ページはモデルが書き、Knowledge-Nest が引用を原本の版と範囲に照らして確かめてから保存します。 [Wiki・PARA の操作](wiki.md)
 
-Node.js からは、CLI と同じ Rust の実装を `Dunlin.wiki(request)` と `Dunlin.wikiServe(request)` で呼べます。`request` には、プロジェクトの場所、検証済みの設定（`about`、`plan`、`pages`）、解決済みのモデル、コマンドと引数を渡します。形は `WikiCommandRequest` 型のとおりで、CLI もこの形で呼びます。`Dunlin.wiki` は `{ status: 'done', output, warnings }` か `{ status: 'failed', error }` を返します。`output` は CLI の `--json` の `data` と同じです。
+Node.js からは、CLI と同じ Rust の実装を `KnowledgeNest.wiki(request)` と `KnowledgeNest.wikiServe(request)` で呼べます。`request` には、プロジェクトの場所、検証済みの設定（`about`、`plan`、`pages`）、解決済みのモデル、コマンドと引数を渡します。形は `WikiCommandRequest` 型のとおりで、CLI もこの形で呼びます。`KnowledgeNest.wiki` は `{ status: 'done', output, warnings }` か `{ status: 'failed', error }` を返します。`output` は CLI の `--json` の `data` と同じです。
 
 ```ts
 // project: WikiCommandRequest のうち、コマンドと引数以外の項目
-const result = await Dunlin.wiki({ ...project, command: 'query', args: ['フィルターの交換周期は'], values: {} });
+const result = await KnowledgeNest.wiki({ ...project, command: 'query', args: ['フィルターの交換周期は'], values: {} });
 if (result.status === 'done') console.log(result.output);
 ```
 
-`Dunlin.wikiServe({ base, settings, token })` は、プロジェクトの画面をブラウザ向けに提供します。画面からの指示は作業として記録し、順に実行します。`signal` を止めると、受け付けた作業を終えてから戻ります。
+`KnowledgeNest.wikiServe({ base, settings, token })` は、プロジェクトの画面をブラウザ向けに提供します。画面からの指示は作業として記録し、順に実行します。`signal` を止めると、受け付けた作業を終えてから戻ります。
 
 以前の版にあった、直接開いた索引の資料から抜粋でページを作る `kb.wiki`（`build`、`get`、`affected`、`regenerate`）、同期の結果の `wiki`、MCP の道具 `knowledge.wiki_get` はなくしました。
 
 ## Node.js API から MCP を提供する
 
-`kb.serveMcp()` は、直接開いた索引を stdio で公開します。既定のツールは `knowledge.search`、`knowledge.read`、`knowledge.explore` です。サーバーは `dunlin` の Rust の部分（MCP の Rust SDK）で動くので、別のパッケージは要りません。Dunlinfile を使う場合は CLI の起動手順を参照してください。[CLI の起動手順](mcp.md)
+`kb.serveMcp()` は、直接開いた索引を stdio で公開します。既定のツールは `knowledge.search`、`knowledge.read`、`knowledge.explore` です。サーバーは `knowledge-nest` の Rust の部分（MCP の Rust SDK）で動くので、別のパッケージは要りません。KnowledgeNestfile を使う場合は CLI の起動手順を参照してください。[CLI の起動手順](mcp.md)
 
 ```js
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
-const kb = await Dunlin.open('./knowledge');
+const kb = await KnowledgeNest.open('./knowledge');
 const server = await kb.serveMcp({ transport: 'stdio' });
 // アプリケーションの終了時に await server.close()、続けて await kb.close()。
 ```
 
 ## Node.js から CLI を実行する
 
-`dunlin` コマンドの入口は、`Dunlin.runCli(args, options)` を呼ぶだけの起動役です。コマンドの解釈、実行、表示はすべて Rust で行います。`args` には `process.argv.slice(2)` と同じ形の引数を渡します。結果は標準出力と標準エラーに書かれ、戻り値は終了コードです。`options` には、`serve --print-config` が示す `execPath` と `cli`、パッケージのフォルダ（`package`）、ホームディレクトリ（`home`）を渡します。`serving(active)` はサーバーの開始と終了を知らせるので、その間だけ SIGINT と SIGTERM で `signal` を止めます。コマンドと使用法の一覧は `Dunlin.cliCommands()` で読めます。
+`knowledge-nest` コマンドの入口は、`KnowledgeNest.runCli(args, options)` を呼ぶだけの起動役です。コマンドの解釈、実行、表示はすべて Rust で行います。`args` には `process.argv.slice(2)` と同じ形の引数を渡します。結果は標準出力と標準エラーに書かれ、戻り値は終了コードです。`options` には、`serve --print-config` が示す `execPath` と `cli`、パッケージのフォルダ（`package`）、ホームディレクトリ（`home`）を渡します。`serving(active)` はサーバーの開始と終了を知らせるので、その間だけ SIGINT と SIGTERM で `signal` を止めます。コマンドと使用法の一覧は `KnowledgeNest.cliCommands()` で読めます。

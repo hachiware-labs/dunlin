@@ -91,7 +91,7 @@ const context = (args) => module('context.assemble', { budget_chars: 300, retrie
 
 /** Creates and builds a project; returns helpers that run the CLI and the reference on it. */
 async function project(t, root, { tokenizer, vector, hannoy, type = 'mcp' }) {
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   const run = (...args) => runNode(process.execPath, [cli, '--project', 'kb', ...args, '--json'], { cwd: root, env, encoding: 'utf8', timeout: 60_000 })
     .then(({ stdout }) => JSON.parse(stdout), (error) => ({ exitCode: error.code, ...JSON.parse(error.stdout) }));
   await runNode(process.execPath, [cli, 'init', type, 'kb'], { cwd: root, env, encoding: 'utf8', timeout: 60_000 });
@@ -100,8 +100,8 @@ async function project(t, root, { tokenizer, vector, hannoy, type = 'mcp' }) {
     await mkdir(dirname(join(base, 'docs', name)), { recursive: true });
     await writeFile(join(base, 'docs', name), text);
   }
-  const configPath = join(base, 'Dunlinfile.yaml');
-  // dunlin add records the tool in the Dunlinfile, so it runs first.
+  const configPath = join(base, 'KnowledgeNestfile.yaml');
+  // knowledge-nest add records the tool in the KnowledgeNestfile, so it runs first.
   const tool = hannoy ? (await run('add', 'hannoy')).data : null;
   const config = parse(await readFile(configPath, 'utf8'));
   config.transform.modules[1].with = { ...config.transform.modules[1].with, size: 60, overlap: 20 };
@@ -110,7 +110,7 @@ async function project(t, root, { tokenizer, vector, hannoy, type = 'mcp' }) {
     ranker: { provider: 'ollama', kind: 'chat', model: 'r', base_url: vector },
     ...(type === 'rag' && {
       answerer: { provider: 'ollama', kind: 'chat', model: 'a', base_url: vector },
-      gpt: { provider: 'openai', kind: 'chat', model: 'g', base_url: vector, api_key_env: 'DUNLIN_PARITY_KEY' },
+      gpt: { provider: 'openai', kind: 'chat', model: 'g', base_url: vector, api_key_env: 'KNOWLEDGE_NEST_PARITY_KEY' },
       strata: { provider: 'strata', kind: 'chat', model: 's', base_url: vector },
       limited: { provider: 'ollama', kind: 'chat', model: 'l', base_url: vector, max_input_bytes: 300 },
     }) };
@@ -120,11 +120,11 @@ async function project(t, root, { tokenizer, vector, hannoy, type = 'mcp' }) {
   await writeFile(configPath, stringify(config));
   const built = await run('build');
   assert.equal(built.status, 'succeeded', JSON.stringify(built.errors));
-  const state = new DatabaseSync(join(base, '.dunlin', 'state.sqlite'), { readOnly: true });
+  const state = new DatabaseSync(join(base, '.knowledge-nest', 'state.sqlite'), { readOnly: true });
   const build = JSON.parse(state.prepare('SELECT manifest FROM project JOIN builds ON builds.id = project.build_id').get().manifest);
   state.close();
-  const paths = { data: join(base, '.dunlin'), state: join(base, '.dunlin', 'state.sqlite'), artifacts: join(base, '.dunlin', 'artifacts'),
-    corpus: join(base, '.dunlin', 'corpus') };
+  const paths = { data: join(base, '.knowledge-nest'), state: join(base, '.knowledge-nest', 'state.sqlite'), artifacts: join(base, '.knowledge-nest', 'artifacts'),
+    corpus: join(base, '.knowledge-nest', 'corpus') };
   const database = await referenceOpen(paths, build);
   t.after(() => database.close());
   let variants = 0;
@@ -172,7 +172,7 @@ async function project(t, root, { tokenizer, vector, hannoy, type = 'mcp' }) {
 }
 
 test('searches keyword and exact vector plans like the JavaScript search', { timeout: 300_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-search-parity-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-search-parity-'));
   const compare = await project(t, root, { tokenizer: 'lindera', vector: await models(t) });
   // After the open index closes: Windows keeps its files until then.
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
@@ -209,9 +209,9 @@ test('searches keyword and exact vector plans like the JavaScript search', { tim
 });
 
 test('answers with Ollama, OpenAI and Strata like the JavaScript answer', { timeout: 300_000 }, async (t) => {
-  process.env.DUNLIN_PARITY_KEY = 'parity-key';
-  t.after(() => delete process.env.DUNLIN_PARITY_KEY);
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-answer-parity-'));
+  process.env.KNOWLEDGE_NEST_PARITY_KEY = 'parity-key';
+  t.after(() => delete process.env.KNOWLEDGE_NEST_PARITY_KEY);
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-answer-parity-'));
   const compare = await project(t, root, { tokenizer: 'lindera', vector: await models(t), type: 'rag' });
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const search = [module('query.normalize', { unicode: 'nfkc' }), module('retrieval.keyword', { top_k: 5 }), context({ budget_chars: 250 })];
@@ -235,7 +235,7 @@ test('answers with Ollama, OpenAI and Strata like the JavaScript answer', { time
 });
 
 test('searches the hannoy graph like the JavaScript search', { timeout: 300_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-search-hannoy-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-search-hannoy-'));
   const compare = await project(t, root, { tokenizer: 'trigram', vector: await models(t), hannoy: true });
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const plan = [module('query.normalize', { unicode: 'nfkc' }), module('retrieval.keyword', { top_k: 5 }),

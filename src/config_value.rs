@@ -9,9 +9,9 @@ use std::fmt;
 use serde::de::{self, Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-/// JavaScript sends NaN and infinities as `{ "$dunlin_nonfinite": "NaN" }`, since JSON has no
+/// JavaScript sends NaN and infinities as `{ "$knowledge_nest_nonfinite": "NaN" }`, since JSON has no
 /// such numbers.
-const NON_FINITE: &str = "$dunlin_nonfinite";
+const NON_FINITE: &str = "$knowledge_nest_nonfinite";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum ConfigValue {
@@ -264,15 +264,16 @@ mod tests {
         ] {
             assert_eq!(js_number(value), text, "{value}");
         }
-        let value: ConfigValue =
-            serde_json::from_str(r#"{"b":[-0.0,1e21,"\u0001\n"],"a":{"$dunlin_nonfinite":"NaN"}}"#)
-                .unwrap();
+        let value: ConfigValue = serde_json::from_str(
+            r#"{"b":[-0.0,1e21,"\u0001\n"],"a":{"$knowledge_nest_nonfinite":"NaN"}}"#,
+        )
+        .unwrap();
         assert_eq!(value.to_js_json(), r#"{"b":[0,1e+21,"\u0001\n"],"a":null}"#);
     }
 
     #[test]
     fn keeps_key_order_and_non_finite_numbers() {
-        let text = r#"{"b":1,"a":[1.5,"x",null,true],"n":{"$dunlin_nonfinite":"NaN"}}"#;
+        let text = r#"{"b":1,"a":[1.5,"x",null,true],"n":{"$knowledge_nest_nonfinite":"NaN"}}"#;
         let value: ConfigValue = serde_json::from_str(text).unwrap();
         assert_eq!(value.get("n"), Some(&ConfigValue::NonFinite("NaN".into())));
         assert_eq!(serde_json::to_string(&value).unwrap(), text);

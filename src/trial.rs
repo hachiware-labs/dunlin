@@ -363,7 +363,7 @@ mod tests {
 
     fn state() -> (std::path::PathBuf, String) {
         let directory = std::env::temp_dir().join(format!(
-            "dunlin-trial-{}-{}",
+            "knowledge-nest-trial-{}-{}",
             std::process::id(),
             uuid::Uuid::new_v4()
         ));

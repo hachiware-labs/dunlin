@@ -1,8 +1,8 @@
-import { Dunlin, DunlinError } from 'dunlin';
-import type { DeltaSyncOutcome, DocumentSnapshot, EvaluationReport, Evidence, ExploreOutcome, OptimizationReport, ReadOutcome, RetrievalPlan, SearchOutcome, SourceDocument, SyncOutcome } from 'dunlin';
+import { KnowledgeNest, KnowledgeNestError } from 'knowledge-nest';
+import type { DeltaSyncOutcome, DocumentSnapshot, EvaluationReport, Evidence, ExploreOutcome, OptimizationReport, ReadOutcome, RetrievalPlan, SearchOutcome, SourceDocument, SyncOutcome } from 'knowledge-nest';
 
 async function publicContract(signal: AbortSignal, evidence: Evidence): Promise<void> {
-  const database: Dunlin = await Dunlin.open('./knowledge', { signal });
+  const database: KnowledgeNest = await KnowledgeNest.open('./knowledge', { signal });
   try {
     await database.addSource({ id: 'docs', kind: 'filesystem', path: './docs' }, { signal });
     const documents: readonly SourceDocument[] = [
@@ -43,7 +43,7 @@ async function publicContract(signal: AbortSignal, evidence: Evidence): Promise<
     // @ts-expect-error Vector search is outside the current public contract.
     await database.search('OAuth', { mode: 'vector' });
   } catch (error) {
-    if (error instanceof DunlinError && error.code === 'ABORTED') return;
+    if (error instanceof KnowledgeNestError && error.code === 'ABORTED') return;
     throw error;
   } finally {
     await database.close();

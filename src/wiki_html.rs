@@ -25,7 +25,7 @@ pub fn render_document(title: &str, body: &str, metadata: Option<&ConfigValue>) 
     let title = escape_html(title);
     let footer = metadata.map_or_else(String::new, |metadata| {
         format!(
-            "<!-- dunlin:publication {} -->\n",
+            "<!-- knowledge-nest:publication {} -->\n",
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(metadata.to_js_json())
         )
     });
@@ -33,7 +33,7 @@ pub fn render_document(title: &str, body: &str, metadata: Option<&ConfigValue>) 
         "<!doctype html>
 <html lang=\"ja\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
 <meta http-equiv=\"Content-Security-Policy\" content=\"{CONTENT_SECURITY_POLICY}\">
-<title>{title} | Dunlin</title>
+<title>{title} | Knowledge-Nest</title>
 <style>
   body {{ font: 1rem/1.65 system-ui, sans-serif; max-width: 54rem; margin: auto; padding: 1.5rem; color-scheme: light dark; }}
   nav, section {{ border-block-end: 1px solid GrayText; padding-block: .65rem; }}
@@ -104,14 +104,16 @@ pub fn render_publication(
             let original_uri = original
                 .and_then(|original| string_field(original, "uri"))
                 .unwrap_or_default();
-            let use_original = original.is_some() && source_url.starts_with("dunlin://");
+            let use_original = original.is_some() && source_url.starts_with("knowledge-nest://");
             let url = if use_original {
                 original_uri
             } else {
                 source_url
             };
             let source_link = match protocol(url).as_deref() {
-                Some("http:" | "https:" | "file:" | "s3:" | "dunlin:") => link(url, object_id),
+                Some("http:" | "https:" | "file:" | "s3:" | "knowledge-nest:") => {
+                    link(url, object_id)
+                }
                 _ => escape_html(object_id),
             };
             let position = citation_locations(field(citation, "locations"));

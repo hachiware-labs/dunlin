@@ -4,7 +4,7 @@
 
 "Search seems to miss. Would smaller chunks help?" This guide is about answering that with numbers instead of a hunch.
 
-You cannot tell how good search is by looking. A setting that helps one question may break another. In Dunlin, once you register pairs of a question and its answer, every change of setting tells you how many of the questions found their answer. And since only what you changed, and what follows it, is rebuilt, trying is fast, so you can compare as many variations as you like.
+You cannot tell how good search is by looking. A setting that helps one question may break another. In Knowledge-Nest, once you register pairs of a question and its answer, every change of setting tells you how many of the questions found their answer. And since only what you changed, and what follows it, is rebuilt, trying is fast, so you can compare as many variations as you like.
 
 It assumes `build` and `eval` work, as in [section 7 of Getting started](getting-started.en.md#7-next-keep-versions-and-measure-by-numbers-new-commands).
 
@@ -17,7 +17,7 @@ documents → extract → transform → index → search → eval
             (docs)    (chunks)    (index)  (query)  (result)
 ```
 
-- The result of each section is kept as a version in the store (`.dunlin/store`). The same input and the same processing never run twice.
+- The result of each section is kept as a version in the store (`.knowledge-nest/store`). The same input and the same processing never run twice.
 - When you change a setting, **only that section and the ones after it** run. Changing `transform` does not read the documents again.
 - A result can have a name. Names live on separate shelves by kind: documents, chunks, indexes, evaluation data, and evaluation results.
 - Improving search is a loop: measure a baseline, change one thing, measure again, compare, choose.
@@ -36,8 +36,8 @@ Evaluation data is a set of questions, each with the quote that answers it. Writ
 ```
 
 ```sh
-dunlin eval-data import cases.json
-dunlin eval-data import cases.json --tag v2
+knowledge-nest eval-data import cases.json
+knowledge-nest eval-data import cases.json --tag v2
 ```
 
 - `source` and `document` say where the quote is. `source` is the `id` of `source.filesystem` (the folder name if omitted); `document` is the path inside that folder.
@@ -58,8 +58,8 @@ eval:
 ```
 
 ```sh
-dunlin eval
-dunlin results
+knowledge-nest eval
+knowledge-nest results
 ```
 
 `eval` builds what is missing, measures, and prints the recall:
@@ -68,10 +68,10 @@ dunlin results
 Recall: 0.667 (2 of 3 cases)
 ```
 
-`dunlin results` lists the named evaluation results, best recall first. Give it a name to see each case and where its evidence was found:
+`knowledge-nest results` lists the named evaluation results, best recall first. Give it a name to see each case and where its evidence was found:
 
 ```sh
-dunlin results trial-400
+knowledge-nest results trial-400
 ```
 
 ```text
@@ -83,7 +83,7 @@ missed    filter       フィルターの交換
 ```
 
 - `Found at` is the rank at which the quote appeared in the result. `missed` means it did not appear; those cases are listed first.
-- Reproduce a miss with `dunlin search "<question>"` and look for the cause.
+- Reproduce a miss with `knowledge-nest search "<question>"` and look for the cause.
 
 | How it misses | What to try |
 |---|---|
@@ -93,7 +93,7 @@ missed    filter       フィルターの交換
 
 ## 4 Change one thing and compare (by hand)
 
-Copy `Dunlinfile.yaml` and rewrite only the sections you want to change. To keep the baseline's names where they are, give the changed sections new tags and start from the baseline's documents with `from`.
+Copy `KnowledgeNestfile.yaml` and rewrite only the sections you want to change. To keep the baseline's names where they are, give the changed sections new tags and start from the baseline's documents with `from`.
 
 ```yaml
 # candidate.yaml
@@ -117,17 +117,17 @@ eval:
 ```
 
 ```sh
-dunlin eval candidate.yaml
-dunlin results
+knowledge-nest eval candidate.yaml
+knowledge-nest results
 ```
 
 - `from: docs` does not scan the folder. It uses the version of documents named `docs`, so both runs are measured on the same documents.
-- The result is kept as `trial-400`. `dunlin results` lists it next to the baseline's result, so you can compare recall.
+- The result is kept as `trial-400`. `knowledge-nest results` lists it next to the baseline's result, so you can compare recall.
 - A comparison is meaningful only if the evaluation data and method are the same. Keep `data` and `split` of `eval.evidence` identical.
 
 ## 5 Give chunks some context
 
-A chunk cut out of a document loses which document and which section it came from. With `context`, Dunlin puts that information at the start of the text the index searches.
+A chunk cut out of a document loses which document and which section it came from. With `context`, Knowledge-Nest puts that information at the start of the text the index searches.
 
 ```yaml
 transform:
@@ -148,12 +148,12 @@ transform:
 
 ## 6 Try many settings at once (optimize)
 
-Instead of writing each candidate by hand, describe what to vary. Dunlin makes the candidates and measures them one after another.
+Instead of writing each candidate by hand, describe what to vary. Knowledge-Nest makes the candidates and measures them one after another.
 
 ```yaml
 # tune.yaml
 optimize:
-  base: Dunlinfile.yaml
+  base: KnowledgeNestfile.yaml
   vary:
     - name: chunking
       options:
@@ -178,7 +178,7 @@ optimize:
 ```
 
 ```sh
-dunlin optimize tune.yaml
+knowledge-nest optimize tune.yaml
 ```
 
 Progress is printed one line at a time (an example; numbers and names depend on the instruction):
@@ -210,17 +210,17 @@ Trial  Recall  To base  Ran                  Time   What
 To look at results again:
 
 ```sh
-dunlin results            # evaluation results, and the optimizations that were run
-dunlin results tune       # the table of the optimization called tune
-dunlin results tune/010   # the cases of one trial
+knowledge-nest results            # evaluation results, and the optimizations that were run
+knowledge-nest results tune       # the table of the optimization called tune
+knowledge-nest results tune/010   # the cases of one trial
 ```
 
 Without `--name`, an optimization is called after the instruction file (without its extension).
 
-Each trial's configuration file is written to `.dunlin/trials/<name>/<number>.yaml`. To rerun one trial, give that file:
+Each trial's configuration file is written to `.knowledge-nest/trials/<name>/<number>.yaml`. To rerun one trial, give that file:
 
 ```sh
-dunlin eval .dunlin/trials/tune/010.yaml
+knowledge-nest eval .knowledge-nest/trials/tune/010.yaml
 ```
 
 > For now you can vary `transform`, `index`, and `search`. Options that rewrite `extract`, measures other than recall, and choosing the next values from earlier results are not there yet.
@@ -228,14 +228,14 @@ dunlin eval .dunlin/trials/tune/010.yaml
 ## 7 Release
 
 ```sh
-dunlin list indexes
-dunlin release tune/010
-dunlin release main --name release
+knowledge-nest list indexes
+knowledge-nest release tune/010
+knowledge-nest release main --name release
 ```
 
 - `release <index> [--name <name>]` gives a served name to an index. The default name is `release`.
 - Pointing the name at another index says which one it replaced. To go back, release the earlier index again. The record is never erased.
-- `dunlin list indexes` shows which index is served under which name.
+- `knowledge-nest list indexes` shows which index is served under which name.
 - `build --release` gives the index that `build` just made the served name directly.
 
 > `serve` does not read these served names yet. To serve over MCP or HTTP, use the earlier flow.
@@ -257,14 +257,14 @@ extract:
 
 ## 9 What still uses the earlier flow
 
-These are not in the new flow yet. Use the configuration that `dunlin init` writes.
+These are not in the new flow yet. Use the configuration that `knowledge-nest init` writes.
 
 | To do this | Earlier command or page |
 |---|---|
 | Vector search, hybrid search, reranking | Embedding settings with `index.vector` and `fusion.rrf`. [MCP and RAG](mcp.md) · [Modules](modules.md) |
 | User dictionary | `dictionary suggest` and `dictionary add`. [Evaluation and dictionary](evaluation.md) |
 | Generate and review questions | `eval-data generate` and `eval-data review`. [Evaluation and dictionary](evaluation.md) |
-| PDF, Office, HTML, OCR | `loader.auto` and `dunlin add ocr`. [PDF extraction](pdf-extraction.md) |
+| PDF, Office, HTML, OCR | `loader.auto` and `knowledge-nest add ocr`. [PDF extraction](pdf-extraction.md) |
 | Serve over MCP or HTTP, `ask` | `serve`, `ask`. [MCP and RAG](mcp.md) |
 | Tuning with an agent | [Agents and trials](agents.md) |
 
@@ -274,17 +274,17 @@ Which flow a command uses depends on the form of the configuration file it reads
 
 Wiki and PARA are a separate mechanism and are not in this guide's versioned store. See [Wiki and PARA](wiki.md) (Japanese). The essentials:
 
-- Ingest with `dunlin ingress <path>`. A statement whose citation does not match the source word for word is not saved and is reported as a `CITATION_REJECTED` warning.
-- `dunlin verify` checks citations, source versions, and links. `dunlin verify --content` uses a model to look for contradictions between pages.
-- Ask a page to change with `dunlin instruct <page> "instruction"`. Add a rule for all future work with `dunlin instruct --persistent "rule"`.
-- Changes are recorded as jobs. `dunlin undo <job-id>` undoes one. Originals are never rewritten.
-- Follow a long ingest with `dunlin progress <job-id>`.
+- Ingest with `knowledge-nest ingress <path>`. A statement whose citation does not match the source word for word is not saved and is reported as a `CITATION_REJECTED` warning.
+- `knowledge-nest verify` checks citations, source versions, and links. `knowledge-nest verify --content` uses a model to look for contradictions between pages.
+- Ask a page to change with `knowledge-nest instruct <page> "instruction"`. Add a rule for all future work with `knowledge-nest instruct --persistent "rule"`.
+- Changes are recorded as jobs. `knowledge-nest undo <job-id>` undoes one. Originals are never rewritten.
+- Follow a long ingest with `knowledge-nest progress <job-id>`.
 
 ## 11 Checklist
 
 - [ ] At least 10 evaluation cases, phrased like real questions
-- [ ] The baseline is measured with `dunlin eval` and its result has a name
+- [ ] The baseline is measured with `knowledge-nest eval` and its result has a name
 - [ ] Trials use the same evaluation method and data as the baseline
 - [ ] You looked at how the `missed` cases changed, not only the average
 - [ ] You measured with `split: test` before adopting a change
-- [ ] You checked the released index with `dunlin list indexes`
+- [ ] You checked the released index with `knowledge-nest list indexes`

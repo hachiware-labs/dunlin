@@ -301,7 +301,7 @@ impl TempDir {
             .map(|time| time.as_nanos())
             .unwrap_or_default();
         let path = std::env::temp_dir().join(format!(
-            "dunlin-parse-{}-{nanos}-{}",
+            "knowledge-nest-parse-{}-{nanos}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Writes an HTML report of Dunlin evaluation results (staged projects).
+// Writes an HTML report of Knowledge-Nest evaluation results (staged projects).
 //
 //   node report.mjs [<name>] [--out <file>] [--project <folder>] [--title <text>]
 //
 // Without a name: every named result. With the name of an optimization: its trials and a
 // table of cases by trial. With the name of a result: its cases with what was returned.
 //
-// It reads everything from `dunlin results ... --json`, so it shows what the store holds
-// and nothing else. Set DUNLIN to the command that runs Dunlin when it is not `dunlin`.
+// It reads everything from `knowledge-nest results ... --json`, so it shows what the store holds
+// and nothing else. Set KNOWLEDGE_NEST to the command that runs Knowledge-Nest when it is not `knowledge-nest`.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -27,7 +27,7 @@ for (let index = 0; index < args.length; index += 1) {
 }
 const name = positionals[0];
 const project = resolve(options.project ?? '.');
-const out = resolve(options.out ?? 'dunlin-report.html');
+const out = resolve(options.out ?? 'knowledge-nest-report.html');
 
 function fail(message) {
   process.stderr.write(`${message}\n`);
@@ -36,10 +36,10 @@ function fail(message) {
 
 const quote = (value) => `"${String(value).replaceAll('"', '\\"')}"`;
 
-/** Runs `dunlin results` and gives its data, or stops with what Dunlin said. */
+/** Runs `knowledge-nest results` and gives its data, or stops with what Knowledge-Nest said. */
 function results(of) {
   const command = [
-    process.env.DUNLIN ?? 'dunlin',
+    process.env.KNOWLEDGE_NEST ?? 'knowledge-nest',
     'results',
     ...(of === undefined ? [] : [quote(of)]),
     '--project',
@@ -47,15 +47,15 @@ function results(of) {
     '--json',
   ].join(' ');
   const ran = spawnSync(command, { shell: true, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  if (ran.error) fail(`Dunlin could not be run: ${ran.error.message}`);
+  if (ran.error) fail(`Knowledge-Nest could not be run: ${ran.error.message}`);
   let answer;
   try {
     answer = JSON.parse(ran.stdout);
   } catch {
-    fail(`Dunlin did not answer with JSON.\n${ran.stderr || ran.stdout}`);
+    fail(`Knowledge-Nest did not answer with JSON.\n${ran.stderr || ran.stdout}`);
   }
   if (answer.status !== 'succeeded') {
-    fail((answer.errors ?? []).map((error) => error.message).join('\n') || 'Dunlin failed.');
+    fail((answer.errors ?? []).map((error) => error.message).join('\n') || 'Knowledge-Nest failed.');
   }
   return answer.data;
 }
@@ -154,7 +154,7 @@ function overviewPage(data) {
 <table>
 <thead><tr><th>Result</th><th>Recall</th><th></th><th>Found</th><th>Index</th><th>Evaluation data</th><th>Version</th></tr></thead>
 <tbody>
-${rows || '<tr><td colspan="7" class="dim">No result has a name yet. Run dunlin eval.</td></tr>'}
+${rows || '<tr><td colspan="7" class="dim">No result has a name yet. Run knowledge-nest eval.</td></tr>'}
 </tbody></table>`,
   };
 }
@@ -319,7 +319,7 @@ footer { margin-top:48px; color:var(--dim); font-size:12px; }
 <h1>${escape(heading)}</h1>
 <div class="dim">${escape(project)}</div>
 ${body}
-<footer>Made from <code>dunlin results${name === undefined ? '' : ` ${escape(name)}`} --json</code> on ${new Date().toISOString().slice(0, 16).replace('T', ' ')}Z.</footer>
+<footer>Made from <code>knowledge-nest results${name === undefined ? '' : ` ${escape(name)}`} --json</code> on ${new Date().toISOString().slice(0, 16).replace('T', ' ')}Z.</footer>
 </main>
 </body>
 </html>

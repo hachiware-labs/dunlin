@@ -1,4 +1,4 @@
-// The skill in skills/dunlin tells an agent which commands to run. These tests keep it honest:
+// The skill in skills/knowledge-nest tells an agent which commands to run. These tests keep it honest:
 // every command and option it names exists, and the workflow it describes runs from the
 // command line, ending in the HTML reports its script writes.
 
@@ -11,9 +11,9 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '..');
 const cli = join(root, 'tools', 'rag', 'cli.mjs');
-const skill = join(root, 'skills', 'dunlin');
+const skill = join(root, 'skills', 'knowledge-nest');
 
-function dunlin(args, cwd = root) {
+function knowledgeNest(args, cwd = root) {
   const ran = spawnSync(process.execPath, [cli, ...args], { cwd, encoding: 'utf8' });
   return { code: ran.status, out: ran.stdout, err: ran.stderr };
 }
@@ -45,7 +45,7 @@ function code(text) {
 }
 
 test('the skill names only commands and options that exist', async () => {
-  const help = dunlin(['--help']).out;
+  const help = knowledgeNest(['--help']).out;
   const commands = new Set([...help.matchAll(/^ {2}([a-z][a-z-]*) {2,}\S/gm)].map(([, name]) => name));
   assert.ok(commands.has('build') && commands.has('results'), 'the help lists the commands');
 
@@ -54,7 +54,7 @@ test('the skill names only commands and options that exist', async () => {
   const has = (command, option) => {
     const key = `${command} ${option}`;
     if (!known.has(key)) {
-      const said = dunlin([command, `${option}=x`, '--help']);
+      const said = knowledgeNest([command, `${option}=x`, '--help']);
       known.set(key, !`${said.out}${said.err}`.includes(`Unknown option ${option}`));
     }
     return known.get(key);
@@ -66,15 +66,15 @@ test('the skill names only commands and options that exist', async () => {
   let seen = 0;
   for (const file of await markdown(skill)) {
     for (const span of code(await readFile(file, 'utf8'))) {
-      for (const [, command, rest] of span.matchAll(/(?<![./\w-])dunlin ([a-z][a-z-]*)((?:(?!dunlin ).)*)/g)) {
+      for (const [, command, rest] of span.matchAll(/(?<![./\w-])knowledge-nest ([a-z][a-z-]*)((?:(?!knowledge-nest ).)*)/g)) {
         seen += 1;
         if (!commands.has(command)) {
-          wrong.push(`${file}: dunlin ${command} is not a command`);
+          wrong.push(`${file}: knowledge-nest ${command} is not a command`);
           continue;
         }
         for (const [option] of rest.matchAll(/--[a-z][a-z-]*/g)) {
           if (!everywhere.has(option) && !has(command, option)) {
-            wrong.push(`${file}: dunlin ${command} has no ${option}`);
+            wrong.push(`${file}: knowledge-nest ${command} has no ${option}`);
           }
         }
       }
@@ -85,19 +85,19 @@ test('the skill names only commands and options that exist', async () => {
 });
 
 test('the workflow of the skill runs and its script writes the reports', async (t) => {
-  const project = await mkdtemp(join(tmpdir(), 'dunlin-skill-'));
+  const project = await mkdtemp(join(tmpdir(), 'knowledge-nest-skill-'));
   t.after(() => rm(project, { recursive: true, force: true, maxRetries: 5 }));
   const fixtures = join(root, 'tests', 'fixtures');
   await cp(join(fixtures, 'extract', 'original'), join(project, 'docs'), { recursive: true });
   await cp(join(fixtures, 'extract', 'additional'), join(project, 'docs'), { recursive: true });
   await cp(join(fixtures, 'optimize', 'cases.json'), join(project, 'cases.json'));
   await cp(join(fixtures, 'optimize', 'chunk-and-search.yaml'), join(project, 'tune.yaml'));
-  const config = await readFile(join(fixtures, 'optimize', 'Dunlinfile.yaml'), 'utf8');
+  const config = await readFile(join(fixtures, 'optimize', 'KnowledgeNestfile.yaml'), 'utf8');
   await writeFile(
-    join(project, 'Dunlinfile.yaml'),
+    join(project, 'KnowledgeNestfile.yaml'),
     `${config}\neval:\n  - eval.evidence: { data: default, split: dev }\n`,
   );
-  const run = (...args) => dunlin(args, project);
+  const run = (...args) => knowledgeNest(args, project);
   const data = (...args) => {
     const ran = run(...args, '--json');
     assert.equal(ran.code, 0, ran.err || ran.out);
@@ -139,7 +139,7 @@ test('the workflow of the skill runs and its script writes the reports', async (
   assert.equal(data('release', String(released.before)).index, released.before);
 
   // A staged file is checked without building, and status shows what list shows.
-  assert.match(run('validate').out, /Dunlinfile\.yaml can run: extract, transform, index, eval\./);
+  assert.match(run('validate').out, /KnowledgeNestfile\.yaml can run: extract, transform, index, eval\./);
   assert.equal(run('status').out, run('list').out);
   const wrong = run('validate', '--config', 'tune.yaml');
   assert.notEqual(wrong.code, 0);
@@ -156,7 +156,7 @@ test('the workflow of the skill runs and its script writes the reports', async (
     const ran = spawnSync(
       process.execPath,
       [join(skill, 'scripts', 'report.mjs'), ...(name ? [name] : []), '--out', out, '--project', project],
-      { encoding: 'utf8', env: { ...process.env, DUNLIN: `"${process.execPath}" "${cli}"` } },
+      { encoding: 'utf8', env: { ...process.env, KNOWLEDGE_NEST: `"${process.execPath}" "${cli}"` } },
     );
     assert.equal(ran.status, 0, ran.stderr);
     assert.equal(ran.stdout.trim(), out);

@@ -11,15 +11,15 @@ import { execFile, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 const runNode = promisify(execFile);
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 
 test('uses trial settings without changing the active build and evaluates saved evidence', { timeout: 30_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-evaluation-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-evaluation-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   await run('init', 'mcp', 'kb');
   await writeFile(join(root, 'kb', 'docs', 'guide.txt'), '交換手順の根拠。\n');
@@ -31,7 +31,7 @@ test('uses trial settings without changing the active build and evaluates saved 
   const original = (await json('eval', '--tag', 'baseline')).data;
   assert.equal(original.scores['evidence_recall@context'], 1);
   assert.equal((await json('status')).data.evaluation_status, 'evaluated');
-  const config = parse(await readFile(join(root, 'kb', 'Dunlinfile.yaml'), 'utf8'));
+  const config = parse(await readFile(join(root, 'kb', 'KnowledgeNestfile.yaml'), 'utf8'));
   config.source.modules[0].with.path = './kb/docs';
   config.search.modules.at(-1).with.budget_chars = 10;
   await writeFile(join(root, 'trial.yaml'), stringify(config));
@@ -65,7 +65,7 @@ test('uses trial settings without changing the active build and evaluates saved 
 });
 
 test('builds exact vector and hybrid search using the configured chunk ranges', { timeout: 30_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-vector-next-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-vector-next-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const requests = [];
   const server = createServer(async (request, response) => {
@@ -79,12 +79,12 @@ test('builds exact vector and hybrid search using the configured chunk ranges', 
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   await run('init', 'mcp', 'kb');
   await writeFile(join(root, 'kb', 'docs', 'guide.txt'), 'フィルターを交換します。\n');
   await writeFile(join(root, 'kb', 'docs', 'safety.txt'), '絶縁手袋を使います。\n');
-  const path = join(root, 'kb', 'Dunlinfile.yaml');
+  const path = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(path, 'utf8'));
   config.models = { local: { provider: 'ollama', kind: 'embedding', model: 'testing', base_url: 'http://127.0.0.1:' + server.address().port } };
   config.index.modules.push({ use: 'index.vector', with: { model: 'local' } });
@@ -122,7 +122,7 @@ test('builds exact vector and hybrid search using the configured chunk ranges', 
   assert.equal(ann.vector.backend, 'hannoy');
   assert.equal(requests.length, calls);
   assert.equal((await json('search', '取り替え')).data.results[0].evidence.source.objectId, 'guide.txt');
-  const toolDirectory = join(root, 'kb', '.dunlin', 'tools', 'hannoy', tool.version, process.platform + '-' + process.arch);
+  const toolDirectory = join(root, 'kb', '.knowledge-nest', 'tools', 'hannoy', tool.version, process.platform + '-' + process.arch);
   await rename(toolDirectory, toolDirectory + '-missing');
   await assert.rejects(json('validate'), (error) => error.code === 2 && JSON.parse(error.stdout).errors[0].code === 'REQUIREMENT_MISSING');
   await rename(toolDirectory + '-missing', toolDirectory);
@@ -144,21 +144,21 @@ test('builds exact vector and hybrid search using the configured chunk ranges', 
 });
 
 test('ranks all rows when positions are omitted', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-vector-rank-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-vector-rank-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const bytes = Buffer.alloc(3 * 8);
   for (const i of [0, 2]) bytes.writeFloatLE(1, i * 8);
   const file = join(root, 'vectors.f32');
   await writeFile(file, bytes);
   const options = { needle: [1, 0], rows: 3, limit: 3 };
-  const explicit = await Dunlin.rankVectors(file, { ...options, positions: [2, 1, 0] });
-  assert.deepEqual(await Dunlin.rankVectors(file, options), explicit);
+  const explicit = await KnowledgeNest.rankVectors(file, { ...options, positions: [2, 1, 0] });
+  assert.deepEqual(await KnowledgeNest.rankVectors(file, options), explicit);
   assert.deepEqual(explicit.map(({ i }) => i), [0, 2, 1]);
-  assert.deepEqual(await Dunlin.rankVectors(file, { ...options, positions: [] }), []);
+  assert.deepEqual(await KnowledgeNest.rankVectors(file, { ...options, positions: [] }), []);
 });
 
 test('enforces trial counters and time without blocking short operations', { timeout: 35_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-trials-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-trials-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const calls = [];
   const server = createServer(async (request, response) => {
@@ -171,14 +171,14 @@ test('enforces trial counters and time without blocking short operations', { tim
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); });
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout);
   const failure = async (code, ...args) => {
     try { await json(...args); assert.fail('Expected failure.'); }
     catch (error) { assert.equal(error.code, code); return JSON.parse(error.stdout); }
   };
   await run('init', 'mcp', 'kb');
-  const configPath = join(root, 'kb', 'Dunlinfile.yaml');
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
   await writeFile(join(root, 'kb', 'docs', 'guide.txt'), '交換手順を確認する。\n');
   const base = (await json('build')).data;
   const config = parse(await readFile(configPath, 'utf8'));
@@ -233,7 +233,7 @@ test('enforces trial counters and time without blocking short operations', { tim
 });
 
 test('writes and verifies a Wiki page with an explicitly configured model', { timeout: 30_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-wiki-next-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-wiki-next-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const calls = [];
   let pauseModel;
@@ -251,7 +251,7 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
       const { supplement, sources, instruction } = JSON.parse(input.messages[1].content);
       if (instruction === '交換周期を変更') {
         result = supplement ? { conflict: '', pages: [{ id, title: '交換手順', facts: [
-          fact, { text: '担当者の補足では交換周期は3か月。<script>window.dunlinInjected=true</script>',
+          fact, { text: '担当者の補足では交換周期は3か月。<script>window.knowledgeNestInjected=true</script>',
             citations: [{ id: sources.at(-1).id, quote: '交換周期は3か月。' }] },
         ] }] } : { conflict: '原本と食い違います', pages: [] };
       }
@@ -273,11 +273,11 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
+  const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env: { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') }, encoding: 'utf8', timeout: 10_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'wiki', ...args, '--json')).stdout);
   await run('init', 'wiki', 'wiki', '--purpose', '設備保全の手順');
   await writeFile(join(root, 'manual.txt'), '交換手順を確認する。\n');
-  const path = join(root, 'wiki', 'Dunlinfile.yaml');
+  const path = join(root, 'wiki', 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(path, 'utf8'));
   config.models.writer.model = 'testing';
   config.models.writer.base_url = 'http://127.0.0.1:' + server.address().port;
@@ -338,11 +338,11 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   assert.ok(checked.issues.every(({ id }) => id !== dismissed.id));
   assert.equal((await json('verify', '--content', '--all-issues')).data.issues.find(({ id }) => id === dismissed.id).state, 'dismissed');
   config.serve.port = 0;
-  config.serve.access.auth = { type: 'token', token_env: 'DUNLIN_TEST_WIKI_TOKEN' };
+  config.serve.access.auth = { type: 'token', token_env: 'KNOWLEDGE_NEST_TEST_WIKI_TOKEN' };
   await writeFile(path, stringify(config));
   const site = spawn(process.execPath, [cli, '--project', 'wiki', 'serve'], { cwd: root,
-    env: { ...process.env, DUNLIN_TEST_WIKI_TOKEN: 'local-wiki-token' }, stdio: ['ignore', 'ignore', 'pipe'] });
-  const auth = { authorization: 'Basic ' + Buffer.from('dunlin:local-wiki-token').toString('base64') };
+    env: { ...process.env, KNOWLEDGE_NEST_TEST_WIKI_TOKEN: 'local-wiki-token' }, stdio: ['ignore', 'ignore', 'pipe'] });
+  const auth = { authorization: 'Basic ' + Buffer.from('knowledge-nest:local-wiki-token').toString('base64') };
   const stopped = once(site, 'exit');
   try {
     let log = '';
@@ -393,7 +393,7 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
     await waitFor(nextPage, /data-work-status="succeeded"/u);
   } finally { pauseModel?.resolve(); site.kill(); await stopped; }
   await run('init', 'para', 'para', '--purpose', '設備保全の記録');
-  const paraPath = join(root, 'para', 'Dunlinfile.yaml');
+  const paraPath = join(root, 'para', 'KnowledgeNestfile.yaml');
   const para = parse(await readFile(paraPath, 'utf8'));
   para.models.writer = config.models.writer;
   await writeFile(paraPath, stringify(para));

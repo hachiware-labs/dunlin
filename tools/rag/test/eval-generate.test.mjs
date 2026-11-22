@@ -15,7 +15,7 @@ const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const runNode = promisify(execFile);
 
 test('generates evaluation candidates across uncovered documents and keeps only verified quotes', { timeout: 60_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-generate-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-generate-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const requests = [];
   const prompts = [];
@@ -42,7 +42,7 @@ test('generates evaluation candidates across uncovered documents and keeps only 
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   const run = (...args) => runNode(process.execPath, [cli, ...args], { cwd: root, env, encoding: 'utf8', timeout: 20_000 });
   const json = async (...args) => JSON.parse((await run('--project', 'kb', ...args, '--json')).stdout).data;
   const rejects = (promise, code) => assert.rejects(promise, (error) => JSON.parse(error.stdout).errors[0].code === code);
@@ -55,7 +55,7 @@ test('generates evaluation candidates across uncovered documents and keeps only 
     writeFile(join(docs, 'repeat.txt'), '点検の記録を残す。点検の責任者を決める。\n'),
     writeFile(join(docs, 'long.txt'), '前半の手順を確認する。\n' + 'あ'.repeat(4500) + '\n後半の注意事項を読む。\n'),
   ]);
-  const configPath = join(root, 'kb', 'Dunlinfile.yaml');
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   config.models = { writer: { provider: 'ollama', kind: 'chat', model: 'testing', base_url: 'http://127.0.0.1:' + server.address().port } };
   await writeFile(configPath, stringify(config));

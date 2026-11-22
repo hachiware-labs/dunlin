@@ -1,7 +1,7 @@
 //! OCR with LightOnOCR: the managed Python server, started by Rust as a separate process
 //! (spec 4.1, 28.9 step 2a).
 //!
-//! `dunlin add lightonocr` prepares Python and the model. The server starts when the first page
+//! `knowledge-nest add lightonocr` prepares Python and the model. The server starts when the first page
 //! needs OCR and stops when the load ends: it exits when its standard input closes. Pages go to it
 //! as PNG images; it answers with text blocks marked by boxes in 0..1000.
 
@@ -317,7 +317,7 @@ pub fn parse(
     check: &dyn Fn() -> bool,
 ) -> Result<ConfigValue, String> {
     let mut recognize_page = |image: image::RgbImage| {
-        let config = config.ok_or("Local GPU OCR is not prepared. Run dunlin add ocr.")?;
+        let config = config.ok_or("Local GPU OCR is not prepared. Run knowledge-nest add ocr.")?;
         recognize(config, image, check)
     };
     let parser = ConfigValue::Object(vec![

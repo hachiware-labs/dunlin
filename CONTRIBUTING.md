@@ -22,11 +22,11 @@ npm test
 npm --prefix tools/rag test
 ```
 
-パッケージの変更では `npm run test:package` を使います。バンドル版と分割版をインストールして、検索と出典本文の取得まで試します。GitHub Actions は依頼されたときに手動実行します。**Verify Dunlin** の標準実行は Windows と Ubuntu を、macOS のオプションは ARM と Intel を検証します。
+パッケージの変更では `npm run test:package` を使います。バンドル版と分割版をインストールして、検索と出典本文の取得まで試します。GitHub Actions は依頼されたときに手動実行します。**Verify Knowledge-Nest** の標準実行は Windows と Ubuntu を、macOS のオプションは ARM と Intel を検証します。
 
 ## リリースを準備する
 
-公開する npm パッケージは、ネイティブコードを含まない本体と、プラットフォームごとのパッケージ（アドオン、索引ツール、ライセンス）に分かれます。GitHub Actions の **Release Dunlin** を手動実行すると、4つのプラットフォームでビルドとテストを行い、tarball を成果物 `dunlin-release` にまとめます。`publish` を選ばない限り公開は行いません。
+公開する npm パッケージは、ネイティブコードを含まない本体と、プラットフォームごとのパッケージ（アドオン、索引ツール、ライセンス）に分かれます。GitHub Actions の **Release Knowledge-Nest** を手動実行すると、4つのプラットフォームでビルドとテストを行い、tarball を成果物 `knowledge-nest-release` にまとめます。`publish` を選ばない限り公開は行いません。
 
 1台で構成だけを確かめる場合は、ビルド済みの `dist` を入力にします。出力先は `dist/release/` です。
 
@@ -38,7 +38,7 @@ npm run release:prepare -- --artifacts dist --partial
 
 - `package.json` の `name` を確定し、`private` を外す。`server.json` の `identifier`、`name`、バージョンと、`package.json` の `mcpName` を合わせる。食い違いは `release:prepare` が検出します。
 - リポジトリのシークレット `NPM_TOKEN` に npm の公開用トークンを登録する。
-- **Release Dunlin** を `publish` 付きで実行する。プラットフォームのパッケージを先に、本体を最後に公開します。
+- **Release Knowledge-Nest** を `publish` 付きで実行する。プラットフォームのパッケージを先に、本体を最後に公開します。
 
 MCP Registry への登録は、npm への公開後に `mcp-publisher login github` と `mcp-publisher publish` をリポジトリのルートで実行します。Registry は npm 上のパッケージの `mcpName` で所有を確認します。
 

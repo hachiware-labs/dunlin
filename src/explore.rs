@@ -399,7 +399,7 @@ fn parse_link(
     if destination.is_empty() || destination.starts_with('#') || destination.len() > 4096 {
         return None;
     }
-    if let Some(address) = destination.strip_prefix("dunlin://") {
+    if let Some(address) = destination.strip_prefix("knowledge-nest://") {
         let path = address.split(['#', '?']).next()?;
         let (id, object_id) = path.split_once('/')?;
         if !source::in_scope(id, sources) || source::validate_id(id).is_err() {

@@ -389,8 +389,8 @@ mod tests {
             ["C:\\proj", "C:\\proj\\site\\a.html", "site\\a.html"],
             [
                 "C:\\proj\\site\\x",
-                "C:\\proj\\.dunlin\\a.bin",
-                "..\\..\\.dunlin\\a.bin",
+                "C:\\proj\\.knowledge-nest\\a.bin",
+                "..\\..\\.knowledge-nest\\a.bin",
             ],
             ["C:\\proj", "c:\\PROJ", ""],
             ["C:\\proj", "D:\\x", "D:\\x"],
@@ -402,7 +402,11 @@ mod tests {
         }
         for [from, to, expected] in [
             ["/proj", "/proj/site/a.html", "site/a.html"],
-            ["/proj/site/x", "/proj/.dunlin/a.bin", "../../.dunlin/a.bin"],
+            [
+                "/proj/site/x",
+                "/proj/.knowledge-nest/a.bin",
+                "../../.knowledge-nest/a.bin",
+            ],
             ["/", "/x", "x"],
             ["/proj/a", "/", "../.."],
             ["/proj", "/projects", "../projects"],

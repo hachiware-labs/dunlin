@@ -634,11 +634,11 @@ fn answer_one(
         (
             "metadata",
             object(vec![
-                ("dunlin_build_id", pick("build_id")),
-                ("dunlin_search_config_id", pick("search_config_id")),
+                ("knowledge_nest_build_id", pick("build_id")),
+                ("knowledge_nest_search_config_id", pick("search_config_id")),
             ]),
         ),
-        ("dunlin_citations", ConfigValue::Array(details)),
+        ("knowledge_nest_citations", ConfigValue::Array(details)),
     ]))
 }
 

@@ -134,7 +134,7 @@ fn js_trim(text: &str) -> &str {
     text.trim_matches(crate::registry::js_space)
 }
 
-/// A `DunlinError('INVALID_ARGUMENT', message)` of the JavaScript API: a code without an exit code.
+/// A `KnowledgeNestError('INVALID_ARGUMENT', message)` of the JavaScript API: a code without an exit code.
 fn argument(message: impl Into<String>) -> StageError {
     StageError {
         code: Some("INVALID_ARGUMENT"),
@@ -557,7 +557,7 @@ fn vector(search: &VectorSearch<'_>, cancel: &Cancellation) -> Result<Found, Sta
     if !truthy(built) {
         return Err(StageError::coded(
             "VECTOR_REQUIRED",
-            "The selected build has no vector index. Run dunlin build with index.vector configured.",
+            "The selected build has no vector index. Run knowledge-nest build with index.vector configured.",
             3,
         ));
     }

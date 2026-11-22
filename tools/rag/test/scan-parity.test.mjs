@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, matchesGlob } from 'node:path';
 import { test } from 'node:test';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { parserRoutes, routeFiles } from './fixtures/cli-reference/project-parsers.mjs';
 import { scanFolder as referenceScan } from './fixtures/reference-load/project-content.mjs';
@@ -24,7 +24,7 @@ test('matches globs exactly as Node.js path.matchesGlob', () => {
   let compared = 0;
   for (const path of paths) {
     for (const pattern of patterns) {
-      assert.equal(Dunlin.matchesGlob(path, pattern), matchesGlob(path, pattern), JSON.stringify([path, pattern]));
+      assert.equal(KnowledgeNest.matchesGlob(path, pattern), matchesGlob(path, pattern), JSON.stringify([path, pattern]));
       compared++;
     }
   }
@@ -34,15 +34,15 @@ test('matches globs exactly as Node.js path.matchesGlob', () => {
 // Rust orders files by object ID in code point order (spec 28.9 step 2e); the reference used localeCompare.
 const codePoints = (a, b) => Buffer.compare(Buffer.from(a.objectId), Buffer.from(b.objectId));
 const scanFolder = async (sources, { path, exclude }, { name, projectRoot }) =>
-  [...sources, await Dunlin.scanSource({ path, exclude, name, ...(projectRoot && { projectRoot }) })];
+  [...sources, await KnowledgeNest.scanSource({ path, exclude, name, ...(projectRoot && { projectRoot }) })];
 
 test('scans and routes folders like the JavaScript implementation', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-scan-parity-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-scan-parity-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const docs = join(root, 'docs');
   const files = ['a.md', 'B.md', 'c.TXT', 'page.html', 'deck.pptx', 'report.pdf', 'scan.png', 'data.bin', 'drawings/pump.vsdx',
     'drawings/sub/notes.md', '.hidden/x.md', 'node_modules/y.md', 'skip/z.md', '日本語/資料.md', 'あ.md', 'ア.md', 'Ａ.md', '10.md', '2.md',
-    'name with space.md', 'Dunlinfile.yaml', 'code/main.rs', 'code/app.TS'];
+    'name with space.md', 'KnowledgeNestfile.yaml', 'code/main.rs', 'code/app.TS'];
   for (const file of files) {
     await mkdir(join(docs, file, '..'), { recursive: true });
     await writeFile(join(docs, file), 'x');

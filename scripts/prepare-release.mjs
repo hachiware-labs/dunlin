@@ -2,7 +2,7 @@
 //
 //   npm run release:prepare -- --artifacts <directory> [--partial]
 //
-// <directory> holds one folder per platform, each with the addon (dunlin.<platform>.node)
+// <directory> holds one folder per platform, each with the addon (knowledge-nest.<platform>.node)
 // and its tools/ directory, as uploaded by the release workflow. --partial accepts a
 // subset of the platforms, for trying the layout on one machine (for example --artifacts dist).
 // Nothing is published: the tarballs are written to dist/release/.
@@ -39,7 +39,7 @@ const folders = [artifacts, ...(await readdir(artifacts, { withFileTypes: true }
   .filter((entry) => entry.isDirectory()).map(({ name }) => join(artifacts, name))];
 const platforms = await platformPackages(project);
 const output = join(project, 'dist', 'release');
-const stage = await mkdtemp(join(tmpdir(), 'dunlin-release-'));
+const stage = await mkdtemp(join(tmpdir(), 'knowledge-nest-release-'));
 try {
   await rm(output, { recursive: true, force: true });
   await mkdir(join(output, 'platforms'), { recursive: true });
@@ -57,7 +57,7 @@ try {
     await stageNative({ project, directory, platform, binary: join(folder, platform.main), tools: join(folder, 'tools'), release: true });
     const packed = pack(directory, join(output, 'platforms'));
     assert.ok(packed.files.some(({ path }) => path === platform.main));
-    assert.ok(packed.files.some(({ path }) => path.startsWith('tools/dunlin-hannoy-')), 'No index tool in ' + platform.name);
+    assert.ok(packed.files.some(({ path }) => path.startsWith('tools/knowledge-nest-hannoy-')), 'No index tool in ' + platform.name);
     built.push(packed.filename);
   }
   assert.ok(built.length, 'No platform build found in ' + artifacts);

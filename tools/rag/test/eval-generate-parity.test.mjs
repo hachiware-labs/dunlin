@@ -84,13 +84,13 @@ function normalizer() {
 }
 
 test('generates evaluation candidates like the reference in JavaScript', { timeout: 300_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-eval-generate-parity-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-eval-generate-parity-'));
   const { url, bodies } = await model(t);
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   await runNode(process.execPath, [cli, 'init', 'rag', 'kb', '--no-embedding'], { cwd: root, env });
   const base = join(root, 'kb');
   for (const [name, content] of Object.entries(documents)) await writeFile(join(base, 'docs', name), content);
-  const configPath = join(base, 'Dunlinfile.yaml');
+  const configPath = join(base, 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   config.models = { ...config.models, local: { provider: 'ollama', kind: 'chat', model: 'test', base_url: url },
     broken: { provider: 'ollama', kind: 'chat', model: 'test', base_url: 'not a url' } };
@@ -103,11 +103,11 @@ test('generates evaluation candidates like the reference in JavaScript', { timeo
     .then(({ stdout }) => JSON.parse(stdout), (error) => ({ exitCode: error.code, ...JSON.parse(error.stdout) }));
 
   const refBase = join(root, 'ref');
-  const paths = { data: join(refBase, '.dunlin'), state: join(refBase, '.dunlin', 'state.sqlite'),
-    artifacts: join(refBase, '.dunlin', 'artifacts'), corpus: join(refBase, '.dunlin', 'corpus') };
+  const paths = { data: join(refBase, '.knowledge-nest'), state: join(refBase, '.knowledge-nest', 'state.sqlite'),
+    artifacts: join(refBase, '.knowledge-nest', 'artifacts'), corpus: join(refBase, '.knowledge-nest', 'corpus') };
   const db = new DatabaseSync(paths.state);
   db.exec('PRAGMA busy_timeout = 500');
-  const actualDb = new DatabaseSync(join(base, '.dunlin', 'state.sqlite'), { readOnly: true });
+  const actualDb = new DatabaseSync(join(base, '.knowledge-nest', 'state.sqlite'), { readOnly: true });
   // The databases close first, which Windows needs before removing their files.
   t.after(async () => {
     db.close();
@@ -115,8 +115,8 @@ test('generates evaluation candidates like the reference in JavaScript', { timeo
     await rm(root, { recursive: true, force: true, maxRetries: 5 });
   });
   const reference = async (action, positionals, values = {}) => {
-    const text = await readFile(join(refBase, 'Dunlinfile.yaml'), 'utf8');
-    const project = { root: refBase, config: parse(text), configPath: join(refBase, 'Dunlinfile.yaml'), configDigest: sha256(text), paths };
+    const text = await readFile(join(refBase, 'KnowledgeNestfile.yaml'), 'utf8');
+    const project = { root: refBase, config: parse(text), configPath: join(refBase, 'KnowledgeNestfile.yaml'), configDigest: sha256(text), paths };
     referenceEnsureEvaluation(db);
     return referenceManageEvaluationData(db, project, action, positionals, values, () => referenceOpen(paths,
       JSON.parse(db.prepare('SELECT manifest FROM project JOIN builds ON builds.id = project.build_id').get().manifest)));

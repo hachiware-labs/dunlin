@@ -11,10 +11,10 @@ import { deflateSync } from 'node:zlib';
 const runNode = promisify(execFile);
 
 test('builds mixed PDF and text sources in stable order and preserves the active build on failure', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-mixed-sources-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-mixed-sources-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const projectCli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   const json = async (...args) => JSON.parse((await runNode(process.execPath, [projectCli, ...args, '--json'],
     { cwd: root, env, timeout: 15_000 })).stdout);
   await json('init', 'rag', '.');
@@ -35,7 +35,7 @@ test('builds mixed PDF and text sources in stable order and preserves the active
   const search = (await json('search', 'Calibration')).data;
   assert.deepEqual(search.results.map(({ document_id }) => document_id).sort(), ['docs:a-original.pdf', 'docs:b-duplicate.pdf']);
   assert.ok(search.results.every(({ page }) => page === 1));
-  const originals = join(root, '.dunlin', 'artifacts', 'originals', 'shared');
+  const originals = join(root, '.knowledge-nest', 'artifacts', 'originals', 'shared');
   const archived = await Promise.all((await readdir(originals)).map((name) => readFile(join(originals, name))));
   assert.equal(archived.filter((bytes) => bytes.equals(pdf)).length, 1);
   const repeated = await json('build', '--skip-unsupported');
@@ -61,10 +61,10 @@ test('builds mixed PDF and text sources in stable order and preserves the active
 });
 
 test('uses text-layer PDFs in an OCR-enabled project and guides setup for scans', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-project-ocr-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-project-ocr-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const projectCli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml'), DUNLIN_OCR_HOME: join(root, 'ocr') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml'), KNOWLEDGE_NEST_OCR_HOME: join(root, 'ocr') };
   const run = (...args) => runNode(process.execPath, [projectCli, ...args], { cwd: root, env, timeout: 15_000 });
   await run('config', 'set', 'ocr');
   await run('init', 'rag', '.');
@@ -76,7 +76,7 @@ test('uses text-layer PDFs in an OCR-enabled project and guides setup for scans'
   assert.equal(result.page, 1);
 
   await writeFile(join(root, 'docs', 'scan.pdf'), scannedPdf(1));
-  await assert.rejects(run('build'), { code: 1, stderr: /Run dunlin add ocr\./u });
+  await assert.rejects(run('build'), { code: 1, stderr: /Run knowledge-nest add ocr\./u });
 });
 
 /** A PDF whose pages are images without a text layer, as scanners write them. */

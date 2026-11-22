@@ -66,7 +66,7 @@ export async function atomicWrite(path, content) {
 }
 
 export async function withWriteLock(root, write) {
-  const path = join(root, '.dunlin-write.lock');
+  const path = join(root, '.knowledge-nest-write.lock');
   const lock = await open(path, 'wx').catch((error) => {
     if (error.code !== 'EEXIST') throw error;
     throw new Error(`Another writer is updating ${root}`);
@@ -95,8 +95,8 @@ export async function checkSourceRevision(database, expected, signal) {
   }
 }
 
-const sourcesMarker = '\n\n<!-- dunlin:sources -->\n';
-const sourcesEnd = '<!-- /dunlin:sources -->\n';
+const sourcesMarker = '\n\n<!-- knowledge-nest:sources -->\n';
+const sourcesEnd = '<!-- /knowledge-nest:sources -->\n';
 
 export function citationLocations(locations = []) {
   const labels = locations.map(({ page, symbol }) => page ? `p. ${page}` : symbol).filter(Boolean);

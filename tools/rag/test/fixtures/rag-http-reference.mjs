@@ -58,7 +58,7 @@ export async function referenceServeRagHttp(settings, { search, answer, model, m
       return;
     }
     const { input, model: requested } = parse(answerRequest, body);
-    if (model === undefined) throw new HttpError(503, 'MODEL_REQUIRED', 'Set the answer model in the Dunlinfile and restart serve.');
+    if (model === undefined) throw new HttpError(503, 'MODEL_REQUIRED', 'Set the answer model in the KnowledgeNestfile and restart serve.');
     if (requested !== undefined && requested !== model) throw new HttpError(400, 'MODEL_MISMATCH', 'Use the model configured for this project.');
     const query = question(input);
     const result = await answer(query, signal);

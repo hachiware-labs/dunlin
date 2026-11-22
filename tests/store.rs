@@ -1,8 +1,8 @@
 //! The store with a list that holds information objects instead of documents
 //! (docs/data-management.md, 4.5 and 6.4): an `index` snapshot lists what each index is.
 
-use dunlin::records::{InfoId, ModuleIdentity, Process, info_id, object_id};
-use dunlin::store::{Committed, Outcome, SnapshotId, Store};
+use knowledge_nest::records::{InfoId, ModuleIdentity, Process, info_id, object_id};
+use knowledge_nest::store::{Committed, Outcome, SnapshotId, Store};
 use serde_json::{Value, json};
 
 fn indexing(tokenizer: &str) -> Process {
@@ -117,7 +117,7 @@ fn lists_what_an_index_is() {
     );
 
     // A document that happens to hold the same JSON is another object: it does not get the note.
-    let same_bytes = dunlin::records::canonical(&keyword_info(&store, chunks, "lindera"));
+    let same_bytes = knowledge_nest::records::canonical(&keyword_info(&store, chunks, "lindera"));
     assert_ne!(
         object_id(same_bytes.as_bytes()).as_str()[4..],
         info.as_str()[4..]

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { describeModules } from './fixtures/cli-reference/project-modules.mjs';
 import { describeModules as referenceDescribe, referenceArgumentInfo, referenceModules } from './fixtures/module-registry-reference.mjs';
@@ -18,7 +18,7 @@ function expectedResult(schema, input) {
 }
 
 test('describes modules exactly as the zod registry did', () => {
-  assert.equal(JSON.stringify(Dunlin.describeModules()), JSON.stringify(referenceDescribe()));
+  assert.equal(JSON.stringify(KnowledgeNest.describeModules()), JSON.stringify(referenceDescribe()));
   assert.equal(JSON.stringify(describeModules()), JSON.stringify(referenceDescribe()));
   assert.equal(JSON.stringify(describeModules('loader.command')), JSON.stringify(referenceDescribe('loader.command')));
   assert.equal(describeModules('missing.module'), undefined);
@@ -29,7 +29,7 @@ test('reads every argument with the zod codes, values and defaults', () => {
   for (const [name, module] of referenceModules) {
     for (const [key, schema] of Object.entries(module.args)) {
       for (const input of inputs) {
-        const [result] = Dunlin.readModuleArgs(name, input === undefined ? {} : { [key]: input }).filter((item) => item.key === key);
+        const [result] = KnowledgeNest.readModuleArgs(name, input === undefined ? {} : { [key]: input }).filter((item) => item.key === key);
         const expected = expectedResult(schema, input);
         const label = name + '.' + key + ' = ' + String(input) + ' ' + JSON.stringify(input);
         if (expected.code) {
@@ -49,11 +49,11 @@ test('reads every argument with the zod codes, values and defaults', () => {
 
 test('keeps argument order and copies values', () => {
   const args = { env: { Z_LAST: 'z', A_FIRST: 'a' }, command: ['tool', '{input}'], match: ['**/*.x'] };
-  const results = Dunlin.readModuleArgs('loader.command', args);
+  const results = KnowledgeNest.readModuleArgs('loader.command', args);
   assert.deepEqual(results.map(({ key }) => key), Object.keys(referenceModules.get('loader.command').args));
   const env = results.find(({ key }) => key === 'env').value;
   assert.deepEqual(Object.keys(env), ['Z_LAST', 'A_FIRST']);
   results.find(({ key }) => key === 'command').value[0] = 'changed';
   assert.equal(args.command[0], 'tool');
-  assert.throws(() => Dunlin.readModuleArgs('missing.module', {}), { code: 'INVALID_ARGUMENT' });
+  assert.throws(() => KnowledgeNest.readModuleArgs('missing.module', {}), { code: 'INVALID_ARGUMENT' });
 });

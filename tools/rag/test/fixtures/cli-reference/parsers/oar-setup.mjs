@@ -27,7 +27,7 @@ const models = {
   dictionary: ['ppocrv6_dict.txt', 'b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d'],
 };
 
-/** The folder oar-ocr uses, beside the lightonocr folder (DUNLIN_OCR_HOME moves both). */
+/** The folder oar-ocr uses, beside the lightonocr folder (KNOWLEDGE_NEST_OCR_HOME moves both). */
 export function oarOcrHome() {
   return join(dirname(dataRoot()), 'oar-ocr', oarOcrVersion);
 }

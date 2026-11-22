@@ -985,7 +985,7 @@ fn add(
 
 /// `add --from-search <file> --hit <n>`: the quote is the text of a saved search hit.
 fn from_search(values: ConfigValue, documents: &[Document]) -> Result<ConfigValue, StageError> {
-    let unreadable = || invalid("Provide JSON saved from dunlin search --json.");
+    let unreadable = || invalid("Provide JSON saved from knowledge-nest search --json.");
     let path = js_string(values.get("from-search"));
     let record: ConfigValue = std::fs::read_to_string(&path)
         .ok()

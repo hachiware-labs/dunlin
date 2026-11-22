@@ -514,7 +514,7 @@ struct WikiServer {
     jobs: Mutex<Option<mpsc::Sender<Job>>>,
 }
 
-/// `authorized(value, digest, true)`: a bearer token, or Basic credentials for the user `dunlin`.
+/// `authorized(value, digest, true)`: a bearer token, or Basic credentials for the user `knowledge-nest`.
 fn authorized(value: Option<&str>, digest: Option<&[u8; 32]>) -> bool {
     let Some(digest) = digest else { return true };
     let Some(value) = value else { return false };
@@ -542,7 +542,7 @@ fn authorized(value: Option<&str>, digest: Option<&[u8; 32]>) -> bool {
             })
             .ok()?;
         String::from_utf8_lossy(&decoded)
-            .strip_prefix("dunlin:")
+            .strip_prefix("knowledge-nest:")
             .map(str::to_owned)
     });
     let Some(password) = password else {
@@ -647,7 +647,7 @@ impl WikiServer {
             let mut reply = Reply::error(401, "AUTH_REQUIRED", "Valid authentication is required.");
             reply.headers.push((
                 "www-authenticate",
-                r#"Basic realm="Dunlin", charset="UTF-8""#.into(),
+                r#"Basic realm="Knowledge-Nest", charset="UTF-8""#.into(),
             ));
             return reply;
         }

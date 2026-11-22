@@ -667,7 +667,10 @@ impl ServerHandler for McpServer {
                 .enable_tool_list_changed()
                 .build(),
         )
-        .with_server_info(Implementation::new("dunlin", env!("CARGO_PKG_VERSION")))
+        .with_server_info(Implementation::new(
+            "knowledge-nest",
+            env!("CARGO_PKG_VERSION"),
+        ))
     }
 
     async fn list_tools(

@@ -34,7 +34,7 @@ PROSE = [
     "交換部品の型番はPX-200（シール）とPX-310（軸受）とする。",
     "第2章　点検の手順",
     "電源を切り、表示灯が消えたことを確かめてから作業を始める。",
-    "Mixed text: Dunlin reads PDF files, 2026年11月15日 版。",
+    "Mixed text: Knowledge-Nest reads PDF files, 2026年11月15日 版。",
 ]
 
 

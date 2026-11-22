@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { chunkCorpus } from './fixtures/cli-reference/project-content.mjs';
 import { atomicWrite } from './fixtures/wiki-reference/files.mjs';
 import { ensureWiki, runWiki, validateWiki } from './fixtures/wiki-reference/project-wiki.mjs';
@@ -111,7 +111,7 @@ async function model(t) {
 function normalizer() {
   const digests = new Map();
   return (text) => text
-    .replace(/<!-- dunlin:publication ([\w-]+) -->/gu, (_, data) => '<!-- ' + Buffer.from(data, 'base64url').toString('utf8') + ' -->')
+    .replace(/<!-- knowledge-nest:publication ([\w-]+) -->/gu, (_, data) => '<!-- ' + Buffer.from(data, 'base64url').toString('utf8') + ' -->')
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/gu, 'TIME')
     .replace(/(\\?")(acquiredAtMs|pid)\1:\d+/gu, '$1$2$1:0')
     .replace(/(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/gu, (digest) => {
@@ -132,7 +132,7 @@ const tables = ['wiki_pages', 'wiki_sources', 'wiki_jobs', 'wiki_issues', 'wiki_
 
 /** The rows of the Wiki tables and the published files, with each publication's record decoded. */
 async function snapshot(base) {
-  const db = new DatabaseSync(join(base, '.dunlin', 'state.sqlite'), { readOnly: true });
+  const db = new DatabaseSync(join(base, '.knowledge-nest', 'state.sqlite'), { readOnly: true });
   try {
     const rows = Object.fromEntries(tables.map((table) => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()
       .map((row) => ({ ...row }))]));
@@ -140,7 +140,7 @@ async function snapshot(base) {
     const walk = async (directory, prefix) => {
       for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : 1)) {
         if (entry.isDirectory()) await walk(join(directory, entry.name), prefix + entry.name + '/');
-        else files[prefix + entry.name] = (await readFile(join(directory, entry.name), 'utf8')).replace(/<!-- dunlin:publication ([\w-]+) -->/u,
+        else files[prefix + entry.name] = (await readFile(join(directory, entry.name), 'utf8')).replace(/<!-- knowledge-nest:publication ([\w-]+) -->/u,
           (_, data) => '<!-- ' + Buffer.from(data, 'base64url').toString('utf8') + ' -->');
       }
     };
@@ -153,10 +153,10 @@ async function snapshot(base) {
 
 /** A Wiki or PARA project and its copy, which run the same commands through the CLI and the reference. */
 async function projects(t, root, type, url) {
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   await runNode(process.execPath, [cli, 'init', type, type, '--purpose', '設備保全の手順'], { cwd: root, env });
   const base = await realpath(join(root, type));
-  const configPath = join(base, 'Dunlinfile.yaml');
+  const configPath = join(base, 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   config.models.writer.model = 'testing';
   config.models.writer.base_url = url;
@@ -165,15 +165,15 @@ async function projects(t, root, type, url) {
   await writeFile(configPath, stringify(config));
   const refBase = join(root, type + '-ref');
   await cp(base, refBase, { recursive: true });
-  const paths = (directory) => ({ data: join(directory, '.dunlin'), state: join(directory, '.dunlin', 'state.sqlite'),
-    artifacts: join(directory, '.dunlin', 'artifacts'), corpus: join(directory, '.dunlin', 'corpus') });
+  const paths = (directory) => ({ data: join(directory, '.knowledge-nest'), state: join(directory, '.knowledge-nest', 'state.sqlite'),
+    artifacts: join(directory, '.knowledge-nest', 'artifacts'), corpus: join(directory, '.knowledge-nest', 'corpus') });
   const cliRun = (args) => runNode(process.execPath, [cli, '--project', type, ...args, '--json'],
     { cwd: root, env, encoding: 'utf8', timeout: 60_000 })
     .then(({ stdout }) => JSON.parse(stdout), (error) => ({ exitCode: error.code, ...JSON.parse(error.stdout) }));
   const reference = async (command, positionals, values, runId) => {
-    const configText = await readFile(join(refBase, 'Dunlinfile.yaml'), 'utf8');
+    const configText = await readFile(join(refBase, 'KnowledgeNestfile.yaml'), 'utf8');
     const projectConfig = parse(configText);
-    const { plan, serveSettings } = validateWiki(projectConfig, join(refBase, 'Dunlinfile.yaml'), () => null);
+    const { plan, serveSettings } = validateWiki(projectConfig, join(refBase, 'KnowledgeNestfile.yaml'), () => null);
     const project = { root: refBase, configRoot: refBase, config: projectConfig, paths: paths(refBase), wikiPlan: plan, serveSettings };
     const readOnly = Boolean(values['dry-run']) || ['cite', 'rules', 'progress'].includes(command) || command === 'verify' && !values.content;
     const db = new DatabaseSync(project.paths.state, { readOnly });
@@ -183,7 +183,7 @@ async function projects(t, root, type, url) {
     const input = values.persistent ? [null, ...positionals] : positionals;
     const execute = (progress) => runWiki(db, project, command, input, values, runId, project.paths, {
       atomicWrite, warnings, progress,
-      open: (path, keyword) => Dunlin.open(path, { corpusBackend: 'sqlite', keywordNgrams: true, keywordBigrams: keyword.short_query === 'bigram' }),
+      open: (path, keyword) => KnowledgeNest.open(path, { corpusBackend: 'sqlite', keywordNgrams: true, keywordBigrams: keyword.short_query === 'bigram' }),
       chunk: (document) => chunkCorpus({ groups: [['docs', [document]]], unicode: 'nfkc' }, { size: 800, overlap: 100 })[0][0],
     });
     try {
@@ -196,7 +196,7 @@ async function projects(t, root, type, url) {
 }
 
 test('runs Wiki and PARA commands like the former JavaScript code', { timeout: 600_000 }, async (t) => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'dunlin-wiki-parity-')));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'knowledge-nest-wiki-parity-')));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const { url, bodies } = await model(t);
   const sources = join(root, 'sources');
@@ -266,7 +266,7 @@ test('runs Wiki and PARA commands like the former JavaScript code', { timeout: 6
     assert.equal(actual.rules, expected.rules, label + ' rules');
   };
   const configure = async (pair, change) => {
-    for (const path of [pair.configPath, join(pair.refBase, 'Dunlinfile.yaml')]) {
+    for (const path of [pair.configPath, join(pair.refBase, 'KnowledgeNestfile.yaml')]) {
       const config = parse(await readFile(path, 'utf8'));
       change(config);
       await writeFile(path, stringify(config));

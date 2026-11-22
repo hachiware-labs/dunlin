@@ -6,7 +6,7 @@ import { atomicWrite, directory, readBytes, readText, revision, withWriteLock } 
 const uploadedSourceId = /^upload-[a-f0-9]{57}$/u;
 const sha256Pattern = /^[a-f0-9]{64}$/u;
 const sharedWrites = new Map();
-export const originalUriTemplate = 'dunlin://original/{sourceId}/{sha256}';
+export const originalUriTemplate = 'knowledge-nest://original/{sourceId}/{sha256}';
 export const originalMimeType = 'application/octet-stream';
 
 export async function withUploadLock(root, document, write) {
@@ -146,5 +146,5 @@ async function readDigests(path) {
 }
 
 function originalReference(sourceId, sha256, name) {
-  return { name, sha256, uri: `dunlin://original/${sourceId}/${sha256}` };
+  return { name, sha256, uri: `knowledge-nest://original/${sourceId}/${sha256}` };
 }

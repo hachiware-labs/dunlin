@@ -7,9 +7,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use dunlin::extract::{Apply, ExtractOutcome, ExtractRequest, Withheld, extract};
-use dunlin::records::{ItemId, Location, object_id};
-use dunlin::store::{Counts, Outcome, SnapshotId, Store};
+use knowledge_nest::extract::{Apply, ExtractOutcome, ExtractRequest, Withheld, extract};
+use knowledge_nest::records::{ItemId, Location, object_id};
+use knowledge_nest::store::{Counts, Outcome, SnapshotId, Store};
 
 fn fixtures(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -54,7 +54,7 @@ impl Project {
         let root = tempfile::tempdir().unwrap();
         let docs = root.path().join("docs");
         copy_into(&fixtures("original"), &docs, Duration::from_secs(3600));
-        let store = Store::open(&root.path().join(".dunlin/store")).unwrap();
+        let store = Store::open(&root.path().join(".knowledge-nest/store")).unwrap();
         Self {
             _root: root,
             docs,

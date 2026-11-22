@@ -3,14 +3,14 @@ import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 const document = (objectId, content, format = 'text') => ({
   objectId, content, format, url: `https://example.invalid/${objectId}`,
 });
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-sync-'));
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-sync-'));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const path = join(root, 'docs');
   const store = join(root, 'index');
@@ -26,7 +26,7 @@ test('filesystem sync writes only changed objects', async (t) => {
   await writeFile(changedPath, '# old_version\nFirst section\n## Archive\nold_version\n');
   await writeFile(deletedPath, '# removed_marker\nFirst section\n## Archive\nremoved_marker\n');
   await writeFile(stablePath, '# keep_marker\nOriginal stable evidence\n');
-  const kb = await Dunlin.open(store);
+  const kb = await KnowledgeNest.open(store);
   try {
     const initial = await kb.syncSource(source);
     assert.deepEqual(initial.added, ['changed.md', 'deleted.md', 'stable.md']);
@@ -66,7 +66,7 @@ test('filesystem sync writes only changed objects', async (t) => {
 
 test('document sync tracks format and URL changes and rolls back a rejected input', async (t) => {
   const { store } = await fixture(t);
-  const kb = await Dunlin.open(store);
+  const kb = await KnowledgeNest.open(store);
   try {
     const text = document('guide', '# Intro\nExplanation\n## Rules\nformat_marker');
     const reference = document('reference', 'reference_marker');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { ragTemplate, wikiTemplate, writeTemplate } from './fixtures/cli-reference/project-modules.mjs';
 import { referenceParseConfig } from './fixtures/config-parse-reference.mjs';
@@ -21,10 +21,10 @@ const samples = [
 const paths = (value, path = []) => [path, ...(Array.isArray(value) ? value.flatMap((item, i) => paths(item, [...path, i]))
   : value && typeof value === 'object' ? Object.entries(value).flatMap(([key, item]) => paths(item, [...path, key])) : [])];
 
-test('reads Dunlinfile text like the JavaScript yaml package', () => {
+test('reads KnowledgeNestfile text like the JavaScript yaml package', () => {
   for (const text of samples) {
     const expected = referenceParseConfig(text);
-    const actual = Dunlin.parseConfig(text);
+    const actual = KnowledgeNest.parseConfig(text);
     const label = JSON.stringify(text);
     if (expected.syntaxError) {
       assert.equal(actual.syntaxError?.message, expected.syntaxError.message, label);

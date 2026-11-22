@@ -142,7 +142,7 @@ function authorized(value, digest, basic) {
   let password = bearer?.[1];
   if (basic && !password && typeof value === 'string' && /^Basic [A-Za-z0-9+/=]+$/iu.test(value)) {
     const credentials = Buffer.from(value.slice(6), 'base64').toString('utf8');
-    if (credentials.startsWith('dunlin:')) password = credentials.slice(7);
+    if (credentials.startsWith('knowledge-nest:')) password = credentials.slice('knowledge-nest:'.length);
   }
   return typeof password === 'string' && timingSafeEqual(createHash('sha256').update(password).digest(), digest);
 }
@@ -186,7 +186,7 @@ export function listenHttp(settings, handle, { browser = false } = {}) {
         return;
       }
       if (!authorized(request.headers.authorization, digest, browser)) {
-        response.setHeader('WWW-Authenticate', browser ? 'Basic realm="Dunlin", charset="UTF-8"' : 'Bearer realm="Dunlin"');
+        response.setHeader('WWW-Authenticate', browser ? 'Basic realm="Knowledge-Nest", charset="UTF-8"' : 'Bearer realm="Knowledge-Nest"');
         return reject(request, response, 401, 'AUTH_REQUIRED', 'Valid authentication is required.');
       }
       if (running >= settings.limits.max_concurrent) return reject(request, response, 429, 'REQUEST_LIMIT', 'Too many concurrent requests.');

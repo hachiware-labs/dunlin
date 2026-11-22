@@ -7,14 +7,14 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 /** The `tools` folder of the platform package, which ships the hannoy binary when the package lacks one. */
 function nativeTools() {
   const abi = { win32: '-msvc', linux: '-gnu', darwin: '' }[process.platform];
   if (abi === undefined) return undefined;
   try {
-    return join(dirname(createRequire(import.meta.url).resolve('dunlin-' + process.platform + '-' + process.arch + abi)), 'tools');
+    return join(dirname(createRequire(import.meta.url).resolve('knowledge-nest-' + process.platform + '-' + process.arch + abi)), 'tools');
   } catch (error) {
     if (error.code !== 'MODULE_NOT_FOUND') throw error;
     return undefined;
@@ -24,9 +24,9 @@ function nativeTools() {
 const controller = new AbortController();
 const stop = () => controller.abort();
 // For tracing, as diagnostics_channel subscribers see it: `{ path }` of each index a server opens.
-const indexOpens = channel('dunlin:index-open');
+const indexOpens = channel('knowledge-nest:index-open');
 
-process.exitCode = await Dunlin.runCli(process.argv.slice(2), {
+process.exitCode = await KnowledgeNest.runCli(process.argv.slice(2), {
   execPath: process.execPath,
   cli: fileURLToPath(import.meta.url),
   package: fileURLToPath(new URL('../..', import.meta.url)),

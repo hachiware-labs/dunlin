@@ -29,7 +29,7 @@ function fail(code, message) {
 }
 
 function globalPath() {
-  return resolve(process.env.DUNLIN_GLOBAL_CONFIG || join(homedir(), '.dunlin', 'config.yaml'));
+  return resolve(process.env.KNOWLEDGE_NEST_GLOBAL_CONFIG || join(homedir(), '.knowledge-nest', 'config.yaml'));
 }
 
 async function readGlobal(path) {

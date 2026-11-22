@@ -1,5 +1,5 @@
 // The originals that `--keep-original` saves next to an index, in the layout the CLI's uploads used
-// (`.dunlin-uploads-v1/upload-<id>/<sha256>.bin`). This tool kept its own copy when the CLI moved
+// (`.knowledge-nest-uploads-v1/upload-<id>/<sha256>.bin`). This tool kept its own copy when the CLI moved
 // to Rust (spec 28.13).
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -45,9 +45,9 @@ function originalName(objectId) {
   return name.replace(/[/\\\x00-\x1f\x7f]/gu, '_');
 }
 
-/** `{ name, sha256, uri }` of a saved original: `dunlin://original/<archive>/<sha256>`. */
+/** `{ name, sha256, uri }` of a saved original: `knowledge-nest://original/<archive>/<sha256>`. */
 export function originalForDigest(document, sha256) {
-  return { name: originalName(document.objectId), sha256, uri: `dunlin://original/${archiveId(document)}/${sha256}` };
+  return { name: originalName(document.objectId), sha256, uri: `knowledge-nest://original/${archiveId(document)}/${sha256}` };
 }
 
 /**

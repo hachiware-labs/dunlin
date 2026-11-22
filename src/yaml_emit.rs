@@ -1,5 +1,5 @@
 //! YAML text as the `yaml` package's `stringify(value)` writes it (spec 28.13 step 6b), for the
-//! configuration files Dunlin writes: block maps and sequences indented by two spaces, plain
+//! configuration files Knowledge-Nest writes: block maps and sequences indented by two spaces, plain
 //! scalars where YAML 1.2 reads them back as strings, double quotes otherwise, block scalars for
 //! multiline text, and lines folded at 80 columns.
 //!

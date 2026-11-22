@@ -7,10 +7,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use dunlin::index::{Found, search};
-use dunlin::pipeline::{BuildOutcome, BuildRequest, build};
-use dunlin::records::InfoId;
-use dunlin::store::{Counts, Outcome, SnapshotId, Store};
+use knowledge_nest::index::{Found, search};
+use knowledge_nest::pipeline::{BuildOutcome, BuildRequest, build};
+use knowledge_nest::records::InfoId;
+use knowledge_nest::store::{Counts, Outcome, SnapshotId, Store};
 
 const CONFIG: &str = "extract:\n  - source.filesystem: { path: ./docs }\n  - loader.text: {}\n  - tag: docs\n\ntransform:\n  - chunk.length: { unit: characters, size: 200, overlap: 20 }\n  - tag: chunks-200\n\nindex:\n  - index.keyword: { tokenizer: lindera }\n  - tag: main\n\nserve:\n  tag: release\n";
 
@@ -56,7 +56,7 @@ impl Project {
             &root.path().join("docs"),
             Duration::from_secs(3600),
         );
-        let store = Store::open(&root.path().join(".dunlin/store")).unwrap();
+        let store = Store::open(&root.path().join(".knowledge-nest/store")).unwrap();
         Self { root, store }
     }
 
@@ -65,7 +65,7 @@ impl Project {
     }
 
     fn indexes(&self) -> PathBuf {
-        self.root.path().join(".dunlin/indexes")
+        self.root.path().join(".knowledge-nest/indexes")
     }
 
     /// A build with the project's own configuration: it also moves what is served.
@@ -77,7 +77,7 @@ impl Project {
                 root: &self.docs(),
                 indexes: &self.indexes(),
                 config: Some(CONFIG.as_bytes()),
-                apply: dunlin::extract::Apply::ALL,
+                apply: knowledge_nest::extract::Apply::ALL,
                 extract_tag: "docs",
                 transform_tag: "chunks-200",
                 index_tag: "main",
@@ -98,7 +98,7 @@ impl Project {
                 root: &self.docs(),
                 indexes: &self.indexes(),
                 config: Some(TRIAL.as_bytes()),
-                apply: dunlin::extract::Apply::ALL,
+                apply: knowledge_nest::extract::Apply::ALL,
                 extract_tag: "docs",
                 transform_tag: "chunks-80",
                 index_tag: "trial-80",
@@ -374,10 +374,10 @@ fn runs_only_what_follows_a_changed_section() {
 
 #[test]
 fn searches_a_chunk_by_the_headings_above_it() {
-    use dunlin::extract::{Apply, ExtractRequest, extract};
-    use dunlin::index::{IndexRequest, index};
-    use dunlin::records::ItemId;
-    use dunlin::transform::{Chunking, Context, TransformRequest, transform};
+    use knowledge_nest::extract::{Apply, ExtractRequest, extract};
+    use knowledge_nest::index::{IndexRequest, index};
+    use knowledge_nest::records::ItemId;
+    use knowledge_nest::transform::{Chunking, Context, TransformRequest, transform};
 
     let project = Project::new();
     let extracted = extract(

@@ -1,8 +1,8 @@
-# Dunlin 受け入れ確認
+# Knowledge-Nest 受け入れ確認
 
-[受け入れ条件 §22](dunlin-spec.md#22-受け入れ条件) に対応する基本機能の確認結果です。Windows x64 で CLI、stdio MCP、Chromium、npm 配布物を確認しました。モデル応答はローカルの模擬サーバーを使用しています。
+[受け入れ条件 §22](knowledge-nest-spec.md#22-受け入れ条件) に対応する基本機能の確認結果です。Windows x64 で CLI、stdio MCP、Chromium、npm 配布物を確認しました。モデル応答はローカルの模擬サーバーを使用しています。
 
-設計仕様 27 章の初期化、`ask`、検索の共通 JSON、HTTP 提供と接続制限は、Windows x64 で追加確認しました。自動テストでは回答モデルを模擬し、MCP TypeScript SDK で接続しました。別途、ローカル Ollama の `qwen3:4b` で CLI と OpenAI Node SDK から回答と出典を取得しました。[設計仕様 §27](dunlin-spec.md#27-search-と-ask-の返却形式種別-rag-の-serve)
+設計仕様 27 章の初期化、`ask`、検索の共通 JSON、HTTP 提供と接続制限は、Windows x64 で追加確認しました。自動テストでは回答モデルを模擬し、MCP TypeScript SDK で接続しました。別途、ローカル Ollama の `qwen3:4b` で CLI と OpenAI Node SDK から回答と出典を取得しました。[設計仕様 §27](knowledge-nest-spec.md#27-search-と-ask-の返却形式種別-rag-の-serve)
 
 ## 確認に使ったテスト
 
@@ -111,12 +111,12 @@
 
 | 項目 | 確認 |
 | --- | --- |
-| `init mcp` の stdio と `init rag` のモデル・`ask`・HTTP 設定 | P1、P3、npm。[生成される設定](mcp.md#初期化で生成される-dunlinfileyaml) |
+| `init mcp` の stdio と `init rag` のモデル・`ask`・HTTP 設定 | P1、P3、npm。[生成される設定](mcp.md#初期化で生成される-knowledgenestfileyaml) |
 | グローバル設定からのモデル継承、`init` での上書き・適用除外 | [プロジェクトテスト](../tools/rag/test/project.test.mjs) と npm。ローカル Ollama で、登録した埋め込み・回答モデルを使う RAG の `build`・`search`・`ask` も確認 |
 | RAG の初期設定のまま検索と HTTP の起動ができ、回答の要求には `503 MODEL_REQUIRED` が返る | R1 |
 | CLI・stdio MCP・HTTP MCP・HTTP 検索の JSON 一致と、実効設定 ID の更新 | P3、R1 |
 | 文書更新後に稼働中の HTTP 検索・MCP・回答が同じ索引に切り替わる | R1 |
-| Responses 形式の応答、引用と根拠の版・範囲、根拠がない場合の応答、未対応の要求の拒否 | R1。OpenAI Node SDK 7.57.0 から `output_text`、`dunlin_citations`、使用量、ビルド ID を取得できることも確認 |
+| Responses 形式の応答、引用と根拠の版・範囲、根拠がない場合の応答、未対応の要求の拒否 | R1。OpenAI Node SDK 7.57.0 から `output_text`、`knowledge_nest_citations`、使用量、ビルド ID を取得できることも確認 |
 | Host・Origin・トークン、公開エンドポイント、本文サイズ、時間、同時要求の制限 | R2 |
 | ループバック外での認証必須、環境変数が空のときの起動拒否、ポート競合、起動時だけの上書き | R2 |
 | Wiki の Basic 認証、ブラウザの送信元の拒否、作業への接続元記録 | I4 |

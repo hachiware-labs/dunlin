@@ -136,7 +136,7 @@ fn stage_required(message: String) -> StageError {
 fn build_required() -> StageError {
     StageError::coded(
         "BUILD_REQUIRED",
-        "No searchable build. Run dunlin build first.",
+        "No searchable build. Run knowledge-nest build first.",
         3,
     )
 }
@@ -287,7 +287,7 @@ fn input_stage_id(
             string_field(build, "build_id").unwrap_or("undefined")
         )),
         None => stage_required(format!(
-            "No {stage} output. Run dunlin {stage} or dunlin build first."
+            "No {stage} output. Run knowledge-nest {stage} or knowledge-nest build first."
         )),
     })
 }
@@ -330,7 +330,7 @@ fn scan_sources(
                 return Err(StageError::coded(
                     "SOURCE_MISSING",
                     format!(
-                        "Source folder not found: {}. Create it, or set the path of {} in Dunlinfile.yaml.",
+                        "Source folder not found: {}. Create it, or set the path of {} in KnowledgeNestfile.yaml.",
                         folder.path, folder.name
                     ),
                     3,
@@ -942,7 +942,7 @@ pub struct TagRequest {
     pub config_models: Option<ConfigValue>,
 }
 
-/// `dunlin tag <name> [build]`: names a build with its search settings and configuration.
+/// `knowledge-nest tag <name> [build]`: names a build with its search settings and configuration.
 /// Returns `{ tag, build_id, search_config_id }`.
 pub fn tag(request: &TagRequest, host: &dyn TagHost) -> Result<ConfigValue, StageError> {
     let mut connection = open(&request.state, false)?;
@@ -1163,7 +1163,7 @@ mod tests {
     }
 
     fn request(root: &std::path::Path, values: &str) -> BuildRequest {
-        let data = root.join(".dunlin");
+        let data = root.join(".knowledge-nest");
         let mut text = format!(
             r#"{{{}"state":{},"artifacts":{},"corpus":{},"root":{},
             "source":{{"scans":[{{"path":{},"name":"source.filesystem"}}],"routes":[{{"name":"loader.auto","category":"auto","ocr":false}}],
@@ -1190,14 +1190,14 @@ mod tests {
     #[test]
     fn runs_stages_dry_runs_and_tags() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(root.path().join(".dunlin").join("artifacts")).unwrap();
+        std::fs::create_dir_all(root.path().join(".knowledge-nest").join("artifacts")).unwrap();
         std::fs::create_dir_all(root.path().join("docs")).unwrap();
         std::fs::write(
             root.path().join("docs").join("guide.md"),
             "# 点検\n電源を止めます。\n",
         )
         .unwrap();
-        Connection::open(root.path().join(".dunlin").join("state.sqlite"))
+        Connection::open(root.path().join(".knowledge-nest").join("state.sqlite"))
             .unwrap()
             .execute_batch(SCHEMA)
             .unwrap();
@@ -1254,7 +1254,7 @@ mod tests {
             &TagRequest {
                 state: root
                     .path()
-                    .join(".dunlin")
+                    .join(".knowledge-nest")
                     .join("state.sqlite")
                     .to_string_lossy()
                     .into_owned(),
@@ -1278,7 +1278,7 @@ mod tests {
     #[test]
     fn keeps_unchanged_documents_without_reading_them() {
         let root = tempfile::tempdir().unwrap();
-        let data = root.path().join(".dunlin");
+        let data = root.path().join(".knowledge-nest");
         let docs = root.path().join("docs");
         std::fs::create_dir_all(data.join("artifacts")).unwrap();
         std::fs::create_dir_all(&docs).unwrap();

@@ -8,14 +8,14 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use dunlin::assess::{Case, report, save_eval_data};
-use dunlin::optimize::{
+use knowledge_nest::assess::{Case, report, save_eval_data};
+use knowledge_nest::optimize::{
     Candidate, Event, Optimization, OptimizeRequest, State, latest, optimize, table,
 };
-use dunlin::pipeline::{RunOutcome, RunRequest, run};
-use dunlin::records::{InfoId, ItemId};
-use dunlin::settings::Settings;
-use dunlin::store::{RunRecord, SnapshotId, Store};
+use knowledge_nest::pipeline::{RunOutcome, RunRequest, run};
+use knowledge_nest::records::{InfoId, ItemId};
+use knowledge_nest::settings::Settings;
+use knowledge_nest::store::{RunRecord, SnapshotId, Store};
 
 fn fixtures(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -52,9 +52,9 @@ impl Project {
         let root = tempfile::tempdir().unwrap();
         copy_into(&fixtures("extract/original"), &root.path().join("docs"));
         copy_into(&fixtures("extract/additional"), &root.path().join("docs"));
-        let config = instruction("Dunlinfile.yaml");
-        fs::write(root.path().join("Dunlinfile.yaml"), &config).unwrap();
-        let store = Store::open(&root.path().join(".dunlin/store")).unwrap();
+        let config = instruction("KnowledgeNestfile.yaml");
+        fs::write(root.path().join("KnowledgeNestfile.yaml"), &config).unwrap();
+        let store = Store::open(&root.path().join(".knowledge-nest/store")).unwrap();
         let project = Self { root, store };
         let built = project.run(&config, true);
         assert_eq!(built.ran, ["extract", "transform", "index"]);
@@ -67,7 +67,7 @@ impl Project {
     }
 
     fn indexes(&self) -> PathBuf {
-        self.root.path().join(".dunlin/indexes")
+        self.root.path().join(".knowledge-nest/indexes")
     }
 
     /// Runs a configuration file, as a build of the project or as a trial.
@@ -317,7 +317,10 @@ fn writes_a_file_for_each_trial_and_runs_it() {
 
     // The configuration of a trial is a whole file with a number, in the folder of the
     // optimization. It is also kept with the runs it started.
-    assert_eq!(structure.file, ".dunlin/trials/chunk-and-search/010.yaml");
+    assert_eq!(
+        structure.file,
+        ".knowledge-nest/trials/chunk-and-search/010.yaml"
+    );
     assert_eq!(project.file(structure), structure.config);
     let kept = project
         .store
@@ -434,7 +437,7 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     assert_eq!(record.stats["candidates"][0]["recall"], 1.0);
     assert_eq!(
         record.stats["candidates"][10]["file"],
-        ".dunlin/trials/chunk-and-search/010.yaml"
+        ".knowledge-nest/trials/chunk-and-search/010.yaml"
     );
     assert_eq!(runs.len(), 9 * 3);
     assert!(runs.iter().all(|record| record.state == "complete"));
@@ -460,7 +463,7 @@ fn writes_a_file_for_each_trial_and_runs_it() {
     ));
     assert_eq!(
         lines[15],
-        "The files of the trials are in .dunlin/trials/chunk-and-search."
+        "The files of the trials are in .knowledge-nest/trials/chunk-and-search."
     );
     // Every trial starts from the same documents, and the table says which.
     assert_eq!(
@@ -592,8 +595,9 @@ fn leaves_what_goes_over_the_limit_and_refuses_a_wrong_instruction() {
     assert_eq!(project.store.runs().unwrap().len(), runs);
 
     // The base configuration can name the evaluation data instead of the instruction.
-    let config = instruction("Dunlinfile.yaml") + "\neval:\n  - eval.evidence: { data: default }\n";
-    fs::write(project.root.path().join("Dunlinfile.yaml"), config).unwrap();
+    let config =
+        instruction("KnowledgeNestfile.yaml") + "\neval:\n  - eval.evidence: { data: default }\n";
+    fs::write(project.root.path().join("KnowledgeNestfile.yaml"), config).unwrap();
     let from_base = project.optimize(&text.replace("    data: default\n", ""));
     assert_eq!(from_base.candidates[0].recall, Some(1.0));
     assert!(from_base.candidates[0].ran.is_empty());
@@ -610,13 +614,18 @@ fn goes_on_after_a_trial_that_fails() {
         .unwrap();
     let item = ItemId::parse(&documents.items[0].1).unwrap();
     let lost = project.store.item(&item).unwrap()[0].object.clone();
-    rusqlite::Connection::open(project.root.path().join(".dunlin/store/objects.sqlite"))
-        .unwrap()
-        .execute("DELETE FROM objects WHERE id = ?", [lost.as_str()])
-        .unwrap();
+    rusqlite::Connection::open(
+        project
+            .root
+            .path()
+            .join(".knowledge-nest/store/objects.sqlite"),
+    )
+    .unwrap()
+    .execute("DELETE FROM objects WHERE id = ?", [lost.as_str()])
+    .unwrap();
 
     let text = "optimize:
-  base: Dunlinfile.yaml
+  base: KnowledgeNestfile.yaml
   vary:
     - name: search
       options:
@@ -681,7 +690,7 @@ fn goes_on_after_a_trial_that_fails() {
 #[test]
 fn says_what_a_scan_found_and_checks_the_evaluation_before_it_builds() {
     let project = Project::new();
-    let config = instruction("Dunlinfile.yaml");
+    let config = instruction("KnowledgeNestfile.yaml");
     let first = project.served();
     assert_eq!(
         project.store.served().unwrap(),

@@ -1,6 +1,6 @@
 import { stringify } from 'yaml';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 
 import { toolsCatalog } from './project-tools.mjs';
 import { isSearchProject, serveTemplate } from './project-serving.mjs';
@@ -33,7 +33,7 @@ const runners = {
   'context.assemble': (input, args, ctx) => ctx.assemble(input, args),
   'answer.generate': (input, args, ctx) => ctx.answer(input, args),
 };
-const descriptions = Dunlin.describeModules();
+const descriptions = KnowledgeNest.describeModules();
 const modules = new Map(descriptions.map((info) => [info.name, { ...info, run: runners[info.name] }]));
 
 export const constructionStages = ['source', 'transform', 'index'];
@@ -62,7 +62,7 @@ const sectionComments = {
 
 function defaultEntry(name, overrides = {}) {
   const values = {};
-  for (const { key, value, code } of Dunlin.readModuleArgs(name, overrides)) {
+  for (const { key, value, code } of KnowledgeNest.readModuleArgs(name, overrides)) {
     if (code) throw new Error(`Invalid default ${key} for ${name}`);
     if (value !== undefined) values[key] = value;
   }
@@ -112,7 +112,7 @@ export function writeTemplate(config) {
   let yaml = stringify(config);
   if (isSearchProject(config.init.type)) {
     for (const [stage, example] of Object.entries({
-      source: 'Additional parser: loader.ocr (requires dunlin add ocr).',
+      source: 'Additional parser: loader.ocr (requires knowledge-nest add ocr).',
       transform: 'Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.',
       index: 'Additional index: use: index.vector, with: { model: local-embed }.',
       search: 'For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.',
@@ -126,9 +126,9 @@ export function writeTemplate(config) {
     '# ' + sectionComments[section] + '\n' + text);
 }
 
-/** Reads Dunlinfile.yaml in Rust. `line(path)` gives the line of the longest existing prefix of path. */
+/** Reads KnowledgeNestfile.yaml in Rust. `line(path)` gives the line of the longest existing prefix of path. */
 export function parseConfig(text) {
-  const parsed = Dunlin.parseConfig(text);
+  const parsed = KnowledgeNest.parseConfig(text);
   if (parsed.syntaxError) return { syntaxError: parsed.syntaxError };
   // Array positions and keys share one form, so ['modules', 0] and ['modules', '0'] find the same line.
   const key = (path) => JSON.stringify(path.map(String));
@@ -156,7 +156,7 @@ export function describeModules(name) {
  */
 export function validateRag(config, file, line) {
   const tools = [...toolsCatalog.values()].map(({ name, version }) => [name, version]);
-  const result = Dunlin.validateConfig(config, { file, lines: line?.entries ?? [], tools });
+  const result = KnowledgeNest.validateConfig(config, { file, lines: line?.entries ?? [], tools });
   const plan = Object.fromEntries(Object.entries(result.plan).map(([stage, entries]) =>
     [stage, entries.map(({ use, name, args }) => ({ module: modules.get(use), args, name }))]));
   return { plan, errors: result.errors, warnings: result.warnings, evalSettings: result.evalSettings, serveSettings: result.serveSettings };

@@ -77,7 +77,7 @@ function reportByRef(db, ref) {
 }
 
 export function referenceDictionaryEvaluation(db, project, ref) {
-  const addHint = 'Add a development evaluation question with dunlin eval-data add --question <text> --doc <path> --quote <text>.';
+  const addHint = 'Add a development evaluation question with knowledge-nest eval-data add --question <text> --doc <path> --quote <text>.';
   let data;
   let report;
   if (ref !== undefined) {
@@ -91,7 +91,7 @@ export function referenceDictionaryEvaluation(db, project, ref) {
     if (!evaluationCases(data, 'dev', project.evalSettings?.includeGenerated).length) throw missing(addHint);
     const row = db.prepare(`SELECT data FROM evaluation_reports WHERE json_extract(data, '$.dataset_id') = ?
       AND json_extract(data, '$.split') = 'dev' ORDER BY rowid DESC LIMIT 1`).get(data.id);
-    if (!row) throw new EvaluationError(3, 'REPORT_REQUIRED', 'Run dunlin eval to create a development report first.');
+    if (!row) throw new EvaluationError(3, 'REPORT_REQUIRED', 'Run knowledge-nest eval to create a development report first.');
     report = JSON.parse(row.data);
   }
   return { report, data };
@@ -99,7 +99,7 @@ export function referenceDictionaryEvaluation(db, project, ref) {
 
 export async function* referenceDictionaryMisses(db, report, data, database) {
   const row = db.prepare('SELECT data FROM evidence_maps WHERE id = ?').get(report.evidence_map_id);
-  if (!row) throw new EvaluationError(3, 'MAP_REQUIRED', 'Run dunlin eval to record the evidence positions first.');
+  if (!row) throw new EvaluationError(3, 'MAP_REQUIRED', 'Run knowledge-nest eval to record the evidence positions first.');
   const { positions } = JSON.parse(row.data);
   const cases = new Map(data.cases.map((item) => [item.id, item]));
   const primary = primaryRecall(Object.keys(report.scores));

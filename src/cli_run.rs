@@ -1,4 +1,4 @@
-//! The commands of the `dunlin` CLI (spec 28.13 step 6c): reading the command line, running each
+//! The commands of the `knowledge-nest` CLI (spec 28.13 step 6c): reading the command line, running each
 //! command on the Rust engine and printing the result, as `cli.mjs` and `project.mjs` did. The npm
 //! entry point only starts this.
 
@@ -28,7 +28,7 @@ use crate::wiki_project::{atomic_write, fs_error};
 pub trait CliEvents: Send + Sync {
     /// A server starts (`true`) or stops: SIGINT and SIGTERM stop it meanwhile.
     fn serving(&self, _active: bool) {}
-    /// The index directory a server opened, for `dunlin:index-open` subscribers.
+    /// The index directory a server opened, for `knowledge-nest:index-open` subscribers.
     fn opened(&self, _path: &str) {}
 }
 
@@ -120,7 +120,7 @@ pub fn run(
         return 0;
     }
     if ["--version", "-v", "-V", "version"].contains(&command.as_str()) {
-        print(&format!("dunlin {}", env!("CARGO_PKG_VERSION")));
+        print(&format!("knowledge-nest {}", env!("CARGO_PKG_VERSION")));
         return 0;
     }
     if command == "help" {
@@ -153,9 +153,9 @@ pub fn run(
 
 fn unknown_command(command: &str) -> String {
     let hint = crate::cli_args::closest_command(command).map_or(String::new(), |name| {
-        format!(" Did you mean dunlin {name}?")
+        format!(" Did you mean knowledge-nest {name}?")
     });
-    format!("Unknown command: {command}.{hint} Run dunlin --help for the commands.")
+    format!("Unknown command: {command}.{hint} Run knowledge-nest --help for the commands.")
 }
 
 fn new_run_id() -> String {
@@ -490,7 +490,7 @@ fn unknown_action(command: &str, given: &str) -> Option<CliError> {
     let hint = crate::cli_args::closest(given, known.iter().copied())
         .map_or(String::new(), |name| format!(" Did you mean {name}?"));
     Some(invalid(format!(
-        "Unknown {what} for dunlin {command}: {given}.{hint} Use {}.",
+        "Unknown {what} for knowledge-nest {command}: {given}.{hint} Use {}.",
         known.join(", ")
     )))
 }
@@ -529,7 +529,7 @@ fn dispatch(
     let flag = |name: &str| parsed.flag(name);
     let usage = || {
         invalid(format!(
-            "Check the arguments of dunlin {command}.\nUsage:\n{}",
+            "Check the arguments of knowledge-nest {command}.\nUsage:\n{}",
             crate::cli_args::wrapped_usage(command).unwrap_or_default()
         ))
     };
@@ -1547,7 +1547,7 @@ fn initialize(
     let root = env.resolve(directory);
     let paths = crate::cli_project::project_paths(&root);
     let config_path = node_path::join(&root, &[crate::cli_project::CONFIG_NAME]);
-    let legacy = node_path::join(&root, &["dunlin.json"]);
+    let legacy = node_path::join(&root, &["knowledge-nest.json"]);
     if crate::cli_project::exists(&config_path)?
         || crate::cli_project::exists(&legacy)?
         || crate::cli_project::exists(&paths.data)?
@@ -1705,7 +1705,7 @@ fn initialize(
     }
     write_new(
         &node_path::join(&root, &[".gitignore"]),
-        ".dunlin/\n.env\n.env.*\n",
+        ".knowledge-nest/\n.env\n.env.*\n",
         true,
     )?;
     let llm_model = llm
@@ -1713,11 +1713,14 @@ fn initialize(
         .and_then(|llm| string_field(llm, "model"))
         .is_some_and(|model| !model.is_empty());
     let next = match kind {
-        "mcp" => "Add documents, then run dunlin build and dunlin serve --print-config.".to_owned(),
+        "mcp" => {
+            "Add documents, then run knowledge-nest build and knowledge-nest serve --print-config."
+                .to_owned()
+        }
         "rag" => format!(
-            "Add documents and run dunlin build. {}",
+            "Add documents and run knowledge-nest build. {}",
             if llm_model {
-                "Run dunlin ask or dunlin serve."
+                "Run knowledge-nest ask or knowledge-nest serve."
             } else {
                 "Set models.answerer.model before using ask or the responses endpoint."
             }
@@ -1731,14 +1734,17 @@ fn initialize(
             .flatten()
             .collect();
             if missing.is_empty() {
-                "Run dunlin ingress <path>.".into()
+                "Run knowledge-nest ingress <path>.".into()
             } else {
-                format!("Set {}, then run dunlin ingress.", missing.join(" and "))
+                format!(
+                    "Set {}, then run knowledge-nest ingress.",
+                    missing.join(" and ")
+                )
             }
         }
     };
     let next = match &ocr {
-        Some(tool) => format!("{next} To prepare {tool}, run dunlin add ocr."),
+        Some(tool) => format!("{next} To prepare {tool}, run knowledge-nest add ocr."),
         None => next,
     };
     Ok(object(vec![
@@ -1846,7 +1852,7 @@ fn compare_defaults(project: &Project, section: Option<&str>) -> Result<ConfigVa
             return Err(CliError::new(
                 4,
                 "CONFIG_CHANGED",
-                "The Dunlinfile changed. Retry defaults.",
+                "The KnowledgeNestfile changed. Retry defaults.",
             ));
         }
         atomic_write(
@@ -2630,7 +2636,7 @@ fn generator_choice(project: &Project, parsed: &Parsed) -> ConfigValue {
     }
 }
 
-/// `selectDataset(project, id)`: the selected evaluation data, written into the Dunlinfile.
+/// `selectDataset(project, id)`: the selected evaluation data, written into the KnowledgeNestfile.
 fn select_dataset(project: &Project, id: &str) -> Result<(), CliError> {
     with_write_lock(&project.paths.data, || {
         let current = read_utf8(&project.config_path)?;
@@ -2754,7 +2760,7 @@ fn latest_stage_id(connection: &Connection, stage: &str) -> Result<Option<String
         .map_err(sqlite)
 }
 
-/// `dunlin eval`
+/// `knowledge-nest eval`
 fn evaluate_command(
     state: &mut Run,
     project: &Project,
@@ -3214,7 +3220,7 @@ fn status_details(
     ])
 }
 
-/// `dunlin status`
+/// `knowledge-nest status`
 fn status_command(state: &mut Run, project: &Project) -> Result<ConfigValue, CliError> {
     let build = current_build(&project.paths, false, None)?;
     let connection = open_state(&project.paths, true)?;
@@ -3464,11 +3470,11 @@ impl crate::serve::ServeHost for SearchServer {
     fn listening(&self, address: &ConfigValue) {
         match address.get("port") {
             None | Some(ConfigValue::Null) => print_error(&format!(
-                "Dunlin MCP stdio ({})",
+                "Knowledge-Nest MCP stdio ({})",
                 js_string(address.get("buildId"))
             )),
             Some(port) => print_error(&format!(
-                "Dunlin {}: {}/",
+                "Knowledge-Nest {}: {}/",
                 self.project.kind,
                 serve_address(&self.host, &js_string(Some(port)))
             )),
@@ -3547,7 +3553,7 @@ struct WikiServer {
 impl crate::wiki_serve::WikiServeHost for WikiServer {
     fn listening(&self, port: u16) {
         print_error(&format!(
-            "Dunlin {}: {}/",
+            "Knowledge-Nest {}: {}/",
             self.kind,
             serve_address(&self.host, &port.to_string())
         ));

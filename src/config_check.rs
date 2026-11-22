@@ -1,7 +1,7 @@
-//! Validation of MCP and RAG `Dunlinfile.yaml` configurations (spec 26.8).
+//! Validation of MCP and RAG `KnowledgeNestfile.yaml` configurations (spec 26.8).
 //!
 //! The checks, their order, codes, paths and messages follow the JavaScript validation that
-//! this replaced, so that `dunlin validate` reports the same diagnostics.
+//! this replaced, so that `knowledge-nest validate` reports the same diagnostics.
 
 use std::collections::HashSet;
 
@@ -475,7 +475,7 @@ pub fn validate_rag(
                 "ARG_UNKNOWN",
                 path![&key],
                 "A supported top-level section",
-                "See the Dunlinfile example in section 5.5.",
+                "See the KnowledgeNestfile example in section 5.5.",
                 Details::none().received(ConfigValue::String(key.clone())),
             );
         }
@@ -504,7 +504,7 @@ pub fn validate_rag(
             "VERSION_UNSUPPORTED",
             path!["init", "version"],
             Expected::Number(1.0),
-            "Generate a version 1 configuration with dunlin init.",
+            "Generate a version 1 configuration with knowledge-nest init.",
             Details {
                 received: version.cloned(),
                 ..Details::none()
@@ -521,7 +521,7 @@ pub fn validate_rag(
                 path![*stage],
                 *stage,
                 format!(
-                    "Generate the standard section with dunlin init {project_type} <directory>."
+                    "Generate the standard section with knowledge-nest init {project_type} <directory>."
                 ),
                 Details::none(),
             );
@@ -594,7 +594,7 @@ pub fn validate_rag(
                     "MODULE_UNKNOWN",
                     with_path(path!["use"]),
                     "A registered module name",
-                    "Run dunlin modules list.",
+                    "Run knowledge-nest modules list.",
                     Details::module(name)
                         .received(ConfigValue::String(name.into()))
                         .suggestions(nearby(&ConfigValue::String(name.into()), &all)),
@@ -702,7 +702,9 @@ pub fn validate_rag(
                         "ARG_UNKNOWN",
                         with_path(path!["with", &key]),
                         Expected::List(defined.clone()),
-                        format!("Use an argument listed by dunlin modules describe {name}."),
+                        format!(
+                            "Use an argument listed by knowledge-nest modules describe {name}."
+                        ),
                         Details::module(name)
                             .received(ConfigValue::String(key.clone()))
                             .suggestions(nearby(&ConfigValue::String(key.clone()), &defined)),
@@ -859,7 +861,7 @@ fn module_checks(
             "REQUIREMENT_MISSING",
             at(path!["use"]),
             "The ocr tool",
-            "Run dunlin add ocr.",
+            "Run knowledge-nest add ocr.",
             Details::module(name),
         );
     }
@@ -895,7 +897,7 @@ fn module_checks(
             "REQUIREMENT_MISSING",
             at(path!["use"]),
             format!("The {tool} tool"),
-            format!("Run dunlin add {tool}."),
+            format!("Run knowledge-nest add {tool}."),
             Details::module(name),
         );
     }
@@ -1358,7 +1360,7 @@ fn check_command(
     }
     let warning = (planned.arg("version").is_none() && planned.arg("version_command").is_none()).then(|| {
         (path!["version"], "version or version_command".to_owned(),
-            "Without a version, Dunlin cannot detect tool updates. Run dunlin build --force after updating the tool.".to_owned())
+            "Without a version, Knowledge-Nest cannot detect tool updates. Run knowledge-nest build --force after updating the tool.".to_owned())
     });
     (issues, warning)
 }
@@ -1633,7 +1635,7 @@ pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], re
             "ARG_TYPE",
             path!["tools"],
             "A list of tool names and versions",
-            "Use dunlin add --list.",
+            "Use knowledge-nest add --list.",
             Details::none(),
         );
         return;
@@ -1658,7 +1660,7 @@ pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], re
                 "ARG_CONFLICT",
                 path!["tools", i],
                 "One OCR tool",
-                "Remove the other OCR tool with dunlin remove.",
+                "Remove the other OCR tool with knowledge-nest remove.",
                 Details::none(),
             );
         } else if valid {
@@ -1668,7 +1670,7 @@ pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], re
                 "REQUIREMENT_MISSING",
                 path!["tools", i],
                 "A unique tool and version from the bundled catalog",
-                "Use dunlin add --list.",
+                "Use knowledge-nest add --list.",
                 Details::none(),
             );
         }
@@ -1719,7 +1721,7 @@ fn validate_evaluation(config: &ConfigValue, report: &mut Report) -> Option<Conf
                 "ARG_TYPE",
                 path!["eval-data"],
                 "A mapping with a dataset reference in use",
-                "Select data with dunlin eval-data use.",
+                "Select data with knowledge-nest eval-data use.",
                 Details::none(),
             );
         }

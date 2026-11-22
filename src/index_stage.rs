@@ -37,7 +37,7 @@ pub trait IndexHost: Charge {
 #[serde(rename_all = "camelCase")]
 pub struct IndexRequest {
     pub state: String,
-    /// `.dunlin/artifacts`: build directories and dictionary snapshots.
+    /// `.knowledge-nest/artifacts`: build directories and dictionary snapshots.
     pub artifacts: String,
     /// The shared corpus directory.
     pub corpus: String,
@@ -86,7 +86,7 @@ pub struct IndexOutcome {
 const EMBED_BATCH: usize = 32;
 /// The largest response read from the index tool.
 const TOOL_OUTPUT_LIMIT: usize = 1024 * 1024;
-const KEYWORD_DIR: &str = ".dunlin-index-v1";
+const KEYWORD_DIR: &str = ".knowledge-nest-index-v1";
 
 pub(crate) fn text(value: &str) -> ConfigValue {
     ConfigValue::String(value.to_owned())
@@ -327,7 +327,7 @@ fn read_manifest(connection: &Connection, id: &str) -> Result<Option<ConfigValue
         .transpose()
 }
 
-/// `Dunlin.inspectIndex(path)` is not null.
+/// `KnowledgeNest.inspectIndex(path)` is not null.
 fn index_exists(path: &Path, cancel: &Cancellation) -> Result<bool, StageError> {
     Ok(KnowledgeBase::inspect_index(path, cancel)
         .map_err(StageError::native)?
@@ -362,7 +362,7 @@ fn document_inputs(
         .collect()
 }
 
-/// `options.keyword` for `Dunlin.open`, from the recorded keyword settings (`keywordOptions`).
+/// `options.keyword` for `KnowledgeNest.open`, from the recorded keyword settings (`keywordOptions`).
 pub(crate) fn keyword_options<'a>(
     keyword: Option<&ConfigValue>,
     snapshot: Option<&'a Path>,
@@ -499,7 +499,7 @@ fn remove_unrecorded(root: &str, location: &Path, run_id: &str) {
     else {
         return;
     };
-    if target != root.join(".dunlin").join("artifacts").join(run_id) {
+    if target != root.join(".knowledge-nest").join("artifacts").join(run_id) {
         return;
     }
     for attempt in 0..4 {
@@ -523,7 +523,7 @@ pub fn run(
         StageError::coded(
             "STAGE_REQUIRED",
             format!(
-                "Missing saved transform {}. Run dunlin build.",
+                "Missing saved transform {}. Run knowledge-nest build.",
                 request.transform_id
             ),
             3,
@@ -536,7 +536,7 @@ pub fn run(
         .ok_or_else(|| {
             StageError::coded(
                 "STAGE_REQUIRED",
-                "The source output referenced by transform is missing. Run dunlin build.",
+                "The source output referenced by transform is missing. Run knowledge-nest build.",
                 3,
             )
         })?;
@@ -869,7 +869,7 @@ pub fn run(
                     assign(&mut data, "skipped", field(&source, "skipped").cloned());
                     let mut error = StageError::coded(
                         "NO_SEARCHABLE_DOCUMENTS",
-                        "No searchable documents. Add UTF-8 text or Markdown files and run dunlin build.",
+                        "No searchable documents. Add UTF-8 text or Markdown files and run knowledge-nest build.",
                         3,
                     );
                     error.data = Some(ConfigValue::Object(data));
@@ -1590,10 +1590,10 @@ mod tests {
     /// A project with a recorded source and transform stage: returns its root and the transform ID.
     fn project(contents: &[&str]) -> (tempfile::TempDir, String) {
         let root = tempfile::tempdir().unwrap();
-        let artifacts = root.path().join(".dunlin").join("artifacts");
+        let artifacts = root.path().join(".knowledge-nest").join("artifacts");
         std::fs::create_dir_all(&artifacts).unwrap();
-        let state = root.path().join(".dunlin").join("state.sqlite");
-        let corpus = root.path().join(".dunlin").join("corpus");
+        let state = root.path().join(".knowledge-nest").join("state.sqlite");
+        let corpus = root.path().join(".knowledge-nest").join("corpus");
         Connection::open(&state)
             .unwrap()
             .execute_batch(SCHEMA)
@@ -1663,7 +1663,7 @@ mod tests {
     }
 
     fn request(root: &Path, transform_id: &str, run_id: &str) -> IndexRequest {
-        let data = root.join(".dunlin");
+        let data = root.join(".knowledge-nest");
         IndexRequest {
             state: data.join("state.sqlite").to_string_lossy().into_owned(),
             artifacts: data.join("artifacts").to_string_lossy().into_owned(),
@@ -1711,10 +1711,10 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
-        let artifacts = root.path().join(".dunlin").join("artifacts");
+        let artifacts = root.path().join(".knowledge-nest").join("artifacts");
         assert!(artifacts.join("run-1").join(KEYWORD_DIR).is_dir());
         let connection =
-            Connection::open(root.path().join(".dunlin").join("state.sqlite")).unwrap();
+            Connection::open(root.path().join(".knowledge-nest").join("state.sqlite")).unwrap();
         let serving: String = connection
             .query_row("SELECT build_id FROM project", [], |row| row.get(0))
             .unwrap();
@@ -1794,7 +1794,11 @@ mod tests {
         };
         // One chunk per document, with the same text.
         assert_eq!(count, 2);
-        let directory = root.path().join(".dunlin").join("artifacts").join("run-1");
+        let directory = root
+            .path()
+            .join(".knowledge-nest")
+            .join("artifacts")
+            .join("run-1");
         assert_eq!(
             std::fs::read(directory.join("vectors.f32")).unwrap().len(),
             count * 2 * 4
@@ -1833,7 +1837,7 @@ mod tests {
         assert!(
             !root
                 .path()
-                .join(".dunlin")
+                .join(".knowledge-nest")
                 .join("artifacts")
                 .join("run-1")
                 .exists()

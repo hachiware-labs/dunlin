@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse, stringify } from 'yaml';
 
-import { Dunlin } from 'dunlin';
+import { KnowledgeNest } from 'knowledge-nest';
 import { validateRag } from './fixtures/cli-reference/project-modules.mjs';
 import { referenceDictionaryEvaluation, referenceDictionaryMisses, referenceEvaluationStatus, referenceReports } from './fixtures/report-reference.mjs';
 import { referenceOpen } from './fixtures/search-reference.mjs';
@@ -51,14 +51,14 @@ const cases = [
 ];
 
 test('reads reports, statuses and misses like the former JavaScript code', { timeout: 180_000 }, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'dunlin-report-parity-'));
-  const env = { ...process.env, DUNLIN_GLOBAL_CONFIG: join(root, 'global.yaml') };
+  const root = await mkdtemp(join(tmpdir(), 'knowledge-nest-report-parity-'));
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml') };
   const run = (...args) => runNode(process.execPath, [cli, '--project', 'kb', ...args, '--json'], { cwd: root, env, encoding: 'utf8', timeout: 60_000 })
     .then(({ stdout }) => JSON.parse(stdout), (error) => ({ exitCode: error.code, ...JSON.parse(error.stdout) }));
   await runNode(process.execPath, [cli, 'init', 'rag', 'kb', '--no-embedding'], { cwd: root, env });
   const base = join(root, 'kb');
   for (const [name, content] of Object.entries(documents)) await writeFile(join(base, 'docs', name), content);
-  const configPath = join(base, 'Dunlinfile.yaml');
+  const configPath = join(base, 'KnowledgeNestfile.yaml');
   const config = parse(await readFile(configPath, 'utf8'));
   config.transform.modules[1].with = { ...config.transform.modules[1].with, size: 80, overlap: 0 };
   config.search.modules.find(({ use }) => use === 'context.assemble').with.budget_chars = 200;
@@ -69,7 +69,7 @@ test('reads reports, statuses and misses like the former JavaScript code', { tim
   ] };
   await writeFile(configPath, stringify(config));
   assert.equal((await run('build')).status, 'succeeded');
-  const statePath = join(base, '.dunlin', 'state.sqlite');
+  const statePath = join(base, '.knowledge-nest', 'state.sqlite');
   const state = new DatabaseSync(statePath);
   state.exec('CREATE TABLE IF NOT EXISTS evaluation_datasets (id TEXT PRIMARY KEY, data TEXT NOT NULL);'
     + 'CREATE TABLE IF NOT EXISTS evaluation_reports (id TEXT PRIMARY KEY, tag TEXT UNIQUE, data TEXT NOT NULL);'
@@ -103,7 +103,7 @@ test('reads reports, statuses and misses like the former JavaScript code', { tim
   // A report from before evidence rows were saved per case.
   const legacy = { ...a, id: 'legacy-report', tag: 'legacy', rows: a.rows.map(({ evidence: _, ...row }) => row) };
   db.prepare('INSERT INTO evaluation_reports VALUES (?, ?, ?)').run(legacy.id, legacy.tag, JSON.stringify(legacy));
-  const paths = { state: statePath, artifacts: join(base, '.dunlin', 'artifacts'), corpus: join(base, '.dunlin', 'corpus') };
+  const paths = { state: statePath, artifacts: join(base, '.knowledge-nest', 'artifacts'), corpus: join(base, '.knowledge-nest', 'corpus') };
   const builds = db.prepare('SELECT id, manifest FROM builds').all().map(({ manifest }) => JSON.parse(manifest));
   const databases = new Map();
   for (const build of builds) databases.set(build.build_id, await referenceOpen(paths, build));
@@ -153,14 +153,14 @@ test('reads reports, statuses and misses like the former JavaScript code', { tim
     [a.build_id, a.search_config_id, evalSettings, 'eval-data:none'],
     [a.build_id, a.search_config_id, { ...evalSettings, percentiles: [50] }, config['eval-data'].use],
   ]) {
-    const actual = Dunlin.evaluationStatus({ state: statePath, buildId, searchId, dataset, settings });
+    const actual = KnowledgeNest.evaluationStatus({ state: statePath, buildId, searchId, dataset, settings });
     assert.equal(actual.status, 'done');
     same(actual.output, referenceEvaluationStatus(db, buildId, searchId, { config: { ...config, 'eval-data': { use: dataset } }, evalSettings: settings }),
       buildId + ' ' + searchId);
   }
 
   for (const reference of ['a', 'b', 'legacy', undefined]) {
-    const actual = Dunlin.dictionaryEvaluation({ state: statePath, report: reference, dataset: config['eval-data'].use });
+    const actual = KnowledgeNest.dictionaryEvaluation({ state: statePath, report: reference, dataset: config['eval-data'].use });
     const expected = referenceDictionaryEvaluation(db, project, reference);
     same(actual.output, expected, String(reference));
     const database = databases.get(expected.report.build_id);
@@ -171,7 +171,7 @@ test('reads reports, statuses and misses like the former JavaScript code', { tim
     if (reference !== 'legacy') assert.ok(found.some(({ text: quoted }) => quoted), 'misses with text');
   }
   for (const reference of ['t1', 'missing']) {
-    const actual = Dunlin.dictionaryEvaluation({ state: statePath, report: reference, dataset: config['eval-data'].use });
+    const actual = KnowledgeNest.dictionaryEvaluation({ state: statePath, report: reference, dataset: config['eval-data'].use });
     assert.equal(actual.status, 'failed');
     await failsLike({ errors: [actual.error], exitCode: actual.error.exitCode }, () => referenceDictionaryEvaluation(db, project, reference), reference);
   }

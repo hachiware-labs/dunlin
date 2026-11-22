@@ -885,6 +885,27 @@ pub fn trial_limits(active: Option<&ConfigValue>, candidate: Option<&ConfigValue
     )
 }
 
+/// What to do with a project of the development versions, which were called Dunlin, when the
+/// folder holds one. Empty when it does not.
+fn earlier_name(folder: &str) -> String {
+    let has = |name: &str| exists(&node_path::join(folder, &[name])).unwrap_or(false);
+    let config = has("Dunlinfile.yaml");
+    let data = has(".dunlin");
+    if !config && !data {
+        return String::new();
+    }
+    let mut said = String::from(" This folder holds a project of the earlier name Dunlin.");
+    if config {
+        said.push_str(
+            " Rename Dunlinfile.yaml to KnowledgeNestfile.yaml and run knowledge-nest build to build it again.",
+        );
+    }
+    if data {
+        said.push_str(" Its .dunlin folder is not read any more and can be deleted.");
+    }
+    said
+}
+
 /// `loadProject(configPath, command, candidate, warnings)`
 pub fn load_project(
     config_path: Option<&str>,
@@ -895,10 +916,14 @@ pub fn load_project(
 ) -> Result<Project, CliError> {
     let cwd = env.cwd.as_str();
     let Some(config_path) = config_path.filter(|path| exists(path).unwrap_or(false)) else {
+        let folder = config_path.map_or_else(|| cwd.to_owned(), node_path::dirname);
         return Err(CliError::new(
             3,
             "PROJECT_REQUIRED",
-            "No KnowledgeNestfile.yaml found. Run knowledge-nest init <mcp|rag|wiki|para> <directory>.",
+            format!(
+                "No KnowledgeNestfile.yaml found. Run knowledge-nest init <mcp|rag|wiki|para> <directory>.{}",
+                earlier_name(&folder)
+            ),
         ));
     };
     let root = node_path::dirname(config_path);

@@ -67,19 +67,74 @@ const WORK_STAGES: [(&str, &str); 13] = [
 ];
 
 const STYLE: &str = concat!(
-    "body{font:1rem/1.6 system-ui;margin:0;color:#20252b;background:#faf9f6}",
-    "main{display:grid;grid-template-columns:minmax(15rem,20rem) minmax(0,1fr);min-height:100vh}",
-    "nav{padding:1rem;border-right:1px solid #ccc;background:#f3f1ec;position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;box-sizing:border-box}",
-    "section{padding:1.25rem 2rem;max-width:60rem}",
-    "nav h2{font-size:.8rem;letter-spacing:.05em;color:#5b6470;margin:1.2rem 0 .3rem}",
-    ".tree,.tree ul{list-style:none;margin:0;padding-left:1rem}nav>details>.tree{padding-left:0}",
-    ".tree summary{cursor:pointer;color:#5b6470}.tree a{text-decoration:none;color:inherit;display:inline-block;padding:0 .25rem;border-radius:.25rem;overflow-wrap:anywhere}",
-    ".tree a:hover{background:#e4e1d9}[aria-current]{font-weight:600;background:#dfe7f2}",
-    ".add label,.ops label{display:block;margin:.25rem 0}.add input{width:100%;box-sizing:border-box}",
-    ".ops{margin-top:2rem;border-top:1px solid #ccc;padding-top:.5rem}.meta{color:#5b6470}",
-    "textarea{width:100%}pre{white-space:pre-wrap;overflow-wrap:anywhere}.source{border-left:3px solid #ccc;padding-left:1rem}",
+    ":root{--bg:#f6f5f2;--side:#eeece7;--card:#fff;--text:#1d2127;--muted:#68707c;--line:#e3e0d9;--hover:#e6e3dc;--accent:#2563eb;--accent-text:#fff;--accent-soft:#e7efff;--ok:#15803d;--bad:#dc2626;--warn-bg:#fff1cc;--warn:#8a5a00;--shadow:0 1px 2px rgba(20,20,20,.04),0 6px 20px rgba(20,20,20,.04);color-scheme:light dark}",
+    "@media(prefers-color-scheme:dark){:root{--bg:#15171b;--side:#1b1e23;--card:#21252b;--text:#e7e9ec;--muted:#9aa3ad;--line:#30353c;--hover:#2a2f36;--accent:#7aa7ff;--accent-text:#0c1424;--accent-soft:#1f2b44;--ok:#4ade80;--bad:#f87171;--warn-bg:#3a2f12;--warn:#f5c565;--shadow:none}}",
+    "*{box-sizing:border-box}",
+    "body{margin:0;background:var(--bg);color:var(--text);font:15px/1.75 system-ui,-apple-system,'Segoe UI','Hiragino Sans','Noto Sans JP','Yu Gothic UI',Meiryo,sans-serif}",
+    "a{color:var(--accent);text-underline-offset:2px}",
+    "main{display:grid;grid-template-columns:290px minmax(0,1fr);min-height:100vh}",
+    "main>nav{background:var(--side);border-right:1px solid var(--line);position:sticky;top:0;height:100vh;overflow:auto;padding:18px 14px 32px}",
+    ".brand{display:flex;align-items:center;gap:10px;color:var(--text);text-decoration:none;padding:2px 6px 14px}",
+    ".brand strong{font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+    ".logo{flex:none;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#7c3aed);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}",
+    ".kind{margin-left:auto;flex:none;font-size:11px;font-weight:700;padding:1px 9px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}",
+    ".home{display:flex;gap:6px;margin:0 0 14px}",
+    ".home a{flex:1;text-align:center;font-size:13px;padding:5px 8px;border-radius:8px;color:var(--text);text-decoration:none;background:var(--card);border:1px solid var(--line)}",
+    ".home a:hover{border-color:var(--accent)}.home a[aria-current]{background:var(--accent-soft);border-color:transparent;color:var(--accent);font-weight:600}",
+    ".add{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 12px 14px;box-shadow:var(--shadow)}",
+    "main>nav .add h2{margin:0 0 4px}",
+    ".field{display:block;margin:8px 0 0}.field span{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}",
+    "input,textarea{font:inherit;font-size:14px;line-height:1.5;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}",
+    "input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}",
+    "input[type=file]{padding:5px;font-size:12px;color:var(--muted)}",
+    "input[type=file]::file-selector-button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:6px;padding:3px 10px;margin-right:8px;cursor:pointer}",
+    "button{font:inherit;font-size:13px;line-height:1.4;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:8px;padding:6px 12px;cursor:pointer;margin:8px 6px 0 0}",
+    "button:hover{border-color:var(--accent);color:var(--accent)}",
+    "button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:600}button.primary:hover{filter:brightness(1.08);color:var(--accent-text)}",
+    ".add button{width:100%;margin:10px 0 0}",
+    "main>nav h2{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);margin:24px 8px 6px}",
+    ".empty{font-size:13px;color:var(--muted);margin:0 8px}",
+    ".tree{list-style:none;margin:0;padding:0}.tree .tree{margin-left:10px;padding-left:8px;border-left:1px solid var(--line)}",
+    ".tree summary{list-style:none;display:flex;align-items:center;gap:6px;cursor:pointer;padding:3px 8px;border-radius:6px;font-size:13.5px;font-weight:600;color:var(--muted)}",
+    ".tree summary::-webkit-details-marker{display:none}",
+    ".tree summary::before{content:'';flex:none;width:6px;height:6px;border:solid currentColor;border-width:0 1.6px 1.6px 0;transform:rotate(-45deg);transition:transform .15s;margin:0 3px 0 2px}",
+    ".tree details[open]>summary::before{transform:rotate(45deg)}",
+    ".tree summary:hover,.tree a:hover{background:var(--hover)}",
+    ".tree a{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:6px;color:var(--text);text-decoration:none;font-size:14px;line-height:1.45}",
+    ".tree a::before{content:'';flex:none;width:15px;height:15px;background:currentColor;opacity:.45;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}",
+    ".tree .name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+    ".tree a[aria-current]{background:var(--accent-soft);color:var(--accent);font-weight:600}.tree a[aria-current]::before{opacity:1}",
+    ".tree .archived{color:var(--muted)}",
+    ".badge{margin-left:auto;flex:none;font-size:10.5px;font-weight:700;padding:0 7px;border-radius:99px;background:var(--warn-bg);color:var(--warn)}",
+    ".page{--icon:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='3' width='16' height='18' rx='2'/%3E%3Cpath d='M8 8h8M8 12h8M8 16h5'/%3E%3C/svg%3E\")}",
+    ".file{--icon:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E\")}",
+    ".web{--icon:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18'/%3E%3C/svg%3E\")}",
+    ".view{padding:28px 40px 64px;min-width:0}.view>*{max-width:860px;margin-left:auto;margin-right:auto}",
+    ".crumbs{display:flex;flex-wrap:wrap;gap:6px;font-size:13px;color:var(--muted);margin-bottom:12px}.crumbs span+span::before{content:'/';margin-right:6px;opacity:.5}",
+    "article{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:36px 44px;box-shadow:var(--shadow);overflow-wrap:anywhere}",
+    "article h1{font-size:28px;line-height:1.35;letter-spacing:-.01em;margin:0 0 16px}article.top h1{font-size:32px}",
+    "article h2{font-size:16px;margin:32px 0 10px;padding-top:20px;border-top:1px solid var(--line)}",
+    "article p:empty{display:none}article ol,article ul{padding-left:1.4em}article li{margin:4px 0}article li::marker{color:var(--muted)}",
+    "article code{background:var(--bg);padding:1px 5px;border-radius:5px;font-size:.92em}",
+    "article table{border-collapse:collapse;width:100%}article th,article td{border:1px solid var(--line);padding:6px 10px;text-align:left}",
+    ".meta{color:var(--muted);font-size:13px;margin:-8px 0 8px}",
+    ".source-text h1{font-size:20px;margin:0 0 10px}.source-text h2{font-size:16px;border:0;padding:0;margin:20px 0 8px}.source-text h3{font-size:15px}",
+    ".source-text{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:18px 22px;font-size:14.5px}.source-text>:first-child{margin-top:0}.source-text>:last-child{margin-bottom:0}",
+    "pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;margin:0}",
+    "blockquote{margin:8px 0;padding:4px 14px;border-left:3px solid var(--line);color:var(--muted)}",
+    "section[data-work-status]{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;padding:12px 18px;margin-bottom:16px;box-shadow:var(--shadow);overflow-wrap:anywhere}",
+    "section[data-work-status=succeeded]{border-left-color:var(--ok)}section[data-work-status=failed]{border-left-color:var(--bad)}",
+    "section[data-work-status] h3{margin:0;font-size:15px}section[data-work-status=succeeded] h3{color:var(--ok)}section[data-work-status=failed] h3{color:var(--bad)}",
+    "section[data-work-status] h3+p{margin:0;font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}",
+    "section[data-work-status] summary{cursor:pointer;font-size:13px;color:var(--muted)}",
+    "progress{width:100%;height:6px;accent-color:var(--accent)}",
+    ".ops{margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:2px 20px;box-shadow:var(--shadow)}.ops[open]{padding-bottom:18px}",
+    ".ops>summary{cursor:pointer;font-weight:600;padding:12px 0}",
+    ".ops label{display:block;font-size:12px;color:var(--muted);margin:10px 0 3px}",
+    ".ops details>summary{cursor:pointer;font-size:13px;color:var(--muted);margin-top:14px}",
+    ".ops h3{font-size:12px;letter-spacing:.06em;color:var(--muted);margin:22px 0 4px}.ops ul{padding-left:1.2em;font-size:13px;margin:0}",
     ".pane>summary{display:none}",
-    "@media(max-width:800px){main{display:block}nav{position:static;max-height:none;border-right:0;border-bottom:1px solid #ccc}section{padding:1rem}.pane>summary{display:list-item}}"
+    "@media(max-width:820px){main{display:block}main>nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.pane>summary{display:list-item;cursor:pointer;font-weight:600;margin-bottom:8px}.view{padding:16px}article{padding:22px 20px;border-radius:12px}article h1,article.top h1{font-size:23px}}",
 );
 
 const SELECTION_SCRIPT: &str = "document.addEventListener(\"pointerup\", () => { const selection = getSelection(); const section = document.getElementById(\"content\"); const text = selection && section.contains(selection.anchorNode) && section.contains(selection.focusNode) ? selection.toString().trim() : \"\"; if (text) { document.getElementById(\"action-target\").value = text.slice(0, 2000); document.getElementById(\"selection-label\").hidden = false; } });";
@@ -409,17 +464,29 @@ impl Tree {
     }
 }
 
-/// A link of the tree to `/?{query}`, marked when it is the one shown.
-fn leaf_link(query: &str, label: &str, title: &str, current: bool, after: &str) -> String {
+/// A link of the tree to `/?{query}`, marked when it is the one shown. `kind` picks its icon:
+/// `page`, `file` or `web`.
+fn leaf_link(
+    kind: &str,
+    query: &str,
+    label: &str,
+    title: &str,
+    current: bool,
+    badge: Option<&str>,
+) -> String {
     format!(
-        "<a href=\"/?{query}\" title=\"{}\"{}>{}</a>{after}",
+        "<a class=\"{kind}\" href=\"/?{query}\" title=\"{}\"{}><span class=\"name\">{}</span>{}</a>",
         escape_html(title),
         if current {
             " aria-current=\"page\""
         } else {
             ""
         },
-        escape_html(label)
+        escape_html(label),
+        badge.map_or_else(String::new, |badge| format!(
+            "<span class=\"badge\">{}</span>",
+            escape_html(badge)
+        ))
     )
 }
 
@@ -954,7 +1021,7 @@ impl WikiServer {
             .filter(|url| crate::wiki_fetch::is_web_address(url))
             .map(|url| {
                 format!(
-                    "<p><a href=\"{0}\" rel=\"noreferrer noopener\" target=\"_blank\">{0}</a></p>",
+                    "<p><a href=\"{}\" rel=\"noreferrer noopener\" target=\"_blank\">元のページを開く ↗</a></p>",
                     escape_html(url)
                 )
             })
@@ -994,9 +1061,14 @@ impl WikiServer {
             None => "<p>本文を読み出せませんでした。</p>".to_owned(),
         };
         Ok(format!(
-            "<h1>{}</h1><p class=\"meta\">原本 · {}{}</p>{address}<h2>引用しているページ</h2>{}<h2>本文</h2><div class=\"source\">{text}</div>",
+            "<h1>{}</h1><p class=\"meta\">原本{}{}</p>{address}<h2>引用しているページ</h2>{}<h2>本文</h2><div class=\"source-text\">{text}</div>",
             escape_html(&name),
-            escape_html(&object_id),
+            // A web page's heading is already its address.
+            if name == object_id {
+                String::new()
+            } else {
+                format!(" · {}", escape_html(&object_id))
+            },
             if reflected {
                 ""
             } else {
@@ -1298,30 +1370,34 @@ impl WikiServer {
             page_tree.leaf(
                 &parts,
                 leaf_link(
+                    "page",
                     &format!("page={}", encode_uri_component(&id)),
                     &js_text(page.get("title")),
                     &id,
                     current_page.as_deref() == Some(id.as_str()),
-                    "",
+                    None,
                 ),
             );
         }
-        let menu = page_tree.html();
-        let archived: String = content
-            .iter()
-            .filter(|page| truthy(page.get("archived")))
-            .map(|page| {
-                let target = page
-                    .get("archive_id")
+        let mut archive_tree = Tree::default();
+        for page in content.iter().filter(|page| truthy(page.get("archived"))) {
+            let target = js_text(
+                page.get("archive_id")
                     .filter(|value| !matches!(value, ConfigValue::Null))
-                    .or_else(|| page.get("id"));
-                format!(
-                    "<li><a href=\"/?page={}\">{}</a></li>",
-                    encode_uri_component(&js_text(target)),
-                    escape_html(&js_text(page.get("title")))
-                )
-            })
-            .collect();
+                    .or_else(|| page.get("id")),
+            );
+            archive_tree.leaf(
+                &[],
+                leaf_link(
+                    "page archived",
+                    &format!("page={}", encode_uri_component(&target)),
+                    &js_text(page.get("title")),
+                    &target,
+                    current_page.as_deref() == Some(js_text(page.get("id")).as_str()),
+                    None,
+                ),
+            );
+        }
         let count: i64 = connection
             .query_row(
                 "SELECT count(*) AS n FROM wiki_sources WHERE reflected = 0",
@@ -1385,15 +1461,16 @@ impl WikiServer {
             source_tree.leaf(
                 &parts,
                 leaf_link(
+                    if crate::wiki_fetch::is_web_address(&object_id) {
+                        "web"
+                    } else {
+                        "file"
+                    },
                     &format!("source={}", encode_uri_component(id)),
                     &label,
                     &object_id,
                     requested_source == Some(id.as_str()),
-                    if *reflected {
-                        ""
-                    } else {
-                        " <small>未反映</small>"
-                    },
+                    (!reflected).then_some("未反映"),
                 ),
             );
         }
@@ -1478,24 +1555,75 @@ impl WikiServer {
         };
         let current_id = current.map(|page| js_text(page.get("id")));
         let at_top = current.is_none() && current_source.is_none();
+        // Where the shown item sits: its section and folders, then its name.
+        let mut crumbs: Vec<String> = Vec::new();
+        let shown = match (current, current_source, &rules) {
+            (Some(page), _, _) => {
+                crumbs.push(
+                    if truthy(page.get("archived")) {
+                        "アーカイブ"
+                    } else {
+                        "ページ"
+                    }
+                    .into(),
+                );
+                let id = js_text(page.get("id"));
+                let mut parts: Vec<String> = id.split('/').map(str::to_owned).collect();
+                parts.pop();
+                crumbs.extend(parts);
+                crumbs.push(js_text(page.get("title")));
+                "page"
+            }
+            (None, Some((_, source, _)), _) => {
+                let (parts, label) = source_path(&js_text(source.get("objectId")));
+                crumbs.push("原本".into());
+                crumbs.extend(parts);
+                crumbs.push(label);
+                "source"
+            }
+            (None, None, Some(_)) => {
+                crumbs.push("運用の決まり".into());
+                "rules"
+            }
+            (None, None, None) => "top",
+        };
+        let crumbs = if crumbs.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<div class=\"crumbs\">{}</div>",
+                crumbs
+                    .iter()
+                    .map(|part| format!("<span>{}</span>", escape_html(part)))
+                    .collect::<String>()
+            )
+        };
+        let tree_or_empty = |tree: &Tree| {
+            if tree.folders.is_empty() && tree.leaves.is_empty() {
+                "<p class=\"empty\">まだありません</p>".to_owned()
+            } else {
+                tree.html()
+            }
+        };
         let body = format!(
             concat!(
                 "<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
                 "{refresh}<title>{title}</title><style>{style}</style>",
                 "<main><nav><details class=\"pane\" open><summary>ファイル</summary>",
-                "<p class=\"home\"><a href=\"/\"{top_current}>トップ</a> · <a href=\"/?rules\"{rules_current}>運用の決まり</a></p>",
+                "<a class=\"brand\" href=\"/\"><span class=\"logo\"></span><strong>{title}</strong><span class=\"kind\">{kind}</span></a>",
+                "<p class=\"home\"><a href=\"/\"{top_current}>トップ</a><a href=\"/?rules\"{rules_current}>運用の決まり</a></p>",
                 "<form class=\"add\" method=\"post\" enctype=\"multipart/form-data\" action=\"/action{action}\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\">",
                 "<input type=\"hidden\" name=\"page\" value=\"{page}\"><h2>資料を取り込む</h2>",
-                "<label>URL<input type=\"url\" name=\"url\" placeholder=\"https://\"></label>",
-                "<label>ファイル<input type=\"file\" name=\"upload\"></label>",
-                "<button name=\"action\" value=\"ingress\">取り込む</button>{pending}</form>",
+                "<label class=\"field\"><span>URL</span><input type=\"url\" name=\"url\" placeholder=\"https://example.com/page\"></label>",
+                "<label class=\"field\"><span>ファイル</span><input type=\"file\" name=\"upload\"></label>",
+                "<button class=\"primary\" name=\"action\" value=\"ingress\">取り込む</button>{pending}</form>",
                 "<h2>ページ</h2>{menu}<h2>原本</h2>{sources}",
-                "<h2>アーカイブ</h2><ul>{archived}</ul></details></nav>",
-                "<section>{work}<article id=\"content\">{center}</article>",
+                "<h2>アーカイブ</h2>{archived}</details></nav>",
+                "<section class=\"view\">{crumbs}{work}<article id=\"content\" class=\"{shown}\">{center}</article>",
                 "<details class=\"ops\"{ops_open}><summary>質問と操作</summary>{target}",
                 "<form method=\"post\" enctype=\"multipart/form-data\" action=\"/action{action}\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\">",
                 "<input type=\"hidden\" name=\"page\" value=\"{page}\">",
-                "<label>質問、資料のパス、ページ ID、または作業 ID<textarea name=\"value\" rows=\"3\"></textarea></label><button name=\"action\" value=\"query\">質問する</button>",
+                "<label>質問、資料のパス、ページ ID、または作業 ID<textarea name=\"value\" rows=\"3\"></textarea></label><button class=\"primary\" name=\"action\" value=\"query\">質問する</button>",
                 "<button name=\"action\" value=\"ingress\">パスの資料を追加</button>",
                 "<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button>",
                 "<button name=\"action\" value=\"archive\">アーカイブ</button><button name=\"action\" value=\"restore\">復元</button><button name=\"action\" value=\"undo\">取り消す</button>",
@@ -1531,9 +1659,12 @@ impl WikiServer {
             } else {
                 String::new()
             },
-            menu = menu,
-            sources = source_tree.html(),
-            archived = archived,
+            kind = if base.kind == "para" { "PARA" } else { "Wiki" },
+            crumbs = crumbs,
+            shown = shown,
+            menu = tree_or_empty(&page_tree),
+            sources = tree_or_empty(&source_tree),
+            archived = tree_or_empty(&archive_tree),
             center = center,
             ops_open = if current.is_some() { " open" } else { "" },
             target = match current {

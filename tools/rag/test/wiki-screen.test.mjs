@@ -134,13 +134,13 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   const host = new URL(web).host;
   assert.match(top.body, /<nav>.*<h2>資料を取り込む<\/h2>.*<input type="url" name="url"/su);
   assert.match(top.body, new RegExp(`<h2>原本</h2><ul class="tree"><li><details open><summary>Web</summary><ul class="tree"><li><details open><summary>${host.replace(/\./gu, '\\.')}</summary>`, 'u'));
-  assert.match(top.body, /title="http:\/\/127\.0\.0\.1:\d+\/notes\.md">\/notes\.md<\/a> <small>未反映<\/small>/u);
+  assert.match(top.body, /<a class="web" href="\/\?source=source-[0-9a-f]{24}" title="http:\/\/127\.0\.0\.1:\d+\/notes\.md"><span class="name">\/notes\.md<\/span><span class="badge">未反映<\/span><\/a>/u);
   assert.match(top.body, /未反映の資料を取り込む（1 件）/u);
 
   // The right column: a source shows where it came from and its text.
   const sourceLink = /href="\/\?(source=source-[0-9a-f]{24})"/u.exec(top.body)[1];
   const source = await send(port, { path: '/?' + sourceLink });
-  assert.match(source.body, /<article id="content"><h1>http:\/\/127\.0\.0\.1:\d+\/notes\.md<\/h1>/u);
+  assert.match(source.body, /<div class="crumbs"><span>原本<\/span><span>Web<\/span><span>127\.0\.0\.1:\d+<\/span><span>\/notes\.md<\/span><\/div><article id="content" class="source"><h1>http:\/\/127\.0\.0\.1:\d+\/notes\.md<\/h1>/u);
   assert.match(source.body, /<a href="http:\/\/127\.0\.0\.1:\d+\/notes\.md" rel="noreferrer noopener" target="_blank">/u);
   assert.match(source.body, /点検の記録を保管する。/u);
   assert.match(source.body, new RegExp(`href="/\\?${sourceLink}" title="[^"]*" aria-current="page"`, 'u'));
@@ -163,7 +163,7 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   // The new page sits in its folder; the page cites the web page, decoded from Shift_JIS.
   const after = await send(port, {});
   assert.match(after.body, /<h2>ページ<\/h2><ul class="tree"><li><details open><summary>guides<\/summary>/u);
-  assert.match(after.body, /title="http:\/\/127\.0\.0\.1:\d+\/manuals\/pump">\/manuals\/pump<\/a><\/li>/u);
+  assert.match(after.body, /title="http:\/\/127\.0\.0\.1:\d+\/manuals\/pump"><span class="name">\/manuals\/pump<\/span><\/a><\/li>/u);
   const pageId = /href="\/\?page=([^"]+)"/u.exec(after.body)[1];
   const page = await send(port, { path: '/?page=' + pageId });
   assert.match(page.body, /<h2>出典<\/h2><ol><li><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a>/u);

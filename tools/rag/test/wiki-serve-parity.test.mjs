@@ -78,7 +78,7 @@ function equalText(left, right, label) {
 /** What both screens show of a full screen: the content and the work, without the layout. */
 function screenParts(body) {
   if (!body.startsWith('<!doctype html>')) return body;
-  const center = /<article id="content">([\s\S]*?)<\/article>/u.exec(body)?.[1]
+  const center = /<article id="content"[^>]*>([\s\S]*?)<\/article>/u.exec(body)?.[1]
     ?? /<\/nav><section>([\s\S]*?)<\/section><aside>/u.exec(body)?.[1] ?? '';
   const work = /<section aria-live="polite"[\s\S]*?<\/section>/u.exec(body)?.[0] ?? '';
   // Citations link to their source on the Rust screen.

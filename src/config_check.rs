@@ -2432,13 +2432,13 @@ fn merge_serve(project_type: &str, input: &ConfigValue) -> ConfigValue {
 }
 
 /// Whether `value` is what a user keeps for the servers of every project on the machine:
-/// `host` and, under `access`, `allowed_hosts`, `allowed_clients` and `auth`.
+/// `host`, `port` and, under `access`, `allowed_hosts`, `allowed_clients` and `auth`.
 pub fn user_serve_valid(value: &ConfigValue) -> bool {
     let known = |value: &ConfigValue, keys: &[&str]| {
         matches!(value, ConfigValue::Object(fields)
             if fields.iter().all(|(key, _)| keys.contains(&key.as_str())))
     };
-    if !known(value, &["host", "access"]) || entries(value).is_empty() {
+    if !known(value, &["host", "port", "access"]) || entries(value).is_empty() {
         return false;
     }
     if let Some(access) = value.get("access")
@@ -2453,7 +2453,7 @@ pub fn user_serve_valid(value: &ConfigValue) -> bool {
 }
 
 /// The `serve` section a project runs with on this machine. Where the project keeps the
-/// standard value of `host`, `allowed_hosts`, `allowed_clients` or `auth`, the value of the
+/// standard value of `host`, `port`, `allowed_hosts`, `allowed_clients` or `auth`, the value of the
 /// user's settings takes its place; a value the project chose stays.
 pub fn with_user_serve(project_type: &str, serve: &ConfigValue, user: &ConfigValue) -> ConfigValue {
     if serve.get("transport").and_then(ConfigValue::as_str) != Some("http")
@@ -2471,11 +2471,13 @@ pub fn with_user_serve(project_type: &str, serve: &ConfigValue, user: &ConfigVal
         value.map(ConfigValue::to_js_json) == standard.map(ConfigValue::to_js_json)
     };
     let mut fields = entries(serve).to_vec();
-    if let Some(host) = user.get("host")
-        && (serve.get("host").is_none()
-            || same(serve.get("host"), serve_template(project_type).get("host")))
-    {
-        set(&mut fields, "host", host);
+    let template = serve_template(project_type);
+    for key in ["host", "port"] {
+        if let Some(value) = user.get(key)
+            && (serve.get(key).is_none() || same(serve.get(key), template.get(key)))
+        {
+            set(&mut fields, key, value);
+        }
     }
     if let Some(theirs) = user.get("access") {
         let standard = default_access();
@@ -2806,6 +2808,7 @@ mod tests {
     fn checks_the_serve_settings_of_a_user() {
         for text in [
             "host: 0.0.0.0",
+            "port: 8080",
             "access: { allowed_clients: [192.168.11.0/24] }",
             "host: 192.168.11.16
 access: { allowed_hosts: [localhost, 192.168.11.16], auth: { type: token, token_env: NEST_TOKEN } }",
@@ -2814,7 +2817,9 @@ access: { allowed_hosts: [localhost, 192.168.11.16], auth: { type: token, token_
         }
         for text in [
             "{}",
-            "port: 4319",
+            "port: 70000",
+            "port: web",
+            "endpoints: [web]",
             "host: 5",
             "access: {}",
             "access: { allowed_clients: [] }",
@@ -2836,6 +2841,15 @@ access: { allowed_hosts: [localhost, 192.168.11.16], allowed_clients: [192.168.1
         let merged = with_user_serve("wiki", &standard, &user);
         assert_eq!(merged.get("host"), user.get("host"));
         assert_eq!(merged.get("port"), standard.get("port"));
+        let moved = with_user_serve("wiki", &standard, &yaml("port: 8080"));
+        assert_eq!(moved.get("port"), Some(&ConfigValue::Number(8080.0)));
+        assert_eq!(moved.get("host"), standard.get("host"));
+        // A port the project chose stays.
+        let fixed = yaml("transport: http\nport: 5000");
+        assert_eq!(
+            with_user_serve("wiki", &fixed, &yaml("port: 8080")).get("port"),
+            Some(&ConfigValue::Number(5000.0))
+        );
         let access = merged.get("access").unwrap();
         for key in ["allowed_hosts", "allowed_clients", "auth"] {
             assert_eq!(

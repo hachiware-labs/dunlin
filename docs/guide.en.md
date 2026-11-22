@@ -373,7 +373,7 @@ nest config unset serve                       # remove the settings of this mach
 nest config unset serve --project ./my-wiki   # put the standard values back in the project
 ```
 
-- It sets `host`, `allowed_hosts`, `allowed_clients` and `auth`. Authentication is `--auth none`, or `--auth token --token-env NEST_TOKEN`. Lists are separated by commas. An empty value (`--allowed-clients ""`) removes that setting.
+- It sets `host`, `port`, `allowed_hosts`, `allowed_clients` and `auth`. A port is written as `--port 8080`. A port in the settings of the machine goes to every project that still has the standard port of its type (4318 or 4319), so when several projects run at once, choose a port for each with `--project`. Authentication is `--auth none`, or `--auth token --token-env NEST_TOKEN`. Lists are separated by commas. An empty value (`--allowed-clients ""`) removes that setting.
 - **The project wins.** Where the project file differs from the standard value that `init` wrote, the project's value is used; where it still has the standard value, the machine's value is used. `nest serve --host` and `--port` win over both.
 - The token itself is never stored. `--token-env` takes the name of an environment variable; put the value in that variable.
 - A `host` outside loopback is refused unless `--allowed-clients` with home or office ranges, or `--auth token`, comes with it.

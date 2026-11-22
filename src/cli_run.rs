@@ -405,6 +405,12 @@ fn text_output(
                 if let Some(host) = serve.get("host").and_then(ConfigValue::as_str) {
                     lines.push(format!("serve.host  {host}"));
                 }
+                if let Some(port) = serve
+                    .get("port")
+                    .filter(|port| matches!(port, ConfigValue::Number(_)))
+                {
+                    lines.push(format!("serve.port  {}", js_string(Some(port))));
+                }
                 for key in ["allowed_hosts", "allowed_clients"] {
                     if let Some(list) = access.and_then(|access| access.get(key)) {
                         let names: Vec<String> = items(Some(list))
@@ -739,6 +745,7 @@ fn dispatch(
         }
         let choice = crate::cli_tools::ServeChoice {
             host: value("host"),
+            port: value("port"),
             allowed_hosts: value("allowed-hosts"),
             allowed_clients: value("allowed-clients"),
             auth: value("auth"),

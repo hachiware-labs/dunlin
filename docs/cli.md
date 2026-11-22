@@ -8,7 +8,7 @@
 
 ```text
 nest init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]
-nest config list [--project <directory>] | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config set serve [--host <address>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>] | nest config unset <embedding|llm|ocr|serve> [--project <directory>] [--json]
+nest config list [--project <directory>] | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config set serve [--host <address>] [--port <port>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>] | nest config unset <embedding|llm|ocr|serve> [--project <directory>] [--json]
 nest validate [--project <directory>] [--config <file>] [--json]
 nest defaults [--apply <section>] [--project <directory>] [--json]
 nest modules <list|describe <name>> [--project <directory>] [--json]

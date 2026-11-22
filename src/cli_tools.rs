@@ -1518,7 +1518,7 @@ fn read_global(path: &str) -> Result<ConfigValue, CliError> {
             2,
             "INVALID_GLOBAL_CONFIG",
             format!(
-                "Check {path}. Expected version: 1, optional embedding and llm entries with provider and model, optional ocr with tool: oar-ocr or lightonocr, and optional serve with host and access."
+                "Check {path}. Expected version: 1, optional embedding and llm entries with provider and model, optional ocr with tool: oar-ocr or lightonocr, and optional serve with host, port and access."
             ),
         )
     };
@@ -1630,12 +1630,13 @@ pub fn global_serve(env: &CliEnv) -> Result<Option<ConfigValue>, CliError> {
 /// The keys of `access` that `config` sets, in the order they are written.
 const ACCESS_KEYS: [&str; 3] = ["allowed_hosts", "allowed_clients", "auth"];
 
-const SERVE_USAGE: &str = "Use config set serve [--host <address>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>], config unset serve [--project <directory>], or config list [--project <directory>].";
+const SERVE_USAGE: &str = "Use config set serve [--host <address>] [--port <port>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>], config unset serve [--project <directory>], or config list [--project <directory>].";
 
 /// The values of `config set serve`. A list is separated by commas, and an empty value takes
 /// the setting away.
 pub struct ServeChoice<'a> {
     pub host: Option<&'a str>,
+    pub port: Option<&'a str>,
     pub allowed_hosts: Option<&'a str>,
     pub allowed_clients: Option<&'a str>,
     pub auth: Option<&'a str>,
@@ -1646,6 +1647,7 @@ impl ServeChoice<'_> {
     pub fn any(&self) -> bool {
         [
             self.host,
+            self.port,
             self.allowed_hosts,
             self.allowed_clients,
             self.auth,
@@ -1655,7 +1657,7 @@ impl ServeChoice<'_> {
         .any(Option::is_some)
     }
 
-    /// `host` and the three keys of `access` of `current`, with the chosen values in place.
+    /// `host`, `port` and the three keys of `access` of `current`, with the chosen values in place.
     fn apply(&self, current: Option<&ConfigValue>) -> Result<Option<ConfigValue>, CliError> {
         let mut host = current.and_then(|current| current.get("host")).cloned();
         let mut access: Vec<(String, ConfigValue)> = Vec::new();
@@ -1667,6 +1669,16 @@ impl ServeChoice<'_> {
         }
         if let Some(chosen) = self.host {
             host = (!chosen.is_empty()).then(|| text(chosen));
+        }
+        let mut port = current.and_then(|current| current.get("port")).cloned();
+        if let Some(chosen) = self.port {
+            port = match chosen.parse::<u16>() {
+                Ok(number) if chosen.bytes().all(|byte| byte.is_ascii_digit()) => {
+                    Some(ConfigValue::Number(f64::from(number)))
+                }
+                _ if chosen.is_empty() => None,
+                _ => return Err(invalid("Use --port with a number from 0 to 65535.")),
+            };
         }
         for (key, list) in [
             ("allowed_hosts", self.allowed_hosts),
@@ -1724,6 +1736,9 @@ impl ServeChoice<'_> {
         let mut fields = Vec::new();
         if let Some(host) = host {
             fields.push(("host", host));
+        }
+        if let Some(port) = port {
+            fields.push(("port", port));
         }
         if !access.is_empty() {
             let mut ordered = Vec::new();
@@ -1800,7 +1815,7 @@ pub fn configure_serve(
             if let Some(next) = &next {
                 if !crate::config_check::user_serve_valid(next) {
                     return Err(invalid(
-                        "Check the values of serve: a host name or address, host names, address ranges such as 192.168.11.0/24, and the name of an environment variable.",
+                        "Check the values of serve: a host name or address, a port, host names, address ranges such as 192.168.11.0/24, and the name of an environment variable.",
                     ));
                 }
                 let run = crate::config_check::with_user_serve("rag", &template("rag"), next);
@@ -1839,6 +1854,7 @@ pub fn configure_serve(
                 "serve",
                 object(vec![
                     ("host", serve.get("host").cloned().unwrap_or_default()),
+                    ("port", serve.get("port").cloned().unwrap_or_default()),
                     ("access", object(access)),
                 ]),
             ),
@@ -1858,11 +1874,9 @@ pub fn configure_serve(
         unreachable!()
     };
     let chosen = |key: &str| next.as_ref().and_then(|next| next.get(key));
-    assign(
-        &mut fields,
-        "host",
-        chosen("host").or(standard.get("host")).cloned(),
-    );
+    for key in ["host", "port"] {
+        assign(&mut fields, key, chosen(key).or(standard.get(key)).cloned());
+    }
     let mut access = match written.get("access") {
         Some(ConfigValue::Object(access)) => access.clone(),
         _ => Vec::new(),

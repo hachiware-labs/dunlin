@@ -293,10 +293,8 @@ test('config keeps who may connect, for every project of the machine or for one'
   await runNode(process.execPath, [cli, 'init', 'wiki', 'kb', '--purpose', '設備保全の手順'], { cwd: root, env });
   const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
   const written = async () => parse(await readFile(configPath, 'utf8')).serve;
-  const config = parse(await readFile(configPath, 'utf8'));
-  config.serve.port = 0;
-  await writeFile(configPath, stringify(config));
   const standard = await written();
+  await writeFile(configPath, stringify({ ...parse(await readFile(configPath, 'utf8')), serve: { ...standard, port: 0 } }));
 
   // Outside loopback, the settings name the clients of a home or office network, or ask a token.
   await refused('config', 'set', 'serve', '--host', '0.0.0.0');
@@ -304,6 +302,8 @@ test('config keeps who may connect, for every project of the machine or for one'
   await refused('config', 'set', 'serve', '--allowed-clients', '192.168.11.*');
   await refused('config', 'set', 'serve', '--auth', 'token');
   await refused('config', 'set', 'serve');
+  await refused('config', 'set', 'serve', '--port', 'web');
+  await refused('config', 'set', 'serve', '--port', '70000');
   await refused('config', 'set', 'llm', '--model', 'x', '--project', 'kb');
   const own = Object.values(networkInterfaces()).flat()
     .find((entry) => entry.family === 'IPv4' && /^(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))\./u.test(entry.address))?.address;
@@ -313,7 +313,7 @@ test('config keeps who may connect, for every project of the machine or for one'
   assert.deepEqual((await nest('config', 'list')).serve, machine);
   assert.match((await runNode(process.execPath, [cli, 'config', 'list'], { cwd: root, env, encoding: 'utf8' })).stdout, /^serve\.allowed_clients {2}10\.255\.255\.0\/24$/mu);
   // The file of the project is not touched: it keeps the standard values, so the machine's apply.
-  assert.deepEqual(await written(), standard);
+  assert.deepEqual(await written(), { ...standard, port: 0 });
 
   const start = async () => {
     const child = spawn(process.execPath, [cli, '--project', 'kb', 'serve'], { cwd: root, env, stdio: ['ignore', 'ignore', 'pipe'] });
@@ -338,12 +338,36 @@ test('config keeps who may connect, for every project of the machine or for one'
   const chosen = await nest('config', 'set', 'serve', '--allowed-clients', range, '--project', 'kb');
   assert.equal(chosen.path, configPath);
   assert.deepEqual(chosen.serve.access.allowed_clients, [range]);
-  assert.deepEqual(await written(), { ...standard, access: { allowed_hosts: standard.access.allowed_hosts, allowed_origins: [], allowed_clients: [range], auth: standard.access.auth } });
+  assert.deepEqual(await written(), { ...standard, port: 0, access: { allowed_hosts: standard.access.allowed_hosts, allowed_origins: [], allowed_clients: [range], auth: standard.access.auth } });
   assert.deepEqual(Object.keys((await written()).access), ['allowed_hosts', 'allowed_origins', 'allowed_clients', 'auth']);
-  assert.deepEqual((await nest('config', 'list', '--project', 'kb')).serve, { host: '127.0.0.1', access: { allowed_hosts: ['localhost', '127.0.0.1'], allowed_clients: [range], auth: { type: 'none', token_env: null } } });
+  assert.deepEqual((await nest('config', 'list', '--project', 'kb')).serve, { host: '127.0.0.1', port: 0, access: { allowed_hosts: ['localhost', '127.0.0.1'], allowed_clients: [range], auth: { type: 'none', token_env: null } } });
   const narrowed = await start();
   if (own) assert.equal((await send(narrowed.port, { address: own })).status, 200);
   await narrowed.stop();
+
+  // The port of the machine goes to the projects that kept the standard one.
+  const free = await new Promise((resolve) => {
+    const probe = createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  assert.equal((await nest('config', 'set', 'serve', '--port', String(free))).serve.port, free);
+  await runNode(process.execPath, [cli, 'init', 'wiki', 'second', '--purpose', '設備保全の手順'], { cwd: root, env });
+  const second = spawn(process.execPath, [cli, '--project', 'second', 'serve'], { cwd: root, env, stdio: ['ignore', 'ignore', 'pipe'] });
+  const ended = once(second, 'exit');
+  stops.push(async () => { second.kill(); await ended; });
+  let listening = '';
+  for await (const chunk of second.stderr) {
+    listening += chunk;
+    if (/http:\/\/[\d.]+:\d+/u.test(listening)) break;
+  }
+  assert.match(listening, new RegExp('http://0\\.0\\.0\\.0:' + free + '\\b', 'u'));
+  second.kill();
+  await ended;
+  assert.equal((await nest('config', 'set', 'serve', '--port', '5001', '--project', 'kb')).serve.port, 5001);
+  assert.equal((await written()).port, 5001);
+  assert.equal((await nest('config', 'set', 'serve', '--port', '')).serve.port, undefined);
 
   // Taking the settings away puts the standard values back, in the project and on the machine.
   await nest('config', 'unset', 'serve', '--project', 'kb');

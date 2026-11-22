@@ -13,7 +13,7 @@ pub const COMMANDS: [(&str, &str); 37] = [
     ),
     (
         "config",
-        "nest config list [--project <directory>] | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config set serve [--host <address>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>] | nest config unset <embedding|llm|ocr|serve> [--project <directory>] [--json]",
+        "nest config list [--project <directory>] | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config set serve [--host <address>] [--port <port>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>] | nest config unset <embedding|llm|ocr|serve> [--project <directory>] [--json]",
     ),
     (
         "build",
@@ -458,6 +458,7 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
             options.push(("tool", String));
             for key in [
                 "host",
+                "port",
                 "allowed-hosts",
                 "allowed-clients",
                 "auth",

@@ -3,7 +3,7 @@ import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -230,6 +230,8 @@ test('enforces host, origin, token, endpoint, size, time and concurrency limits 
   kb.config.serve.host = '127.0.0.1';
   const allowed = 'https://reader.example';
   kb.config.serve.access.allowed_origins = [allowed];
+  // Nobody of this range is here; the machine itself always gets in.
+  kb.config.serve.access.allowed_clients = ['192.0.2.0/24'];
   kb.config.serve.access.auth = { type: 'token', token_env: 'KNOWLEDGE_NEST_TEST_TOKEN' };
   kb.config.serve.limits = { max_request_bytes: 450, request_timeout_seconds: 2, max_concurrent: 1 };
   kb.config.serve.endpoints = ['search', 'responses'];
@@ -246,6 +248,9 @@ test('enforces host, origin, token, endpoint, size, time and concurrency limits 
   await error(post(base, '/v1/search', { query }), 401, 'AUTH_REQUIRED');
   await error(post(base, '/v1/search', { query }, { authorization: 'Bearer incorrect' }), 401, 'AUTH_REQUIRED');
   await error(rawSearch(base, { ...auth, host: 'unexpected.example' }, [JSON.stringify({ query })]), 403, 'HOST_FORBIDDEN');
+  // A request to another address of this machine comes from that address, outside the listed range.
+  const own = Object.values(networkInterfaces()).flat().find((entry) => entry.family === 'IPv4' && !entry.internal)?.address;
+  if (own) await error(post(Object.assign(new URL(base), { hostname: own }), '/v1/search', { query }, auth), 403, 'CLIENT_FORBIDDEN');
   await error(post(base, '/v1/search', { query }, { ...auth, origin: 'https://unlisted.example' }), 403, 'ORIGIN_FORBIDDEN');
   const permitted = await post(base, '/v1/search', { query }, { ...auth, origin: allowed });
   assert.equal(permitted.headers.get('access-control-allow-origin'), allowed);

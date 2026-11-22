@@ -34,6 +34,18 @@ pub struct Access {
     pub allowed_hosts: Vec<String>,
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+    #[serde(default)]
+    pub allowed_clients: Vec<String>,
+}
+
+impl Access {
+    /// The ranges of `allowed_clients`; none means any client.
+    pub(crate) fn clients(&self) -> Vec<crate::config_check::Network> {
+        self.allowed_clients
+            .iter()
+            .filter_map(|range| crate::config_check::Network::parse(range))
+            .collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -700,6 +712,7 @@ struct Server {
     serving: Arc<Serving>,
     hosts: Vec<Option<String>>,
     origins: Vec<String>,
+    clients: Vec<crate::config_check::Network>,
     digest: Option<[u8; 32]>,
     port: u16,
     running: AtomicUsize,
@@ -734,12 +747,16 @@ pub(crate) fn header<'a>(request: &'a Request<Incoming>, name: &str) -> Option<&
 }
 
 impl Server {
-    async fn handle(self: Arc<Self>, request: Request<Incoming>) -> Response<Body> {
+    async fn handle(
+        self: Arc<Self>,
+        request: Request<Incoming>,
+        peer: std::net::SocketAddr,
+    ) -> Response<Body> {
         let mut headers: Vec<(&'static str, String)> = vec![
             ("cache-control", "no-store".into()),
             ("x-content-type-options", "nosniff".into()),
         ];
-        let reply = self.route(request, &mut headers).await;
+        let reply = self.route(request, peer, &mut headers).await;
         // Headers of the reply replace the ones set before, as setHeader then writeHead did.
         for (name, value) in reply.headers {
             headers.retain(|(existing, _)| *existing != name);
@@ -759,8 +776,16 @@ impl Server {
     async fn route(
         self: &Arc<Self>,
         request: Request<Incoming>,
+        peer: std::net::SocketAddr,
         headers: &mut Vec<(&'static str, String)>,
     ) -> Reply {
+        if !crate::config_check::client_allowed(&self.clients, peer.ip()) {
+            return Reply::error(
+                403,
+                "CLIENT_FORBIDDEN",
+                "This client address is not allowed.",
+            );
+        }
         let target = header(&request, "host").and_then(|host| request_target(host, self.port));
         let Some((_, authority)) =
             target.filter(|(name, _)| self.hosts.iter().any(|host| host.as_deref() == Some(name)))
@@ -1438,6 +1463,7 @@ pub fn serve_http(serving: Arc<Serving>, cancel: &Cancellation) -> Result<(), St
             .map(|host| hostname(host))
             .collect(),
         origins: settings.access.allowed_origins.clone(),
+        clients: settings.access.clients(),
         digest,
         port,
         running: AtomicUsize::new(0),
@@ -1471,12 +1497,14 @@ pub fn serve_http(serving: Arc<Serving>, cancel: &Cancellation) -> Result<(), St
                     continue;
                 }
             };
-            let Ok((stream, _)) = accepted else { continue };
+            let Ok((stream, peer)) = accepted else {
+                continue;
+            };
             let server = server.clone();
             tokio::spawn(async move {
                 let service = hyper::service::service_fn(move |request| {
                     let server = server.clone();
-                    async move { Ok::<_, Infallible>(server.handle(request).await) }
+                    async move { Ok::<_, Infallible>(server.handle(request, peer).await) }
                 });
                 let _ = hyper::server::conn::http1::Builder::new()
                     .timer(hyper_util::rt::TokioTimer::new())

@@ -328,6 +328,7 @@ serve:
 
 **接続を許す相手（`access`）** は、次の順に確かめられます。
 
+- **接続元。** `allowed_clients` を書くと、そこに挙げたアドレスの範囲と、サーバーを動かしているマシン自身からの接続だけを受け付けます。ほかは `403 CLIENT_FORBIDDEN` です。`192.168.11.0/24`（`192.168.11.*` のこと）のように、アドレスと、先頭から一致させるビット数で書きます。1台だけなら `192.168.11.7` のようにアドレスだけを書きます。書かなければ、接続元では絞りません。
 - **宛先名。** 要求の `Host` が `allowed_hosts` にないと `403 HOST_FORBIDDEN` です。ホスト名か IP アドレスを、ポートを付けずに書きます。社内の名前（`nest.example.internal` など）で呼ばせるときは、その名前を足します。
 - **送信元。** ブラウザが付ける `Origin` が自分自身でも `allowed_origins` にもないと `403 ORIGIN_FORBIDDEN` です。`https://app.example.com` のように、スキームを含め、パスを付けずに書きます。空のままなら、ほかのサイトのページからは呼べません。開いたページが手元のサーバーに勝手に要求を送るのを防ぐためです。
 - **合言葉。** `host` を `127.0.0.1` などのループバック以外にするときは、`auth.type: token` が必須です。合言葉は設定ファイルに書かず、`token_env` に環境変数の名前だけを書きます。クライアントは `Authorization: Bearer <token>` を送ります。Wiki・PARA の画面は Basic 認証も受け付け、ユーザー名は `knowledge-nest`、パスワードは同じ合言葉です。
@@ -340,6 +341,17 @@ serve:
   access:
     allowed_hosts: [nest.example.internal]
     allowed_origins: [https://app.example.com]
+    auth: { type: token, token_env: NEST_TOKEN }
+```
+
+家や職場の LAN の中だけに開くときの例です。`allowed_hosts` には、このマシンの LAN でのアドレスを足します。ほかの端末は `http://192.168.11.16:4319/` のように、そのアドレスで開きます。
+
+```yaml
+serve:
+  host: 0.0.0.0
+  access:
+    allowed_hosts: [localhost, 127.0.0.1, 192.168.11.16]
+    allowed_clients: [192.168.11.0/24]
     auth: { type: token, token_env: NEST_TOKEN }
 ```
 

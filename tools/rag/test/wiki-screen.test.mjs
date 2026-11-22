@@ -6,7 +6,7 @@ import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, request as httpRequest } from 'node:http';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -77,9 +77,9 @@ function shiftJis(text) {
 }
 
 /** Sends a request to the screen, as the browser on its own origin does. */
-function send(port, { method = 'GET', path = '/', headers = {}, body }) {
+function send(port, { method = 'GET', path = '/', headers = {}, body, address = '127.0.0.1' }) {
   return new Promise((resolve, reject) => {
-    const request = httpRequest({ host: '127.0.0.1', port, method, agent: false, path, headers: { host: '127.0.0.1:' + port, ...headers } }, (response) => {
+    const request = httpRequest({ host: address, port, method, agent: false, path, headers: { host: address + ':' + port, ...headers } }, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks).toString('utf8') }));
@@ -196,4 +196,68 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   const pump = await send(port, { path: '/?' + pumpLink });
   assert.match(pump.body, /毎月第一営業日に点検する。/u);
   assert.match(pump.body, /<h2>引用しているページ<\/h2><ul><li><a href="\/\?page=/u);
+});
+
+test('lets in the machine itself and the clients of the listed ranges', { timeout: 120_000 }, async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'knowledge-nest-wiki-clients-')));
+  const stops = [];
+  t.after(async () => {
+    for (const stop of stops.reverse()) await stop();
+    await rm(root, { recursive: true, force: true, maxRetries: 5 });
+  });
+  const env = { ...process.env, KNOWLEDGE_NEST_GLOBAL_CONFIG: join(root, 'global.yaml'), KNOWLEDGE_NEST_TEST_TOKEN: 'local-test-token' };
+  await runNode(process.execPath, [cli, 'init', 'wiki', 'kb', '--purpose', '設備保全の手順'], { cwd: root, env });
+  const configPath = join(root, 'kb', 'KnowledgeNestfile.yaml');
+  const config = parse(await readFile(configPath, 'utf8'));
+  // An address of this machine other than loopback: a request sent to it also comes from it.
+  const own = Object.values(networkInterfaces()).flat().find((entry) => entry.family === 'IPv4' && !entry.internal)?.address;
+  Object.assign(config.serve, { host: '0.0.0.0', port: 0 });
+  config.serve.access.allowed_hosts.push(...(own ? [own] : []));
+  config.serve.access.auth = { type: 'token', token_env: 'KNOWLEDGE_NEST_TEST_TOKEN' };
+  const save = async (clients) => {
+    config.serve.access.allowed_clients = clients;
+    await writeFile(configPath, stringify(config));
+  };
+  const validate = () => runNode(process.execPath, [cli, '--project', 'kb', 'validate', '--json'], { cwd: root, env, encoding: 'utf8' });
+
+  // A range is an address with the number of leading bits; a list that is given names someone.
+  for (const clients of [['192.168.11.*'], ['192.168.11.0/33'], []]) {
+    await save(clients);
+    await assert.rejects(validate(), (error) => {
+      const [found] = JSON.parse(error.stdout).errors;
+      return error.code === 2 && found.code === 'ARG_RANGE' && found.section === 'serve';
+    }, JSON.stringify(clients));
+  }
+
+  const start = async (clients) => {
+    await save(clients);
+    const child = spawn(process.execPath, [cli, '--project', 'kb', 'serve'], { cwd: root, env, stdio: ['ignore', 'ignore', 'pipe'] });
+    const stopped = once(child, 'exit');
+    const stop = async () => { child.kill(); await stopped; };
+    stops.push(stop);
+    let log = '';
+    for await (const chunk of child.stderr) {
+      log += chunk;
+      const port = /http:\/\/0\.0\.0\.0:(\d+)/u.exec(log)?.[1];
+      if (port) return { port, stop };
+    }
+    assert.fail(log);
+  };
+  const headers = { authorization: 'Bearer local-test-token' };
+
+  // Nobody of the listed range is here: the machine itself still gets in, its other address does not.
+  const closed = await start(['192.0.2.0/24']);
+  assert.equal((await send(closed.port, { headers })).status, 200);
+  assert.equal((await send(closed.port, {})).status, 401);
+  if (own) {
+    const refused = await send(closed.port, { headers, address: own });
+    assert.equal(refused.status, 403);
+    assert.match(refused.body, /CLIENT_FORBIDDEN/u);
+  }
+  await closed.stop();
+
+  if (!own) return t.diagnostic('no address other than loopback: the listed range was not tried');
+  const open = await start(['192.0.2.0/24', own + '/24']);
+  assert.equal((await send(open.port, { headers, address: own })).status, 200);
+  assert.equal((await send(open.port, { address: own })).status, 401);
 });

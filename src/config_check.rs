@@ -2106,6 +2106,59 @@ pub fn is_loopback(host: &str) -> bool {
     host == "localhost" || host == "::1" || (ip_version(host) == 4 && host.starts_with("127."))
 }
 
+/// An address or a range of addresses (`192.168.11.0/24`) of `allowed_clients`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Network {
+    address: std::net::IpAddr,
+    prefix: u32,
+}
+
+impl Network {
+    /// An address, or an address and the number of leading bits a client shares with it.
+    pub fn parse(value: &str) -> Option<Self> {
+        let (address, prefix) = match value.split_once('/') {
+            Some((address, prefix)) => (address, Some(prefix)),
+            None => (value, None),
+        };
+        let address = address.parse::<std::net::IpAddr>().ok()?.to_canonical();
+        let bits = if address.is_ipv4() { 32 } else { 128 };
+        let prefix = match prefix {
+            None => bits,
+            Some(digits) if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) => {
+                digits
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|prefix| *prefix <= bits)?
+            }
+            Some(_) => return None,
+        };
+        Some(Self { address, prefix })
+    }
+
+    pub fn contains(&self, address: std::net::IpAddr) -> bool {
+        use std::net::IpAddr;
+        match (self.address, address.to_canonical()) {
+            (IpAddr::V4(network), IpAddr::V4(address)) => {
+                let mask = u32::MAX.checked_shl(32 - self.prefix).unwrap_or(0);
+                u32::from(network) & mask == u32::from(address) & mask
+            }
+            (IpAddr::V6(network), IpAddr::V6(address)) => {
+                let mask = u128::MAX.checked_shl(128 - self.prefix).unwrap_or(0);
+                u128::from(network) & mask == u128::from(address) & mask
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Whether a client may connect: any client when no range is listed, else the machine itself
+/// and the clients inside a listed range.
+pub fn client_allowed(networks: &[Network], address: std::net::IpAddr) -> bool {
+    networks.is_empty()
+        || address.to_canonical().is_loopback()
+        || networks.iter().any(|network| network.contains(address))
+}
+
 /// Validates a serve section and returns the settings with defaults, or `None` on errors.
 pub fn validate_serve(
     project_type: &str,
@@ -2404,9 +2457,12 @@ fn serve_issues(input: &ConfigValue) -> Vec<(Issue, Vec<String>)> {
     match input.get("access") {
         None => {}
         Some(access) if is_mapping(Some(access)) => {
-            let lists: [ListCheck; 2] = [
+            let lists: [ListCheck; 3] = [
                 ("allowed_hosts", true, |text| hostname(text).is_some()),
                 ("allowed_origins", false, origin),
+                ("allowed_clients", true, |text| {
+                    Network::parse(text).is_some()
+                }),
             ];
             for (key, min, valid) in lists {
                 match access.get(key) {
@@ -2463,7 +2519,12 @@ fn serve_issues(input: &ConfigValue) -> Vec<(Issue, Vec<String>)> {
             unknown(
                 &mut out,
                 access,
-                &["allowed_hosts", "allowed_origins", "auth"],
+                &[
+                    "allowed_hosts",
+                    "allowed_origins",
+                    "allowed_clients",
+                    "auth",
+                ],
                 path!["access"],
             );
         }
@@ -2521,4 +2582,74 @@ fn serve_issues(input: &ConfigValue) -> Vec<(Issue, Vec<String>)> {
         Vec::new(),
     );
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Network, client_allowed};
+
+    fn ranges(values: &[&str]) -> Vec<Network> {
+        values
+            .iter()
+            .map(|value| Network::parse(value).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn reads_an_address_or_a_range() {
+        for value in [
+            "192.168.11.0/24",
+            "192.168.11.7",
+            "10.0.0.0/8",
+            "fd00::/8",
+            "::1",
+            "0.0.0.0/0",
+        ] {
+            assert!(Network::parse(value).is_some(), "{value}");
+        }
+        for value in [
+            "192.168.11.*",
+            "192.168.11.0/33",
+            "192.168.11.0/",
+            "192.168.11.0/+8",
+            "::1/129",
+            "host/24",
+            "",
+        ] {
+            assert!(Network::parse(value).is_none(), "{value}");
+        }
+    }
+
+    #[test]
+    fn allows_the_machine_itself_and_the_listed_ranges() {
+        let home = ranges(&["192.168.11.0/24"]);
+        for address in [
+            "192.168.11.1",
+            "192.168.11.254",
+            "127.0.0.1",
+            "::1",
+            "::ffff:192.168.11.9",
+        ] {
+            assert!(client_allowed(&home, address.parse().unwrap()), "{address}");
+        }
+        for address in ["192.168.12.1", "192.168.10.255", "100.112.0.5", "fe80::1"] {
+            assert!(
+                !client_allowed(&home, address.parse().unwrap()),
+                "{address}"
+            );
+        }
+        assert!(client_allowed(&[], "203.0.113.9".parse().unwrap()));
+        assert!(client_allowed(
+            &ranges(&["0.0.0.0/0"]),
+            "203.0.113.9".parse().unwrap()
+        ));
+        assert!(client_allowed(
+            &ranges(&["fd00::/8"]),
+            "fd12::5".parse().unwrap()
+        ));
+        assert!(!client_allowed(
+            &ranges(&["192.168.11.7"]),
+            "192.168.11.8".parse().unwrap()
+        ));
+    }
 }

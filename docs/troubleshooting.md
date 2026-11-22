@@ -21,7 +21,7 @@
 | HTTP の `INVALID_JSON` | 本文を UTF-8 の JSON で送ります。Windows の `curl` で日本語を直接書くと UTF-8 にならないことがあります。JSON を UTF-8 のファイルに保存し、`curl --data-binary @request.json` で送ります。 |
 | HTTP の `MODEL_MISMATCH` | `/v1/responses` の `model` を省くか、メッセージに示されたプロジェクトのモデル名にします。 |
 | `AUTH_TOKEN_REQUIRED` または HTTP 401 | `serve.access.auth.token_env` に指定した環境変数を設定し、クライアントの認証情報を合わせます。 |
-| HTTP 403 | 接続先のホスト名とブラウザの Origin を `allowed_hosts`、`allowed_origins` と照合します。 |
+| HTTP 403 | 接続先のホスト名とブラウザの Origin を `allowed_hosts`、`allowed_origins` と照合します。`CLIENT_FORBIDDEN` のときは、接続元のアドレスが `allowed_clients` の範囲に入っているか確かめます。 |
 | ポートが使用中 | 既存の `serve` を止めるか、`nest serve --port 4320` のように空きポートを指定します。 |
 
 HTTP の既定接続先は RAG が `127.0.0.1:4318`、Wiki・PARA が `127.0.0.1:4319` です。モデルの設定とアクセス制限の例は起動ガイドにあります。 [モデルの設定](mcp.md#初期化時にモデルを選ぶ) · [HTTP の接続制限](mcp.md#http-の接続制限)

@@ -884,6 +884,7 @@ struct Job {
 struct WikiServer {
     request: WikiServeRequest,
     hosts: Vec<Option<String>>,
+    clients: Vec<crate::config_check::Network>,
     digest: Option<[u8; 32]>,
     port: u16,
     running: AtomicUsize,
@@ -977,6 +978,13 @@ impl WikiServer {
         headers: &mut Vec<(&'static str, String)>,
     ) -> Reply {
         let settings = &self.request.settings;
+        if !crate::config_check::client_allowed(&self.clients, peer.ip()) {
+            return Reply::error(
+                403,
+                "CLIENT_FORBIDDEN",
+                "This client address is not allowed.",
+            );
+        }
         let target = header(&request, "host").and_then(|host| request_target(host, self.port));
         let Some((name, authority)) =
             target.filter(|(name, _)| self.hosts.iter().any(|host| host.as_deref() == Some(name)))
@@ -2169,6 +2177,7 @@ pub fn serve(
         .iter()
         .map(|host| hostname(host))
         .collect();
+    let clients = settings.access.clients();
     let header_timeout = Duration::from_secs(settings.limits.request_timeout_seconds.min(60));
     let (sender, receiver) = mpsc::channel::<Job>();
     let base = request.base.clone();
@@ -2188,6 +2197,7 @@ pub fn serve(
     let server = Arc::new(WikiServer {
         request,
         hosts,
+        clients,
         digest,
         port,
         running: AtomicUsize::new(0),

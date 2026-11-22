@@ -33,8 +33,8 @@ A JSON file with a list of cases:
 Save it:
 
 ```sh
-knowledge-nest eval-data import cases.json                # named default
-knowledge-nest eval-data import cases.json --tag v2       # named v2, and default
+nest eval-data import cases.json                # named default
+nest eval-data import cases.json --tag v2       # named v2, and default
 ```
 
 Saving the same cases again makes no new version. Saving changed cases makes one, and
@@ -71,7 +71,7 @@ eval:
 ```
 
 ```sh
-knowledge-nest eval
+nest eval
 ```
 
 ```text
@@ -84,7 +84,7 @@ evaluation data it names does not exist, it stops before building anything.
 
 **When the configuration has no `eval` section**, add one to the project's configuration
 file and tell the user you did. The section changes nothing about what is built, and
-without it `knowledge-nest eval` has nothing to measure with. Do not keep a private copy of the
+without it `nest eval` has nothing to measure with. Do not keep a private copy of the
 configuration to measure with: the copy drifts from the real one.
 
 **To measure with `test`**, use a second file that differs only in the `eval` section, and
@@ -101,7 +101,7 @@ Do this once, on the setting already chosen.
 
 ## Compare with before
 
-Each `knowledge-nest eval` that measures something new makes a new result, and `default` moves to
+Each `nest eval` that measures something new makes a new result, and `default` moves to
 it. The earlier result stays and is listed without a name:
 
 ```text
@@ -109,16 +109,16 @@ Results  default  v11  2026-11-22 06:16Z  recall 1.000 (5 of 5), index main, def
          -        v6   2026-11-22 06:14Z  recall 0.800 (4 of 5), index version 5 with data default
 ```
 
-`knowledge-nest results 6` shows the cases of the earlier one by its version number. Comparing the
+`nest results 6` shows the cases of the earlier one by its version number. Comparing the
 two case by case is how you answer "did it get worse": the same recall can hide one case
 gained and another lost.
 
 ## Read the results
 
 ```sh
-knowledge-nest results                 # every named result, best first
-knowledge-nest results default         # the cases of the latest result
-knowledge-nest results tune/002        # the cases of one trial of an optimization
+nest results                 # every named result, best first
+nest results default         # the cases of the latest result
+nest results tune/002        # the cases of one trial of an optimization
 ```
 
 ```text
@@ -149,5 +149,5 @@ For each missed case, find out which of these it is before proposing a change:
    only helps if the document is just outside the cut.
 4. **It was found, but late** (`Found at` is high). It will be lost when `top_k` shrinks.
 
-`knowledge-nest search "<the question>" --limit 10` shows what a user would actually get, with the
+`nest search "<the question>" --limit 10` shows what a user would actually get, with the
 first line of each chunk.

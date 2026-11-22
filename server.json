@@ -23,7 +23,7 @@
         {
           "type": "named",
           "name": "--project",
-          "description": "Directory of a project created with knowledge-nest init mcp and built with knowledge-nest build",
+          "description": "Directory of a project created with nest init mcp and built with nest build",
           "format": "filepath",
           "isRequired": true
         }

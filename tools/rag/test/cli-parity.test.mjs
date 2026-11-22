@@ -290,8 +290,8 @@ test('runs the CLI like the former JavaScript CLI', { timeout: 600_000 }, async 
     assert.match(text(['--project', 'kb', 'status']).stdout, /^Build +bld-\S+\nSearch +search-\S+\nEvaluation +evaluated: evidence_recall/u);
     assert.match(text(['--project', 'kb', 'build', '--skip-unsupported']).stdout, /^(Built|Reused build) bld-\S+ from 3 of 4 files in \d+ ms\./u);
     assert.match(text(['--project', 'kb', 'search', 'ポンプ']).stdout, /^a\.md — ポンプ\n[\s\S]*\n\n1 result; \d+ of 4000 characters\.\n$/u);
-    assert.match(text(['--project', 'kb', 'search', 'q', '--bogus']).stderr, /^Unknown option --bogus for knowledge-nest search\./u);
-    assert.match(text(['--project', 'kb', 'eval-data', 'bogus']).stderr, /^Unknown action for knowledge-nest eval-data: bogus\. Use add, /u);
+    assert.match(text(['--project', 'kb', 'search', 'q', '--bogus']).stderr, /^Unknown option --bogus for nest search\./u);
+    assert.match(text(['--project', 'kb', 'eval-data', 'bogus']).stderr, /^Unknown action for nest eval-data: bogus\. Use add, /u);
     assert.match(text(['--project', 'kb', 'tag', 'v1']).stdout, /^Tagged bld-\S+ as v1\.\n$/u);
     assert.equal(text(['--project', 'w', 'rules']).stdout, '# 運用の決まり\n');
     for (const file of files) assert.equal(rust.saved[file], reference.saved[file], file);

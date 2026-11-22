@@ -7,7 +7,7 @@
 CLI をインストールし、リポジトリのルートで新しい MCP プロジェクトを作ります。この例は同梱辞書を使うキーワード検索で進めます。 [CLI のインストール](../README.md#インストール)
 
 ```sh
-knowledge-nest init mcp ./evaluation-demo
+nest init mcp ./evaluation-demo
 cp examples/evaluation/product.txt evaluation-demo/docs/
 cp examples/evaluation/lecture.txt evaluation-demo/docs/
 cd evaluation-demo
@@ -25,10 +25,10 @@ cd evaluation-demo
 `product.txt` を見つけたいときの問い合わせとして「東京大学」を登録します。`--doc` は対象の文書 ID、`--quote` はその文書に一意に現れる引用です。最初の `eval` に付けた `baseline` は評価レポートのタグです。
 
 ```sh
-knowledge-nest build
-knowledge-nest eval-data add --question "東京大学" --doc "docs:product.txt" --quote "製品東京大学は限定品"
-knowledge-nest eval --tag baseline
-knowledge-nest report show baseline
+nest build
+nest eval-data add --question "東京大学" --doc "docs:product.txt" --quote "製品東京大学は限定品"
+nest eval --tag baseline
+nest report show baseline
 ```
 
 この例では `scores` の `evidence_recall@context` が `0` になります。登録した引用が、実際に返す検索文脈に含まれなかったことを示しています。
@@ -36,7 +36,7 @@ knowledge-nest report show baseline
 現在提供中の基準ビルドにもタグを付けます。
 
 ```sh
-knowledge-nest tag baseline-build
+nest tag baseline-build
 ```
 
 ## 質問と引用の候補をモデルに作らせる
@@ -44,7 +44,7 @@ knowledge-nest tag baseline-build
 質問と引用を手で書く代わりに、設定済みの対話用モデルに候補を作らせることができます。`KnowledgeNestfile.yaml` の `models` に `kind: chat` のモデルが1つだけあれば `--model` は省けます。
 
 ```sh
-knowledge-nest eval-data generate --count 30
+nest eval-data generate --count 30
 ```
 
 - 評価ケースがまだない文書から先に読みます。長い文書は、ケースの引用がまだ少ない部分から、文書の中に散らばる順に読みます。`--doc` で対象を1文書に絞れます。
@@ -56,8 +56,8 @@ knowledge-nest eval-data generate --count 30
 候補を一覧し、妥当なものを採用します。`--case` は繰り返して指定できます。
 
 ```sh
-knowledge-nest eval-data review <dataset>
-knowledge-nest eval-data review <dataset> --case <id> --case <id> --state reviewed --reviewer <name> --reviewer-type human
+nest eval-data review <dataset>
+nest eval-data review <dataset> --case <id> --case <id> --state reviewed --reviewer <name> --reviewer-type human
 ```
 
 `<dataset>` は `generate` が表示した評価データの ID です。採用しない候補は `--state rejected` にします。まとめて編集したい場合は `eval-data export` で書き出し、`eval-data import` で戻せます。
@@ -65,7 +65,7 @@ knowledge-nest eval-data review <dataset> --case <id> --case <id> --state review
 ## 辞書候補を選ぶ
 
 ```sh
-knowledge-nest dictionary suggest --report baseline
+nest dictionary suggest --report baseline
 ```
 
 標準辞書では、問い合わせの「東京大学」は1語ですが、正解の引用では「東京」「大学」に分かれています。`suggest` は追加候補の CSV 行と、語全体・部分語の確認用問い合わせを表示します。
@@ -83,7 +83,7 @@ knowledge-nest dictionary suggest --report baseline
 
 ```sh
 cp KnowledgeNestfile.yaml candidate.yaml
-knowledge-nest dictionary add selected.csv --config candidate.yaml
+nest dictionary add selected.csv --config candidate.yaml
 ```
 
 `dictionary add` は、候補設定の `index.keyword` の `with.user_dictionary` に辞書のパスを設定します。
@@ -93,9 +93,9 @@ knowledge-nest dictionary add selected.csv --config candidate.yaml
 基準ビルドの抽出・チャンク化の結果を `--input baseline-build` で指定し、`--from index` で索引から作り直します。`dict` は試行ビルド、`dict-eval` はその評価レポートのタグです。
 
 ```sh
-knowledge-nest build --from index --input baseline-build --config candidate.yaml --tag dict
-knowledge-nest eval --build dict --tag dict-eval
-knowledge-nest report compare baseline dict-eval
+nest build --from index --input baseline-build --config candidate.yaml --tag dict
+nest eval --build dict --tag dict-eval
+nest report compare baseline dict-eval
 ```
 
 比較結果の `comparable` が `true` であることを確認します。この例では `cases` の「東京大学」が `before: 0`、`after: 1`、`status: recovered` になり、辞書を追加すると登録した根拠を回収できることが分かります。
@@ -105,10 +105,10 @@ knowledge-nest report compare baseline dict-eval
 評価に登録した語全体の「東京大学」に加え、`suggest` が出した部分語の「大学」でも順位を調べます。両方のビルドで上位1件を取り、JSON の `data.results` で `document_id` が `docs:product.txt` の結果とその `rank` を見ます。
 
 ```sh
-knowledge-nest search "東京大学" --build baseline-build --limit 1 --json
-knowledge-nest search "東京大学" --build dict --limit 1 --json
-knowledge-nest search "大学" --build baseline-build --limit 1 --json
-knowledge-nest search "大学" --build dict --limit 1 --json
+nest search "東京大学" --build baseline-build --limit 1 --json
+nest search "東京大学" --build dict --limit 1 --json
+nest search "大学" --build baseline-build --limit 1 --json
+nest search "大学" --build dict --limit 1 --json
 ```
 
 | 問い合わせ | 基準 `baseline-build` | 辞書を追加した試行 `dict` |

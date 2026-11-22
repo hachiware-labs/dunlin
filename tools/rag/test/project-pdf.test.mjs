@@ -76,7 +76,7 @@ test('uses text-layer PDFs in an OCR-enabled project and guides setup for scans'
   assert.equal(result.page, 1);
 
   await writeFile(join(root, 'docs', 'scan.pdf'), scannedPdf(1));
-  await assert.rejects(run('build'), { code: 1, stderr: /Run knowledge-nest add ocr\./u });
+  await assert.rejects(run('build'), { code: 1, stderr: /Run nest add ocr\./u });
 });
 
 /** A PDF whose pages are images without a text layer, as scanners write them. */

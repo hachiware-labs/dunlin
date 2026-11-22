@@ -14,7 +14,7 @@
 | 範囲 | 主なコンポーネントとメタデータ上のライセンス |
 | --- | --- |
 | Rust のネイティブアドオン | Tantivy、NAPI-RS、rusqlite、pulldown-cmark は MIT。Rayon、memmap2、idna は MIT または Apache-2.0。ICU4X（icu_normalizer、icu_segmenter、icu_collator、icu_properties とその辞書や照合のデータ）は Unicode-3.0 |
-| 文書の読み取りと OCR（ネイティブアドオン） | pdf_oxide、ort、image は MIT または Apache-2.0。oar-ocr は Apache-2.0。ONNX Runtime と OCR のモデルは `knowledge-nest add oar-ocr` で取得し、それぞれの配布条件に従う |
+| 文書の読み取りと OCR（ネイティブアドオン） | pdf_oxide、ort、image は MIT または Apache-2.0。oar-ocr は Apache-2.0。ONNX Runtime と OCR のモデルは `nest add oar-ocr` で取得し、それぞれの配布条件に従う |
 | 埋め込みモデルの呼び出し（ネイティブアドオン） | ureq は MIT または Apache-2.0。rustls は Apache-2.0、ISC、MIT のいずれか。ring は Apache-2.0 と ISC。rustls-webpki は ISC。webpki-roots（Mozilla のルート証明書）は CDLA-Permissive-2.0 |
 | 近似ベクトル索引の補助バイナリ | hannoy、heed は MIT。その他の依存は `tools/hannoy/Cargo.lock` で版を特定 |
 | npm の実行時に解決する依存 | なし。ネイティブアドオンと入口だけで動く。旧実装と比べるテストが使う MCP TypeScript SDK、cheerio、markdown-it、yaml、zod、npm の docling.rs は開発用の依存で、パッケージには含めない |

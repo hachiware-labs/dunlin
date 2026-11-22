@@ -162,7 +162,7 @@ impl Serving {
         let Some((manifest, generation)) = row else {
             return Err(StageError::coded(
                 "BUILD_REQUIRED",
-                "No searchable build. Run knowledge-nest build first.",
+                "No searchable build. Run nest build first.",
                 3,
             ));
         };
@@ -219,7 +219,7 @@ impl Serving {
         {
             return Err(StageError::coded(
                 "BUILD_REQUIRED",
-                "The build index is missing. Run knowledge-nest build first.",
+                "The build index is missing. Run nest build first.",
                 3,
             ));
         }

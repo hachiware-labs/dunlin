@@ -136,7 +136,7 @@ fn stage_required(message: String) -> StageError {
 fn build_required() -> StageError {
     StageError::coded(
         "BUILD_REQUIRED",
-        "No searchable build. Run knowledge-nest build first.",
+        "No searchable build. Run nest build first.",
         3,
     )
 }
@@ -287,7 +287,7 @@ fn input_stage_id(
             string_field(build, "build_id").unwrap_or("undefined")
         )),
         None => stage_required(format!(
-            "No {stage} output. Run knowledge-nest {stage} or knowledge-nest build first."
+            "No {stage} output. Run nest {stage} or nest build first."
         )),
     })
 }
@@ -942,7 +942,7 @@ pub struct TagRequest {
     pub config_models: Option<ConfigValue>,
 }
 
-/// `knowledge-nest tag <name> [build]`: names a build with its search settings and configuration.
+/// `nest tag <name> [build]`: names a build with its search settings and configuration.
 /// Returns `{ tag, build_id, search_config_id }`.
 pub fn tag(request: &TagRequest, host: &dyn TagHost) -> Result<ConfigValue, StageError> {
     let mut connection = open(&request.state, false)?;

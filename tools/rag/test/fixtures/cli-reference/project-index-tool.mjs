@@ -58,7 +58,7 @@ async function verified(directory, tool, packaged = false) {
     return { path, manifest, bytes };
   } catch (error) {
     if (error.exitCode) throw error;
-    if (error.code === 'ENOENT') throw toolError('TOOL_REQUIRED', 'The ' + tool.name + ' binary is missing. Run knowledge-nest add ' + tool.name + '.', 3);
+    if (error.code === 'ENOENT') throw toolError('TOOL_REQUIRED', 'The ' + tool.name + ' binary is missing. Run nest add ' + tool.name + '.', 3);
     throw toolError('TOOL_INTEGRITY', 'The ' + tool.name + ' binary failed its version or integrity check.');
   }
 }

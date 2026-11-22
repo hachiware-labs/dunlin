@@ -82,7 +82,7 @@ function releaseVectorMetadata(database) {
 }
 
 async function vectorSearch(directory, build, embedder, query, { database, max, sourceIds, signal, backend }) {
-  if (!build.vector) throw error('VECTOR_REQUIRED', 'The selected build has no vector index. Run knowledge-nest build with index.vector configured.');
+  if (!build.vector) throw error('VECTOR_REQUIRED', 'The selected build has no vector index. Run nest build with index.vector configured.');
   if (build.vector.identity !== revision(JSON.stringify(embedder.identity))) {
     throw error('VECTOR_MODEL_MISMATCH', 'The query embedding model differs from the model used for the selected build.');
   }
@@ -359,7 +359,7 @@ function keywordOptions(args, paths) {
 export async function referenceOpen(paths, build) {
   const index = join(paths.artifacts, build.index);
   if (!await KnowledgeNest.inspectIndex(index)) {
-    throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run knowledge-nest build first.');
+    throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run nest build first.');
   }
   return KnowledgeNest.open(index, { corpusBackend: 'sqlite', corpusDirectory: build.shared_corpus ? paths.corpus : undefined,
     ...keywordOptions(build.keyword, paths) });

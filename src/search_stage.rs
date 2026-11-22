@@ -557,7 +557,7 @@ fn vector(search: &VectorSearch<'_>, cancel: &Cancellation) -> Result<Found, Sta
     if !truthy(built) {
         return Err(StageError::coded(
             "VECTOR_REQUIRED",
-            "The selected build has no vector index. Run knowledge-nest build with index.vector configured.",
+            "The selected build has no vector index. Run nest build with index.vector configured.",
             3,
         ));
     }

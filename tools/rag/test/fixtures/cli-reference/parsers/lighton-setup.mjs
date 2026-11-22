@@ -93,7 +93,7 @@ export async function managedOcr({ required = true, requireModel = true } = {}) 
   }));
   if (!runtime || (files && files.some((present) => !present))) {
     if (required) {
-      throw Object.assign(new Error('Local GPU OCR is not prepared. Run knowledge-nest add ocr.'), { code: 'OCR_NOT_PREPARED' });
+      throw Object.assign(new Error('Local GPU OCR is not prepared. Run nest add ocr.'), { code: 'OCR_NOT_PREPARED' });
     }
     return;
   }
@@ -173,7 +173,7 @@ async function installRuntime(runtime, backend) {
 }
 
 export async function setupManagedOcr(requestedBackend) {
-  if (!Object.hasOwn(uvAssets, platform)) throw new Error(`Managed GPU OCR is unavailable on ${platform}. Use oar-ocr instead: knowledge-nest add oar-ocr.`);
+  if (!Object.hasOwn(uvAssets, platform)) throw new Error(`Managed GPU OCR is unavailable on ${platform}. Use oar-ocr instead: nest add oar-ocr.`);
   if (requestedBackend !== undefined && !backends.includes(requestedBackend)) {
     throw new Error(`Expected --backend ${backends.join(' or ')} on ${platform}`);
   }

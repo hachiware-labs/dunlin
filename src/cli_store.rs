@@ -222,7 +222,7 @@ fn list(store: &Store, only: Option<&str>) -> Result<(Value, String), CliError> 
         let hint = crate::cli_args::closest(only, words.iter().copied())
             .map_or(String::new(), |word| format!(" Did you mean {word}?"));
         return Err(invalid(format!(
-            "knowledge-nest list does not know {only}.{hint} Use {}.",
+            "nest list does not know {only}.{hint} Use {}.",
             words.join(", ")
         )));
     }
@@ -357,7 +357,7 @@ fn list(store: &Store, only: Option<&str>) -> Result<(Value, String), CliError> 
 
 fn usage(command: &str) -> CliError {
     invalid(format!(
-        "Check the arguments of knowledge-nest {command}.\nUsage:\n{}",
+        "Check the arguments of nest {command}.\nUsage:\n{}",
         crate::cli_args::wrapped_usage(command).unwrap_or_default()
     ))
 }
@@ -384,7 +384,7 @@ fn results(store: &Store) -> Result<(Value, String), CliError> {
     let names = optimizations(store)?;
     if !names.is_empty() {
         text.push_str(&format!(
-            "\nOptimizations: {}. knowledge-nest results <name> shows the trials of one.",
+            "\nOptimizations: {}. nest results <name> shows the trials of one.",
             names.join(", ")
         ));
     }
@@ -540,7 +540,7 @@ pub fn route(
     if !staged(&text) {
         if argued {
             return Err(invalid(format!(
-                "{file} is not written as a list of modules for each of extract, transform and index, so knowledge-nest {command} does not take it as an argument."
+                "{file} is not written as a list of modules for each of extract, transform and index, so nest {command} does not take it as an argument."
             )));
         }
         return Ok(None);
@@ -561,7 +561,7 @@ pub fn route(
             Ok(Some((action, Some((*file).to_owned()))))
         }
         ("eval-data", _) => Err(invalid(
-            "With a configuration file of this form, knowledge-nest eval-data takes import <file> [--tag <name>].",
+            "With a configuration file of this form, nest eval-data takes import <file> [--tag <name>].",
         )),
         _ => Err(usage(command)),
     }

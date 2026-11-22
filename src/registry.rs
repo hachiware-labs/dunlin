@@ -1,6 +1,6 @@
 //! The module registry: names, roles, argument definitions and descriptions (spec 26.1, 26.5).
 //!
-//! Argument definitions are the single source for validation, `knowledge-nest modules describe` and the
+//! Argument definitions are the single source for validation, `nest modules describe` and the
 //! defaults that `init` writes. The rules follow the validation that this registry replaced, so
 //! existing configurations get the same diagnostics.
 
@@ -636,7 +636,7 @@ pub fn js_space(c: char) -> bool {
     )
 }
 
-/// Describes one argument as `knowledge-nest modules describe` prints it.
+/// Describes one argument as `nest modules describe` prints it.
 pub struct ArgInfo<'a> {
     pub arg: &'a Arg,
     /// Diagnostics describe every argument as affecting output.

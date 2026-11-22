@@ -171,7 +171,7 @@ fn defaults_text(data: &ConfigValue) -> String {
         }
     }
     lines.push(
-        "Run knowledge-nest defaults --apply <section> to use the defaults of a section; --json shows every setting."
+        "Run nest defaults --apply <section> to use the defaults of a section; --json shows every setting."
             .into(),
     );
     lines.join("\n")
@@ -358,14 +358,11 @@ fn build_text(command: &str, data: &ConfigValue) -> String {
             lines.push("Now serving this build.".to_owned());
         } else {
             lines.push(format!(
-                "The project still serves its previous build. Run knowledge-nest use {} to serve this one.",
+                "The project still serves its previous build. Run nest use {} to serve this one.",
                 field(data, "build_id")
             ));
         }
-        lines.push(
-            "Next: knowledge-nest search \"<words>\" or knowledge-nest ask \"<question>\""
-                .to_owned(),
-        );
+        lines.push("Next: nest search \"<words>\" or nest ask \"<question>\"".to_owned());
     }
     lines.join("\n")
 }
@@ -375,7 +372,7 @@ fn search_text(data: &ConfigValue) -> String {
     let context = data.get("context");
     let body = context.and_then(|context| context.get("text"));
     if results.is_empty() || !truthy(body) {
-        return "No matches. Try other words, or check knowledge-nest status for the serving build.".into();
+        return "No matches. Try other words, or check nest status for the serving build.".into();
     }
     let context = context.cloned().unwrap_or_default();
     let mut out = js_string(body).trim_end_matches('\n').to_owned();
@@ -492,7 +489,7 @@ fn push_markers(out: &mut String, markers: &[(usize, usize)], position: usize) {
 
 fn status_text(data: &ConfigValue) -> String {
     if !truthy(data.get("build_id")) {
-        return "No build yet. Add documents and run knowledge-nest build.".into();
+        return "No build yet. Add documents and run nest build.".into();
     }
     let mut rows = vec![
         row("Build", field(data, "build_id")),
@@ -530,7 +527,7 @@ fn status_text(data: &ConfigValue) -> String {
         rows.push(row(
             "Changed",
             format!(
-                "{} in KnowledgeNestfile.yaml since this build. Run knowledge-nest build to apply.",
+                "{} in KnowledgeNestfile.yaml since this build. Run nest build to apply.",
                 changed.join(", ")
             ),
         ));
@@ -607,9 +604,7 @@ fn modules_text(data: &ConfigValue) -> String {
                 ));
             }
             lines.push(String::new());
-            lines.push(
-                "Run knowledge-nest modules describe <name> for the arguments of a module.".into(),
-            );
+            lines.push("Run nest modules describe <name> for the arguments of a module.".into());
             lines.join("\n")
         }
         module => {
@@ -694,7 +689,7 @@ fn tools_text(data: &ConfigValue) -> String {
         })
         .collect();
     lines.insert(0, "Tools you can add:".into());
-    lines.push("Run knowledge-nest add <tool> to install one.".into());
+    lines.push("Run nest add <tool> to install one.".into());
     lines.join("\n")
 }
 
@@ -789,7 +784,7 @@ fn report_text(data: &ConfigValue, evaluated: bool) -> String {
         }
     }
     if evaluated {
-        lines.push(format!("Next: knowledge-nest report show {name}"));
+        lines.push(format!("Next: nest report show {name}"));
     }
     lines.join("\n")
 }
@@ -797,7 +792,7 @@ fn report_text(data: &ConfigValue, evaluated: bool) -> String {
 fn report_list_text(data: &ConfigValue) -> String {
     let groups = items(Some(data));
     if groups.is_empty() {
-        return "No reports yet. Run knowledge-nest eval.".into();
+        return "No reports yet. Run nest eval.".into();
     }
     let mut lines = Vec::new();
     for group in groups {
@@ -965,7 +960,7 @@ fn eval_data_text(action: &str, data: &ConfigValue) -> String {
         "list" => {
             let datasets = items(data.get("datasets"));
             if datasets.is_empty() {
-                return "No evaluation data yet. Add a case with knowledge-nest eval-data add --question <text> --doc <file> --quote <text>.".into();
+                return "No evaluation data yet. Add a case with nest eval-data add --question <text> --doc <file> --quote <text>.".into();
             }
             let selected = field(data, "selected");
             let mut rows = vec![vec![
@@ -988,7 +983,7 @@ fn eval_data_text(action: &str, data: &ConfigValue) -> String {
                 ]);
             }
             let mut lines = grid(&rows, "");
-            lines.push("* the evaluation data that knowledge-nest eval uses".into());
+            lines.push("* the evaluation data that nest eval uses".into());
             lines.join("\n")
         }
         "show" if present(data.get("cases")).is_some() => {
@@ -1025,7 +1020,7 @@ fn evidence_map_text(action: &str, data: &ConfigValue) -> String {
         "list" => {
             let maps = items(Some(data));
             if maps.is_empty() {
-                return "No evidence maps yet. Run knowledge-nest evidence-map create.".into();
+                return "No evidence maps yet. Run nest evidence-map create.".into();
             }
             maps.iter()
                 .map(|map| field(map, "id"))
@@ -1214,7 +1209,7 @@ pub fn text_output(
         "evidence-map" => evidence_map_text(kind, data),
         "serve" => mcp_config_text(data, context),
         "query" if string_field(data, "status") == Some("insufficient_evidence") => {
-            "The wiki pages do not answer this question. Add sources with knowledge-nest ingress, or ask another way.".into()
+            "The wiki pages do not answer this question. Add sources with nest ingress, or ask another way.".into()
         }
         "query" if data.get("answer").is_some() => {
             let mut lines = vec![field(data, "answer")];
@@ -1228,7 +1223,7 @@ pub fn text_output(
             }
             if let Some(id) = string_field(data, "id").filter(|id| !id.is_empty()) {
                 lines.push(String::new());
-                lines.push(format!("Save it as a page: knowledge-nest save-answer {id} <page> <title>"));
+                lines.push(format!("Save it as a page: nest save-answer {id} <page> <title>"));
             }
             lines.join("\n")
         }

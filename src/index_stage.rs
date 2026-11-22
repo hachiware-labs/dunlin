@@ -523,7 +523,7 @@ pub fn run(
         StageError::coded(
             "STAGE_REQUIRED",
             format!(
-                "Missing saved transform {}. Run knowledge-nest build.",
+                "Missing saved transform {}. Run nest build.",
                 request.transform_id
             ),
             3,
@@ -536,7 +536,7 @@ pub fn run(
         .ok_or_else(|| {
             StageError::coded(
                 "STAGE_REQUIRED",
-                "The source output referenced by transform is missing. Run knowledge-nest build.",
+                "The source output referenced by transform is missing. Run nest build.",
                 3,
             )
         })?;
@@ -869,7 +869,7 @@ pub fn run(
                     assign(&mut data, "skipped", field(&source, "skipped").cloned());
                     let mut error = StageError::coded(
                         "NO_SEARCHABLE_DOCUMENTS",
-                        "No searchable documents. Add UTF-8 text or Markdown files and run knowledge-nest build.",
+                        "No searchable documents. Add UTF-8 text or Markdown files and run nest build.",
                         3,
                     );
                     error.data = Some(ConfigValue::Object(data));

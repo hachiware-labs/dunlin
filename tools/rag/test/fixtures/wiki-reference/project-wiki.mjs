@@ -109,7 +109,7 @@ export function validateWiki(config, file, line) {
   }
   for (const [stage, sequence] of Object.entries(checks)) plan[stage] = validateSequence(stage, 'modules', sequence);
   if (plan.ingress[0]?.ocr === 'loader.ocr' && !projectOcr(config.tools)) {
-    add('REQUIREMENT_MISSING', ['ingress', 'modules', 0, 'with', 'ocr'], 'The ocr tool', 'Run knowledge-nest add ocr.');
+    add('REQUIREMENT_MISSING', ['ingress', 'modules', 0, 'with', 'ocr'], 'The ocr tool', 'Run nest add ocr.');
   }
   plan.content = validateSequence('verify', 'content', [['check.contradictions',
     z.strictObject({ model: z.string(), scope: z.literal('changed_and_related') })]]);

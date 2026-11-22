@@ -1,6 +1,6 @@
 // Serves MCP over stdio with the former JavaScript server (mcp-reference.mjs).
 //   library <index>    the Node API server on one index
-//   project <project>  the server `knowledge-nest serve` started for an MCP project, with the former search
+//   project <project>  the server `nest serve` started for an MCP project, with the former search
 import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';

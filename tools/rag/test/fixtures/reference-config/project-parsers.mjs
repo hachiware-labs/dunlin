@@ -96,7 +96,7 @@ export function checkCommand(values, configFile) {
   }
   if (values.version === undefined && values.version_command === undefined) {
     return { issues, warning: { field: ['version'], expected: 'version or version_command',
-      hint: 'Without a version, Knowledge-Nest cannot detect tool updates. Run knowledge-nest build --force after updating the tool.' } };
+      hint: 'Without a version, Knowledge-Nest cannot detect tool updates. Run nest build --force after updating the tool.' } };
   }
   return { issues };
 }

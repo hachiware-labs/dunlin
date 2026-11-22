@@ -76,9 +76,9 @@ pdfjs はセルの間に空白を 3 つ入れた。`pdf_oxide` はセルの間�
 
 ## OCR（oar-ocr）の確認
 
-`oar-ocr` を標準の OCR とした（仕様 4.1 節）。PP-OCRv6 small の検出と認識のモデルを、ONNX Runtime 1.28.3 で CPU で動かす。`knowledge-nest add oar-ocr` が ONNX Runtime とモデルを SHA-256 を確かめて取得し、Rust が実行時に読み込む。
+`oar-ocr` を標準の OCR とした（仕様 4.1 節）。PP-OCRv6 small の検出と認識のモデルを、ONNX Runtime 1.28.3 で CPU で動かす。`nest add oar-ocr` が ONNX Runtime とモデルを SHA-256 を確かめて取得し、Rust が実行時に読み込む。
 
-日本語の画像 1 枚（PNG）と、文字層のない画像だけの PDF 1 ページで、`knowledge-nest build` を試した。
+日本語の画像 1 枚（PNG）と、文字層のない画像だけの PDF 1 ページで、`nest build` を試した。
 
 - 日本語の行は、どちらも原文どおりに読めた。行ごとにページと位置（0〜1000 の座標）が付いた。
 - 英数字の行「Model PX-200 / 2026年11月」は「ModelPX-200／2026年11月」になった。空白が落ち、半角の斜線が全角になった。

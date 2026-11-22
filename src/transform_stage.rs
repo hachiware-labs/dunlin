@@ -364,7 +364,7 @@ fn source_entries(
     let Some(manifest) = manifest else {
         return Err(StageError::coded(
             "STAGE_REQUIRED",
-            format!("Missing saved source {id}. Run knowledge-nest build."),
+            format!("Missing saved source {id}. Run nest build."),
             3,
         ));
     };

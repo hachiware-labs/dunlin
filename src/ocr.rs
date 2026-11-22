@@ -1,6 +1,6 @@
 //! OCR with oar-ocr: PP-OCR models on ONNX Runtime, on the CPU (spec 4.1, 28.9 step 2a).
 //!
-//! `knowledge-nest add oar-ocr` prepares ONNX Runtime and the models in a folder with `oar-ocr.json`,
+//! `nest add oar-ocr` prepares ONNX Runtime and the models in a folder with `oar-ocr.json`,
 //! which names the files relative to that folder. ONNX Runtime is loaded from there when the first
 //! file needs OCR, so the package does not carry it.
 //!
@@ -61,7 +61,7 @@ fn load_runtime(path: &Path) -> Result<(), String> {
 }
 
 fn not_prepared(detail: impl std::fmt::Display) -> String {
-    format!("oar-ocr is not prepared ({detail}). Run knowledge-nest add ocr.")
+    format!("oar-ocr is not prepared ({detail}). Run nest add ocr.")
 }
 
 fn engine(home: &Path) -> Result<Arc<OAROCR>, String> {
@@ -262,7 +262,7 @@ pub fn read(
     ]))
 }
 
-/// Reads a scanned PDF or an image with oar-ocr from the folder `knowledge-nest add oar-ocr` prepared.
+/// Reads a scanned PDF or an image with oar-ocr from the folder `nest add oar-ocr` prepared.
 pub fn parse(
     home: &str,
     version: &str,
@@ -298,7 +298,7 @@ mod tests {
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
             .unwrap();
         let error = parse(&home.path().to_string_lossy(), "1", &png, &|| true).unwrap_err();
-        assert!(error.contains("Run knowledge-nest add ocr"), "{error}");
+        assert!(error.contains("Run nest add ocr"), "{error}");
         let text_layer = pdf_oxide::api::Pdf::from_text("Text layer")
             .unwrap()
             .to_bytes()

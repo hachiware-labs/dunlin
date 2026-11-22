@@ -344,7 +344,7 @@ export async function referenceManageEvaluationData(db, project, action, [positi
   if (action === 'add' && values['from-search']) {
     let record;
     try { record = JSON.parse(await readFile(values['from-search'], 'utf8')); }
-    catch { throw invalid('Provide JSON saved from knowledge-nest search --json.'); }
+    catch { throw invalid('Provide JSON saved from nest search --json.'); }
     const index = Number(values.hit);
     const evidence = record?.command === 'search' && (record.data?.results ?? record.data?.hits)?.[index - 1]?.evidence;
     if (!Number.isSafeInteger(index) || index < 1 || !evidence?.byteRange || !evidence.source) throw invalid('Set --hit to the one-based search hit number.');

@@ -99,10 +99,10 @@ Knowledge-Nest は、取り込みの入り口から分かれた2つの系統で�
 ### 4.1 初期化と作業ディレクトリ
 
 ```bash
-knowledge-nest init mcp ./kb --source ~/manuals
-knowledge-nest init rag ./qa --source ~/manuals
-knowledge-nest init wiki ./wiki
-knowledge-nest init para ./notes
+nest init mcp ./kb --source ~/manuals
+nest init rag ./qa --source ~/manuals
+nest init wiki ./wiki
+nest init para ./notes
 ```
 
 種別は4つあり、それぞれ「引く」ためのコマンドが決まっている。
@@ -131,7 +131,7 @@ knowledge-nest init para ./notes
 | 埋め込み | `--embedding-model <name>`、`--embedding-provider <provider>` | `mcp`、`rag` | `ollama`、`openai` |
 | 回答・執筆 | `--llm-model <name>`、`--llm-provider <provider>` | `rag`、`wiki`、`para` | `ollama`、`openai`、`strata` |
 
-頻繁に使う組み合わせは `knowledge-nest config set <embedding|llm> --provider <provider> --model <name>` でユーザーごとに保存する。`knowledge-nest config list` で確認し、`knowledge-nest config unset <embedding|llm>` で解除する。保存先は `~/.knowledge-nest/config.yaml` とし、`KNOWLEDGE_NEST_GLOBAL_CONFIG` で変更できる。
+頻繁に使う組み合わせは `nest config set <embedding|llm> --provider <provider> --model <name>` でユーザーごとに保存する。`nest config list` で確認し、`nest config unset <embedding|llm>` で解除する。保存先は `~/.knowledge-nest/config.yaml` とし、`KNOWLEDGE_NEST_GLOBAL_CONFIG` で変更できる。
 
 - `init mcp` は埋め込みを明示した場合にモデルを設定する。RAG は `init` の指定、ユーザー設定、標準値の順に優先する。プロバイダーを変えた場合、以前のプロバイダーのモデル名は引き継がない。
 - `--no-embedding`、`--no-llm` で、それぞれのユーザー設定をその初期化だけ適用しない。同じ用途のモデル・プロバイダー指定との併用はエラーにする。
@@ -147,15 +147,15 @@ OCR の実行方式は次の2つから選ぶ。
 | `oar-ocr`（標準） | PaddleOCR のモデルを ONNX Runtime で動かす。Rust から直接呼ぶ | GPU のない環境を含む、すべての環境 |
 | `lightonocr` | LightOnOCR の視覚言語モデルを、管理された Python の実行環境で動かす。Rust から別プロセスとして起動する | GPU があり、精度を優先する環境 |
 
-`knowledge-nest config set ocr` で OCR をユーザー設定に登録する。`--tool oar-ocr` または `--tool lightonocr` で方式を選ぶ。`--tool` を省いた場合は `oar-ocr` を登録する。以前に登録した `tool: lightonocr` はそのまま有効である。`knowledge-nest config list` で確認し、`knowledge-nest config unset ocr` で解除する。登録内容はモデルの既定値と同じ `~/.knowledge-nest/config.yaml` に保存する。
+`nest config set ocr` で OCR をユーザー設定に登録する。`--tool oar-ocr` または `--tool lightonocr` で方式を選ぶ。`--tool` を省いた場合は `oar-ocr` を登録する。以前に登録した `tool: lightonocr` はそのまま有効である。`nest config list` で確認し、`nest config unset ocr` で解除する。登録内容はモデルの既定値と同じ `~/.knowledge-nest/config.yaml` に保存する。
 
 `init mcp` は `--ocr` を明示すると OCR を有効にする。ほかの種別は `init` のオプション、ユーザー設定、組み込みの既定値（無効）の順で優先する。`init --ocr-tool <oar-ocr|lightonocr>` で、その初期化に限って方式を選べる。方式は `--ocr-tool`、ユーザー設定、`oar-ocr` の順で決める。
 
-OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に選んだ方式の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `knowledge-nest add ocr` を実行して準備する。`knowledge-nest add ocr` は、`tools` に記録された方式を準備し、記録がなければ `oar-ocr` を準備して記録する。
+OCR を有効にした `init` は、MCP/RAG では `source`、Wiki/PARA では `ingress` の `loader.auto` で `with.ocr` に `loader.ocr` を設定し、`tools` に選んだ方式の名前と版を記録する。`config set` と `init` は設定を書き出す。実行環境とモデルは必要に応じてプロジェクト内で `nest add ocr` を実行して準備する。`nest add ocr` は、`tools` に記録された方式を準備し、記録がなければ `oar-ocr` を準備して記録する。
 
 - PDF のテキスト層は先に読み、テキスト層のないページと画像だけを OCR にかける。テキスト層は `pdf_oxide` で読み、テキスト層のないページも `pdf_oxide` で長辺 1540 ピクセルの画像にしてから OCR にかける。
 - 1つのプロジェクトで使う OCR は1つとする。`tools` に2つの方式を書いた場合は検証エラーにする。
-- 方式を切り替えるには、`knowledge-nest remove` で今の方式を外し、`knowledge-nest add` で別の方式を足してから `knowledge-nest build` を実行する。抽出結果の再利用のキーには方式と版を含めるので、OCR にかけた文書だけが読み直される。
+- 方式を切り替えるには、`nest remove` で今の方式を外し、`nest add` で別の方式を足してから `nest build` を実行する。抽出結果の再利用のキーには方式と版を含めるので、OCR にかけた文書だけが読み直される。
 - 以前のプロジェクトの `tools` にある `name: ocr` は、`lightonocr` の旧名として読む。
 
 #### 初期化で作成する項目
@@ -260,11 +260,11 @@ RAG/MCP側は「作る」「測る」「採用する」の3つのフェーズに
 
 ```bash
 npm install -g knowledge-nest
-knowledge-nest init mcp ./kb --source ~/manuals
+nest init mcp ./kb --source ~/manuals
 cd kb
-knowledge-nest build
-knowledge-nest search "手順"
-knowledge-nest serve
+nest build
+nest search "手順"
+nest serve
 ```
 
 `init`、`build`、`search` の3コマンドで検索に到達する。評価データやLLMの設定がなくても、キーワード検索とMCPでの提供まで動く。
@@ -312,13 +312,13 @@ knowledge-nest serve
 
 #### MCP の KnowledgeNestfile.yaml
 
-`knowledge-nest init mcp ./mcp`
+`nest init mcp ./mcp`
 
 ```yaml
 init:
   version: 1
   type: mcp
-# Additional parser: loader.ocr (requires knowledge-nest add ocr).
+# Additional parser: loader.ocr (requires nest add ocr).
 # Scan and extract documents. Optional OCR requires a loader.ocr module.
 source:
   modules:
@@ -375,13 +375,13 @@ serve:
 
 #### RAG の KnowledgeNestfile.yaml
 
-`knowledge-nest init rag ./rag`
+`nest init rag ./rag`
 
 ```yaml
 init:
   version: 1
   type: rag
-# Additional parser: loader.ocr (requires knowledge-nest add ocr).
+# Additional parser: loader.ocr (requires nest add ocr).
 # Scan and extract documents. Optional OCR requires a loader.ocr module.
 source:
   modules:
@@ -516,13 +516,13 @@ eval:
 ### 6.2 build
 
 ```bash
-knowledge-nest build
-knowledge-nest build --dry-run
-knowledge-nest build --from transform
-knowledge-nest build --until transform
-knowledge-nest build --force
-knowledge-nest build --skip-unsupported
-knowledge-nest build --from transform --config candidates/trial-3.yaml --tag trial-3
+nest build
+nest build --dry-run
+nest build --from transform
+nest build --until transform
+nest build --force
+nest build --skip-unsupported
+nest build --from transform --config candidates/trial-3.yaml --tag trial-3
 ```
 
 | 指定 | 動作 |
@@ -673,8 +673,8 @@ source:
 #### 再利用と検証
 
 - 工程キー（7.1）には、モジュール名と出力互換性バージョン、影響が「結果」の引数、`version` か `version_command` の出力、原本の内容ハッシュを入れる。`timeout_ms` と `concurrency` を変えても抽出はやり直さない。
-- `version` も `version_command` もない場合は、外部ツールを更新しても検出できない。`knowledge-nest validate` で警告し、更新したときは `build --force` で作り直すよう案内する。
-- `knowledge-nest validate` は次を検査する。
+- `version` も `version_command` もない場合は、外部ツールを更新しても検出できない。`nest validate` で警告し、更新したときは `build --force` で作り直すよう案内する。
+- `nest validate` は次を検査する。
   - `command` の実行ファイルが見つかること
   - 置き換え記号が正しく、`input` の指定と矛盾しないこと
   - `version` と `version_command` を同時に指定していないこと
@@ -933,12 +933,12 @@ source:
 評価は、指定したビルドと検索設定に対して、評価データの根拠をどれだけ拾えたかを測る。結果は上書きしない実行記録として残す。
 
 ```bash
-knowledge-nest eval
-knowledge-nest eval --build trial-3 --tag trial-3
-knowledge-nest eval --build trial-3 --split test --tag trial-3-test
-knowledge-nest report show trial-3
-knowledge-nest report list
-knowledge-nest report compare baseline trial-3
+nest eval
+nest eval --build trial-3 --tag trial-3
+nest eval --build trial-3 --split test --tag trial-3-test
+nest report show trial-3
+nest report list
+nest report compare baseline trial-3
 ```
 
 ### 10.1 実行の規則
@@ -1019,10 +1019,10 @@ knowledge-nest report compare baseline trial-3
 
 ```bash
 # 候補の設定ファイルを作る（本体の設定はそのまま）
-knowledge-nest validate --config candidates/trial-3.yaml --json
-knowledge-nest build --from transform --config candidates/trial-3.yaml --tag trial-3 --json
-knowledge-nest eval --build trial-3 --tag trial-3 --json
-knowledge-nest report compare baseline trial-3 --json
+nest validate --config candidates/trial-3.yaml --json
+nest build --from transform --config candidates/trial-3.yaml --tag trial-3 --json
+nest eval --build trial-3 --tag trial-3 --json
+nest report compare baseline trial-3 --json
 ```
 
 1. 評価レポートを読み、品質や速度の弱点を特定する。
@@ -1038,17 +1038,17 @@ knowledge-nest report compare baseline trial-3 --json
 `candidates/dict.yaml` は基準の設定から作った候補設定とする。相対パスは候補設定の位置に合わせる。`selected.csv` は利用者が選んだ辞書の行、`BASELINE_BUILD_ID` は `report show dict-baseline` に表示されるビルド ID とする。
 
 ```bash
-knowledge-nest eval --tag dict-baseline
-knowledge-nest dictionary suggest --report dict-baseline
-knowledge-nest dictionary add selected.csv --config candidates/dict.yaml
-knowledge-nest build --from index --input BASELINE_BUILD_ID --config candidates/dict.yaml --tag dict
-knowledge-nest eval --build dict --tag dict-eval
-knowledge-nest report compare dict-baseline dict-eval
+nest eval --tag dict-baseline
+nest dictionary suggest --report dict-baseline
+nest dictionary add selected.csv --config candidates/dict.yaml
+nest build --from index --input BASELINE_BUILD_ID --config candidates/dict.yaml --tag dict
+nest eval --build dict --tag dict-eval
+nest report compare dict-baseline dict-eval
 ```
 
 - 辞書の変更は索引段階に反映する。`--from index --input` で、基準ビルドに保存された抽出とチャンク化の結果を再利用する。比較する評価データ、検索設定、評価方法はそろえる。
 - `report compare` では、質問ごとに根拠回収率の変化を示し、回収できるようになった質問、悪化した質問、未回収が残った質問を確認できるようにする。候補ごとに生成した2つの問い合わせでも、基準と試行を `search --build <ref> --json` で指定し、同じ検索件数で根拠を含む結果の `rank` を見比べる。上位に現れなければ「上位 k 件に含まれない」と記録する。
-- 根拠の回収と部分語での検索への影響を確認したうえで、11.3節の手順に沿って `knowledge-nest use dict` で採用する。
+- 根拠の回収と部分語での検索への影響を確認したうえで、11.3節の手順に沿って `nest use dict` で採用する。
 
 ### 11.2 試行は提供内容を変えない
 
@@ -1066,9 +1066,9 @@ knowledge-nest report compare dict-baseline dict-eval
 ### 11.3 採用
 
 ```bash
-knowledge-nest eval --build trial-3 --split test --tag trial-3-test
-knowledge-nest use trial-3
-knowledge-nest status
+nest eval --build trial-3 --split test --tag trial-3-test
+nest use trial-3
+nest status
 ```
 
 - `use` は、試行のビルドと検索設定の組を提供に使う構成として採用し、候補の設定を本体の設定ファイルへ反映する。変更前の設定も記録する。
@@ -1115,9 +1115,9 @@ Knowledge-Nest の中に、エージェント固有の計画処理や会話履�
 ### 12.1 文書が変わったとき
 
 ```bash
-knowledge-nest build --dry-run
-knowledge-nest build
-knowledge-nest status
+nest build --dry-run
+nest build
+nest status
 ```
 
 - 追加、内容の更新、削除を区別して検出する。走査や取得に失敗した場合は不完全な走査として扱い、削除を確定しない。
@@ -1216,7 +1216,7 @@ Wiki は `wiki.write` でページを書き、PARA は `para.write` でノート
 
 #### Wiki の KnowledgeNestfile.yaml
 
-`knowledge-nest init wiki ./wiki`
+`nest init wiki ./wiki`
 
 ```yaml
 init:
@@ -1302,7 +1302,7 @@ serve:
 
 #### PARA の KnowledgeNestfile.yaml
 
-`knowledge-nest init para ./para`
+`nest init para ./para`
 
 ```yaml
 init:
@@ -1391,9 +1391,9 @@ serve:
 ### 14.1 ingress
 
 ```bash
-knowledge-nest ingress ./papers/maintenance-manual-v3.pdf
-knowledge-nest ingress ./inbox/
-knowledge-nest ingress --dry-run ./inbox/
+nest ingress ./papers/maintenance-manual-v3.pdf
+nest ingress ./inbox/
+nest ingress --dry-run ./inbox/
 ```
 
 `ingress` は次の順で進む。
@@ -1415,7 +1415,7 @@ knowledge-nest ingress --dry-run ./inbox/
 ### 14.2 query
 
 ```bash
-knowledge-nest query "フィルターの交換周期は"
+nest query "フィルターの交換周期は"
 ```
 
 - ページやノートを対象に検索し、出典付きの回答を返す。出典は、ページと、そのページが引用する原本の版と範囲まで辿れる。
@@ -1433,8 +1433,8 @@ knowledge-nest query "フィルターの交換周期は"
 | 内容の検査 | ページ同士の矛盾、新しい資料と既存ページの食い違い、同じ事柄の重複記述 | 必要 | 指摘の候補。誤検出がある |
 
 ```bash
-knowledge-nest verify
-knowledge-nest verify --content
+nest verify
+nest verify --content
 ```
 
 - **既定は機械的な検査だけ**: 速くて費用がかからないので、`ingress` のたびに走らせられる。内容の検査は明示的に指定したときだけ実行する。
@@ -1446,8 +1446,8 @@ knowledge-nest verify --content
 ### 14.4 archive
 
 ```bash
-knowledge-nest archive <ページ>
-knowledge-nest archive --restore <ページ>
+nest archive <ページ>
+nest archive --restore <ページ>
 ```
 
 WikiとPARAの両方で使う。アーカイブの意味は次のとおり。
@@ -1604,15 +1604,15 @@ Wiki/PARA側の `serve` は、構築したサイトをブラウザで読み、�
 
 ```bash
 npm install -g knowledge-nest
-knowledge-nest init mcp ./kb --source ~/manuals
+nest init mcp ./kb --source ~/manuals
 cd kb
-knowledge-nest build
-knowledge-nest search "手順"
-knowledge-nest serve
+nest build
+nest search "手順"
+nest serve
 ```
 
 - 構築が終わると、文書数、飛ばしたファイル、次に打つコマンドが表示される。
-- フォルダに未対応のファイルが混ざっていた場合は、一覧と除外方法が表示され、`knowledge-nest build --skip-unsupported` で進められる。
+- フォルダに未対応のファイルが混ざっていた場合は、一覧と除外方法が表示され、`nest build --skip-unsupported` で進められる。
 - エージェントへの登録は、接続設定を出力するコマンドの結果を貼り付ける。
 
 ### 18.2 月曜の朝、文書が更新されている
@@ -1620,9 +1620,9 @@ knowledge-nest serve
 マニュアルが3件改訂され、1件が削除された。
 
 ```bash
-knowledge-nest build --dry-run
-knowledge-nest build
-knowledge-nest status
+nest build --dry-run
+nest build
+nest status
 ```
 
 - 変更のあった4件だけが処理され、索引まで反映される。稼働中のサーバーは再起動なしで新しい索引を使う。
@@ -1633,10 +1633,10 @@ knowledge-nest status
 「交換周期」で検索したのに、該当の節が上位に出なかった。
 
 ```bash
-knowledge-nest search "フィルターの交換周期"
-knowledge-nest eval-data add --question "フィルターの交換周期は" --doc manuals:maintenance.md --quote "フィルターは6か月ごとに交換する。"
-knowledge-nest eval --tag baseline
-knowledge-nest report show baseline
+nest search "フィルターの交換周期"
+nest eval-data add --question "フィルターの交換周期は" --doc manuals:maintenance.md --quote "フィルターは6か月ごとに交換する。"
+nest eval --tag baseline
+nest report show baseline
 ```
 
 - 外れた検索をその場で評価ケースにする。数件たまったところで評価する。
@@ -1649,16 +1649,16 @@ knowledge-nest report show baseline
 
 ```bash
 # エージェントが繰り返す
-knowledge-nest report show baseline --json
-knowledge-nest validate --config candidates/trial-3.yaml --json
-knowledge-nest build --from transform --config candidates/trial-3.yaml --tag trial-3 --json
-knowledge-nest eval --build trial-3 --tag trial-3 --json
-knowledge-nest report compare baseline trial-3 --json
+nest report show baseline --json
+nest validate --config candidates/trial-3.yaml --json
+nest build --from transform --config candidates/trial-3.yaml --tag trial-3 --json
+nest eval --build trial-3 --tag trial-3 --json
+nest report compare baseline trial-3 --json
 
 # 人が確かめて採用する
-knowledge-nest report compare baseline trial-3
-knowledge-nest eval --build trial-3 --split test --tag trial-3-test
-knowledge-nest use trial-3
+nest report compare baseline trial-3
+nest eval --build trial-3 --split test --tag trial-3-test
+nest use trial-3
 ```
 
 - 試行の間、提供内容は変わらない。原文も固定されているので、設定の違いだけが比べられる。
@@ -1667,10 +1667,10 @@ knowledge-nest use trial-3
 ### 18.5 資料からWikiを立ち上げる
 
 ```bash
-knowledge-nest init wiki ./wiki
+nest init wiki ./wiki
 cd wiki
-knowledge-nest ingress ~/manuals/maintenance-manual.pdf
-knowledge-nest serve
+nest ingress ~/manuals/maintenance-manual.pdf
+nest serve
 ```
 
 - 作成時に、目的と範囲を1〜2行で指定する。
@@ -1998,7 +1998,7 @@ knowledge-nest serve
 
 ## 25 標準の保存先とツールの追加
 
-標準の保存先と索引は本体に同梱し、導入した時点で動くようにする。それ以外への切り替えは、後から `knowledge-nest add` でツールを足して行う。
+標準の保存先と索引は本体に同梱し、導入した時点で動くようにする。それ以外への切り替えは、後から `nest add` でツールを足して行う。
 
 ### 25.1 標準の構成
 
@@ -2035,22 +2035,22 @@ knowledge-nest serve
 - **索引はいつでも作り直せる**: 索引はチャンクから再構築できるので、保存先を切り替えてもデータの移行は要らない。
 - **決まった口を通して呼ぶ**: 索引の作成と検索は、内部の決まった口を通す。標準の実装も、その口の1つとして作る。
 
-### 25.4 knowledge-nest add
+### 25.4 nest add
 
 ```bash
-knowledge-nest add --list
-knowledge-nest add hannoy
-knowledge-nest add ocr          # tools に記録された OCR の方式を準備する
-knowledge-nest add oar-ocr
-knowledge-nest add lightonocr
-knowledge-nest remove hannoy
+nest add --list
+nest add hannoy
+nest add ocr          # tools に記録された OCR の方式を準備する
+nest add oar-ocr
+nest add lightonocr
+nest remove hannoy
 ```
 
 - **1つのツールが複数のモジュールを提供する**: 追加すると、そのツールのモジュールが一覧に現れ、設定ファイルで使えるようになる。
 - **設定ファイルに記録する**: 追加したツールの名前と版を設定ファイルに書く。使うものをすべて書き出す方針と同じで、別の環境でも同じ構成を再現できる。
 - **構成の書き換えは利用者が行う**: 追加しただけでは構成は変わらない。該当する区切りに書くべき内容を表示する。
 - **入手元を限定する**: 外部のコードを実行することになるので、最初は公式の一覧にあるものだけを対象にする。版を固定し、取得したものの整合性を検証する。
-- **モデルを使う機能も同じ経路で足す案**: 文字認識、埋め込み、再ランク付けの実行環境も、`knowledge-nest add` で追加する形を候補とする。本体は軽いままで、別の道具を自分で導入する必要もなくなる。
+- **モデルを使う機能も同じ経路で足す案**: 文字認識、埋め込み、再ランク付けの実行環境も、`nest add` で追加する形を候補とする。本体は軽いままで、別の道具を自分で導入する必要もなくなる。
 
 設定ファイルへの記録と、切り替え後の区切りの例を示す。名前とキーは案である。
 
@@ -2071,7 +2071,7 @@ index:
         model: local-embed
 ```
 
-設定を書き換えた後、`knowledge-nest build --from index` を実行すれば、索引だけが作り直される。試行として構築して評価し、標準の索引と比べてから採用することもできる。
+設定を書き換えた後、`nest build --from index` を実行すれば、索引だけが作り直される。試行として構築して評価し、標準の索引と比べてから採用することもできる。
 
 ### 25.5 切り替えの目安
 
@@ -2230,7 +2230,7 @@ struct ChunkLengthArgs {
 
 | コード | 状況 | 添える案内 |
 | --- | --- | --- |
-| `MODULE_UNKNOWN` | 登録表にない名前 | 近い名前の候補。追加ツールのモジュールなら `knowledge-nest add` の案内 |
+| `MODULE_UNKNOWN` | 登録表にない名前 | 近い名前の候補。追加ツールのモジュールなら `nest add` の案内 |
 | `MODULE_WRONG_STAGE` | その区切りでは使えないモジュール | 使える区切り |
 | `ARG_UNKNOWN` | 定義にない引数 | 近い引数名の候補、使える引数の一覧 |
 | `ARG_MISSING` | 既定値のない必須の引数がない | 引数の型と例 |
@@ -2289,7 +2289,7 @@ KnowledgeNestfile.yaml:35  search > retrieval.keyword > top_k
       "received": "chunk.lenght",
       "expected": "登録済みのモジュール名",
       "suggestions": ["chunk.length"],
-      "hint": "knowledge-nest modules list で使えるモジュールを確認できます"
+      "hint": "nest modules list で使えるモジュールを確認できます"
     }
   ]
 }
@@ -2325,7 +2325,7 @@ KnowledgeNestfile.yaml:35  search > retrieval.keyword > top_k
 
 ### 26.10 追加ツールとの関係
 
-`knowledge-nest add` で足したツールも、「説明、生成、実行」の3つを提供する。別のプロセスで動くツールは、この3つをやり取りする変換役を間に置く。エンジンからは、標準のモジュールと区別なく扱える。
+`nest add` で足したツールも、「説明、生成、実行」の3つを提供する。別のプロセスで動くツールは、この3つをやり取りする変換役を間に置く。エンジンからは、標準のモジュールと区別なく扱える。
 
 外部のツールとの技術的な接続方式は、今は決めない。標準のモジュールを数個作ってから、何を外に開くべきかを決める。
 
@@ -2434,12 +2434,12 @@ KnowledgeNestfile.yaml:35  search > retrieval.keyword > top_k
 - **版と範囲の詳細**: 標準の注釈には、原文上の範囲を入れる欄がない。版と範囲は、拡張の欄で返す。どの欄に入れるかと、既存のクライアントが未知の欄を許容するかは、実物で確かめて決める（未決）。
 - **使ったビルドと検索設定**: `metadata` に入れて返す。評価の記録と照らし合わせられる。
 - **根拠が見つからない場合**: 設定に従い、答えられない旨を回答文として返す。注釈は空になる。
-- **コマンドでの表示**: `knowledge-nest ask` は、既定では回答文と出典を読みやすく表示する。`--json` では、共通の外枠の `data` に上の形式を入れる。
+- **コマンドでの表示**: `nest ask` は、既定では回答文と出典を読みやすく表示する。`--json` では、共通の外枠の `data` に上の形式を入れる。
 
 ### 27.3 種別 rag の serve
 
 ```bash
-knowledge-nest serve
+nest serve
 ```
 
 | 口 | 形式 | 内容 |
@@ -2486,7 +2486,7 @@ serve:
 
 種別 `rag` でも、MCPで検索を提供できる。内容は種別 `mcp` の `serve` と同じで、検索の道具が `search` と同じJSONを返す。
 
-- **1つのサーバーで同時に提供する**: `knowledge-nest serve` を1回実行すると、1つのポートでHTTPの2つの口とMCPの口が同時に立ち上がる。MCPはHTTPを使う接続方式で提供する。
+- **1つのサーバーで同時に提供する**: `nest serve` を1回実行すると、1つのポートでHTTPの2つの口とMCPの口が同時に立ち上がる。MCPはHTTPを使う接続方式で提供する。
 - **MCPで提供するのは検索だけ**: `ask` はMCPには出さない。エージェントは自分で回答を作れるので、根拠があれば足りる。
 - **どの口も同じ結果を返す**: 同じプロセスが同じビルドと検索設定を使うので、HTTPの `search`、MCPの検索の道具、`ask` の中の検索が、同じ問い合わせに同じ根拠を返す。文書更新後の索引の切り替えも、3つの口で同時に起きる。
 - **プロセスを起動する方式にも対応する**: 標準入出力でしか接続できないエージェントのために、標準入出力のMCPだけを起動する指定も用意する。種別 `mcp` の既定はこちらである。
@@ -2521,7 +2521,7 @@ serve:
 - **宛先名と送信元を確かめる**: `allowed_hosts` にない宛先名の要求と、`allowed_origins` にない送信元からのブラウザの要求は拒否する。ブラウザで開いた別のページが、自分のPCのサーバーに要求を送る経路を塞ぐためである。
 - **矛盾する指定はエラーにする**: `transport` が `stdio` のときに `host`、`port`、`endpoints`、`access`、`limits` を書いた場合は `ARG_CONFLICT` とする。種別にない口を `endpoints` に書いた場合は `ARG_RANGE` とする。
 - **ポートが使用中なら止まる**: 別のポートに黙って移らず、実行エラー（終了コード1）にする。接続する側の設定がずれるのを防ぐ。
-- **一時的な上書き**: `knowledge-nest serve --host` と `--port` で、その起動に限って値を変えられる。上書き後の値にも上の検査を適用し、実際に使った値を起動時に表示する。
+- **一時的な上書き**: `nest serve --host` と `--port` で、その起動に限って値を変えられる。上書き後の値にも上の検査を適用し、実際に使った値を起動時に表示する。
 - **結果には影響しない**: `serve` の値は、ビルドIDと検索設定IDには含めない。ポートを変えても、再ビルドや再評価は要らない。
 - **書き込みを伴う画面はより慎重に扱う**: 種別 `wiki` と `para` の画面は `ingress` や `archive` の指示を受け付ける。外に開く場合の認証の必須は同じとし、指示を出した接続の情報を作業の記録に残す。
 
@@ -2675,7 +2675,7 @@ Node.js API（`knowledge-nest` パッケージ）は、Rust のエンジンを�
 
 - PDF の文字層の抽出は `pdf_oxide` を標準とする。文字の並べ方や改行の入れ方が pdfjs と違い、抽出結果が変わり得る。抽出結果のキャッシュのキーに PDF だけパーサの名前と版（`pdf_oxide@<版>`）を加えるので、切り替え後の最初の構築では PDF だけが読み直される。版は固定し、上げると PDF を読み直す。
 - 日本語の PDF（横書き、縦書き、表、段組み）で pdfjs と抽出結果を比べ、差のある文書の数と内容、ページ位置の一致、処理時間を記録として `docs/pdf-extraction.md` に残す。比較の結果は、標準を決める条件にはしない。
-- `oar-ocr` は ONNX Runtime とモデルを使う。どちらも本体には含めず、`knowledge-nest add oar-ocr` で準備する（25.4節）。日本語のスキャン文書で認識の精度と速度を測り、標準の方式として十分かを確かめる。
+- `oar-ocr` は ONNX Runtime とモデルを使う。どちらも本体には含めず、`nest add oar-ocr` で準備する（25.4節）。日本語のスキャン文書で認識の精度と速度を測り、標準の方式として十分かを確かめる。
 - `lightonocr` は、今の管理された Python の実行環境とサーバーを、Rust から別プロセスとして起動する。
 
 #### 埋め込みモデルの呼び出し（2b）
@@ -2688,7 +2688,7 @@ Node.js API（`knowledge-nest` パッケージ）は、Rust のエンジンを�
 
 - `index` 段は Rust で実行する。キーワード索引、ベクトル索引（`exact` と hannoy）、埋め込みのキャッシュ（`embeddings` 表）、ビルドの記録（`builds`、`build_runs`、`index_outputs`、`build_search`、`build_config`）を Rust が書く。`--tag` を付けた構築のタグの記録と、採用中のビルドの切り替え（`project`、`serving_generations`）も同じトランザクションで行う。
 - ビルドID、設定ID、`builds` の JSON、`vectors.json`、`vectors.f32`、hannoy のスロットの割り当ては JavaScript の実装と同じにする。既存のビルドはそのまま再利用でき、差分の更新（前のビルドのキーワード索引の写しと hannoy のグラフ）も続けて使える。
-- JavaScript は設定から決まる値だけを渡す。キーワードとベクトルの引数、埋め込みの接続先、検索の設定、ビルドに保存する設定である。構築中に設定ファイルが変わったかの確認、hannoy の版と完全性の検査、試行の上限の計数は、Rust から JavaScript に問い合わせる。hannoy の検査は、道具の管理（`knowledge-nest add`）を Rust に移すときに合わせて移す。
+- JavaScript は設定から決まる値だけを渡す。キーワードとベクトルの引数、埋め込みの接続先、検索の設定、ビルドに保存する設定である。構築中に設定ファイルが変わったかの確認、hannoy の版と完全性の検査、試行の上限の計数は、Rust から JavaScript に問い合わせる。hannoy の検査は、道具の管理（`nest add`）を Rust に移すときに合わせて移す。
 - 単独の `tag` コマンドは 2d で Rust に移した。`use` コマンドは設定ファイルの書き換え（`yaml`、段階6）と評価の状態の確認（段階4）を伴うので、それらとともに移す。
 
 #### コマンドの進行（2d）
@@ -2728,7 +2728,7 @@ Node.js API（`knowledge-nest` パッケージ）は、Rust のエンジンを�
 
 - Rust の口は、ビルドの記録、検索のモジュールの設定、問い合わせ、上書きの指定（`limit`、`budget_chars`、`source_ids`）を受け取り、27.1節の返却形式を返す。`search` コマンド、`serve`、評価（`eval`）は同じ口を使う。評価そのものは段階4で移すが、検索は 3a から Rust で動く。
 - 埋め込みモデルの接続先、並べ替えのモデルの設定は、段階2と同じく JavaScript が `models` から解決して渡す。`search_config_id` の計算に入る値も同じものを使う。
-- `hannoy.search` は、索引の道具（`knowledge-nest add hannoy`）を Rust から別プロセスとして呼ぶ。いまと同じく検索ごとに1回起動し、道具の検査（版と完全性）も同じ規則で行う。
+- `hannoy.search` は、索引の道具（`nest add hannoy`）を Rust から別プロセスとして呼ぶ。いまと同じく検索ごとに1回起動し、道具の検査（版と完全性）も同じ規則で行う。
 - `rerank.model` は、2a の JavaScript のパーサと同じく、番号を付けた要求で JavaScript に渡す。候補の本文は Rust が読んで渡す。
 - 試行の上限（モデルへの要求の数と送信量）は、段階2と同じく送る前に JavaScript に問い合わせて数える。
 - 検索は開いた索引の口（Node.js API の `searchProject`）で行う。`vectors.json` は開いた索引ごとに一度だけ読み、索引を閉じると捨てる。`search_config_id` も Rust の計算（`KnowledgeNest.searchConfigId`）を `status`、`tag`、`use` が使う。

@@ -161,9 +161,9 @@ export interface LoadCorpusRequest {
   ocrVersion: string;
   /** `oar-ocr`, run in Rust, or `lightonocr` (the default), run as a separate process. */
   ocrTool?: 'oar-ocr' | 'lightonocr';
-  /** The folder `knowledge-nest add oar-ocr` prepared. */
+  /** The folder `nest add oar-ocr` prepared. */
   ocrHome?: string;
-  /** The runtime `knowledge-nest add lightonocr` prepared. */
+  /** The runtime `nest add lightonocr` prepared. */
   lighton?: LightonRuntime;
   /** The project root, for `{root}` in loader.command arguments. */
   root: string;
@@ -335,7 +335,7 @@ export type BuildCommandOutcome =
   | { status: 'done'; output: Record<string, unknown>; warnings: { code: string; message: string }[] }
   | { status: 'failed'; error: { code?: string; message: string; exitCode?: number; data?: unknown } };
 
-/** `knowledge-nest tag`: names a build (the serving build when `reference` is absent). */
+/** `nest tag`: names a build (the serving build when `reference` is absent). */
 export interface TagBuildRequest {
   state: string;
   name: string;
@@ -572,7 +572,7 @@ export type ParsedConfig =
   | { config: unknown; lines: [(string | number)[], number][]; syntaxError?: undefined }
   | { syntaxError: { line: number | null; message: string }; config?: undefined; lines?: undefined };
 
-/** How knowledge-nest modules describe prints one module argument. */
+/** How nest modules describe prints one module argument. */
 export interface ModuleArgInfo {
   type?: string;
   default?: unknown;

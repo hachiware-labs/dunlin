@@ -66,15 +66,15 @@ test('the skill names only commands and options that exist', async () => {
   let seen = 0;
   for (const file of await markdown(skill)) {
     for (const span of code(await readFile(file, 'utf8'))) {
-      for (const [, command, rest] of span.matchAll(/(?<![./\w-])knowledge-nest ([a-z][a-z-]*)((?:(?!knowledge-nest ).)*)/g)) {
+      for (const [, command, rest] of span.matchAll(/(?<![./\w-])nest ([a-z][a-z-]*)((?:(?!(?<![./\w-])nest ).)*)/g)) {
         seen += 1;
         if (!commands.has(command)) {
-          wrong.push(`${file}: knowledge-nest ${command} is not a command`);
+          wrong.push(`${file}: nest ${command} is not a command`);
           continue;
         }
         for (const [option] of rest.matchAll(/--[a-z][a-z-]*/g)) {
           if (!everywhere.has(option) && !has(command, option)) {
-            wrong.push(`${file}: knowledge-nest ${command} has no ${option}`);
+            wrong.push(`${file}: nest ${command} has no ${option}`);
           }
         }
       }

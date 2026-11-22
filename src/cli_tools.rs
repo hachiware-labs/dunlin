@@ -159,7 +159,7 @@ fn hannoy_configuration() -> ConfigValue {
     ])
 }
 
-/// `listedTools()`: the tools that `knowledge-nest add --list` shows.
+/// `listedTools()`: the tools that `nest add --list` shows.
 pub fn listed_tools() -> ConfigValue {
     ConfigValue::Array(
         CATALOG
@@ -297,7 +297,7 @@ fn verified(
         Failure::Missing => coded(
             3,
             "TOOL_REQUIRED",
-            "The hannoy binary is missing. Run knowledge-nest add hannoy.",
+            "The hannoy binary is missing. Run nest add hannoy.",
         ),
         Failure::Other => coded(
             2,
@@ -1022,7 +1022,7 @@ fn setup_managed_ocr(env: &CliEnv) -> Result<(), CliError> {
     let platform = platform_key();
     if uv_asset().is_none() {
         return Err(CliError::plain(format!(
-            "Managed GPU OCR is unavailable on {platform}. Use oar-ocr instead: knowledge-nest add oar-ocr."
+            "Managed GPU OCR is unavailable on {platform}. Use oar-ocr instead: nest add oar-ocr."
         )));
     }
     let root = data_root(env)?;
@@ -1315,7 +1315,7 @@ pub fn change_tool(
         return Err(coded(
             2,
             "TOOL_UNKNOWN",
-            "Use knowledge-nest add --list to see the available tools.",
+            "Use nest add --list to see the available tools.",
         ));
     };
     if !remove
@@ -1327,7 +1327,7 @@ pub fn change_tool(
         return Err(coded(
             2,
             "TOOL_CONFLICT",
-            format!("A project uses one OCR tool. Run knowledge-nest remove {recorded} first."),
+            format!("A project uses one OCR tool. Run nest remove {recorded} first."),
         ));
     }
     let kind = project
@@ -2032,7 +2032,7 @@ pub fn write_template(config: &ConfigValue) -> String {
         for (stage, example) in [
             (
                 "source",
-                "Additional parser: loader.ocr (requires knowledge-nest add ocr).",
+                "Additional parser: loader.ocr (requires nest add ocr).",
             ),
             (
                 "transform",

@@ -1,4 +1,4 @@
-//! `knowledge-nest dictionary` (spec 28.13 step 6c): dictionary candidates from the missed evidence of an
+//! `nest dictionary` (spec 28.13 step 6c): dictionary candidates from the missed evidence of an
 //! evaluation report, and adding a user dictionary to a candidate configuration, as
 //! `project-dictionary.mjs` did them.
 
@@ -612,7 +612,7 @@ fn suggest_dictionary(
     if legacy {
         output.push((
             "hint",
-            text("Run knowledge-nest eval again for per-evidence diagnostics."),
+            text("Run nest eval again for per-evidence diagnostics."),
         ));
     }
     Ok(object(output))

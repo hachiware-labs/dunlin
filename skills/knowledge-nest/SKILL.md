@@ -18,15 +18,15 @@ Knowledge-Nest changes between versions and a project can be written in one of t
 before you act. These three calls cost almost nothing and prevent most mistakes.
 
 ```sh
-knowledge-nest --help                 # the commands this version has
-knowledge-nest <command> --help       # the arguments of one command
-knowledge-nest modules list           # the modules a configuration can name
+nest --help                 # the commands this version has
+nest <command> --help       # the arguments of one command
+nest modules list           # the modules a configuration can name
 ```
 
 A command or option that `--help` does not show does not exist in the installed version.
 Do not use it and do not guess a replacement: say that the installed version lacks it.
 
-`knowledge-nest build --help`, `knowledge-nest eval-data --help` and `knowledge-nest optimize --help` also show the
+`nest build --help`, `nest eval-data --help` and `nest optimize --help` also show the
 file formats the installed version takes. Where they differ from this skill, they are right.
 
 Then read the project's `KnowledgeNestfile.yaml` and decide which style it is.
@@ -35,7 +35,7 @@ Then read the project's `KnowledgeNestfile.yaml` and decide which style it is.
 | --- | --- | --- |
 | `extract:`, `transform:` and `index:` are **lists** of `- module.name: { args }` | staged | `references/staged-config.md` |
 | `source:`, `transform:`, `index:` each hold `modules:` with `- use: module.name` | classic | `references/classic.md` |
-| There is no `KnowledgeNestfile.yaml` | none yet | ask what the user wants to build, then `references/classic.md` for `knowledge-nest init`, or `references/staged-config.md` to write a staged file by hand |
+| There is no `KnowledgeNestfile.yaml` | none yet | ask what the user wants to build, then `references/classic.md` for `nest init`, or `references/staged-config.md` to write a staged file by hand |
 
 The style matters because `build`, `eval`, `search` and `eval-data` exist in both and behave
 differently: Knowledge-Nest picks the behaviour from the configuration file it reads. `list`,
@@ -74,7 +74,7 @@ trying things. Run `test` once, at the end, on the setting you chose. A setting 
 
 **Building is safe; serving is the user's decision.** Building, evaluating and optimizing
 only add versions to the project's store: nothing is overwritten and what is served does
-not move. `knowledge-nest release`, `knowledge-nest build --release` and (classic) `knowledge-nest use` change
+not move. `nest release`, `nest build --release` and (classic) `nest use` change
 what real users of the search get. Recommend, show the numbers, and release only when the
 user says so.
 
@@ -104,10 +104,10 @@ the user the file, with the two or three findings that matter in your message.
   belongs to the classic style. The staged way to do the same thing is in
   `references/workflow.md`.
 - **Recall is 0 or far lower than expected.** Before blaming the settings, check the
-  evaluation data: `source` and `document` of each case must match what `knowledge-nest build`
+  evaluation data: `source` and `document` of each case must match what `nest build`
   printed, and `quote` must be text that appears in the document exactly.
 - **The numbers did not change after documents were added.** An optimization uses the
-  documents as they were at the last build. Run `knowledge-nest build` first.
+  documents as they were at the last build. Run `nest build` first.
 - **`The index would be made at ... Windows takes at most ...`.** The project sits in a
   folder whose path is too long for Windows. Nothing is wrong with the configuration: the
   project has to move to a shorter path. Tell the user; do not work around it.

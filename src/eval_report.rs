@@ -613,7 +613,7 @@ pub fn evaluation_status(request: &StatusRequest) -> Result<ConfigValue, StageEr
 
 /// `{ report, data }` for dictionary suggestions.
 pub fn dictionary_evaluation(request: &DictionaryRequest) -> Result<ConfigValue, StageError> {
-    let hint = "Add a development evaluation question with knowledge-nest eval-data add --question <text> --doc <path> --quote <text>.";
+    let hint = "Add a development evaluation question with nest eval-data add --question <text> --doc <path> --quote <text>.";
     let connection = open_state(&request.state, true)?;
     let (report, data) = match &request.report {
         Some(reference) => {
@@ -644,7 +644,7 @@ pub fn dictionary_evaluation(request: &DictionaryRequest) -> Result<ConfigValue,
             )?
             .into_iter()
             .next()
-            .ok_or_else(|| report_required("Run knowledge-nest eval to create a development report first."))?;
+            .ok_or_else(|| report_required("Run nest eval to create a development report first."))?;
             (report, data)
         }
     };
@@ -671,7 +671,7 @@ pub fn dictionary_misses(
     let map = parse(&map.ok_or_else(|| {
         StageError::coded(
             "MAP_REQUIRED",
-            "Run knowledge-nest eval to record the evidence positions first.",
+            "Run nest eval to record the evidence positions first.",
             3,
         )
     })?)?;

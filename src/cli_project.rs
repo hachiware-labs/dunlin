@@ -724,7 +724,7 @@ pub fn validate_wiki(config: &ConfigValue, file: &str, parsed: &Parsed) -> Check
                 key("ocr"),
             ],
             text("The ocr tool"),
-            "Run knowledge-nest add ocr.",
+            "Run nest add ocr.",
         );
     }
     let content = sequence(
@@ -897,7 +897,7 @@ fn earlier_name(folder: &str) -> String {
     let mut said = String::from(" This folder holds a project of the earlier name Dunlin.");
     if config {
         said.push_str(
-            " Rename Dunlinfile.yaml to KnowledgeNestfile.yaml and run knowledge-nest build to build it again.",
+            " Rename Dunlinfile.yaml to KnowledgeNestfile.yaml and run nest build to build it again.",
         );
     }
     if data {
@@ -921,7 +921,7 @@ pub fn load_project(
             3,
             "PROJECT_REQUIRED",
             format!(
-                "No KnowledgeNestfile.yaml found. Run knowledge-nest init <mcp|rag|wiki|para> <directory>.{}",
+                "No KnowledgeNestfile.yaml found. Run nest init <mcp|rag|wiki|para> <directory>.{}",
                 earlier_name(&folder)
             ),
         ));
@@ -985,7 +985,7 @@ pub fn load_project(
     ]
     .contains(&command);
     if !PROJECT_TYPES.contains(&kind.as_str()) {
-        let message = "Expected init.type in the KnowledgeNestfile. Generate a new standard file with knowledge-nest init.";
+        let message = "Expected init.type in the KnowledgeNestfile. Generate a new standard file with nest init.";
         return Err(
             CliError::new(2, "SECTION_MISSING", message).with_diagnostics(vec![object(vec![
                 ("code", text("SECTION_MISSING")),
@@ -1120,9 +1120,7 @@ pub fn load_project(
         return Err(CliError::new(
             3,
             "STATE_REQUIRED",
-            format!(
-                "Project state is missing. Initialize a project with knowledge-nest init {kind}."
-            ),
+            format!("Project state is missing. Initialize a project with nest init {kind}."),
         ));
     }
     if is_search_project(&kind)
@@ -1361,7 +1359,7 @@ pub fn current_build(
             3,
             "BUILD_NOT_FOUND",
             format!(
-                "Unknown build: {reference}. Pass a build tag or ID; knowledge-nest status shows the current build."
+                "Unknown build: {reference}. Pass a build tag or ID; nest status shows the current build."
             ),
         ));
     }
@@ -1369,7 +1367,7 @@ pub fn current_build(
         return Err(CliError::new(
             3,
             "BUILD_REQUIRED",
-            "No searchable build. Run knowledge-nest build first.",
+            "No searchable build. Run nest build first.",
         ));
     }
     Ok(None)
@@ -1388,7 +1386,7 @@ pub fn open_build(paths: &Paths, build: &ConfigValue) -> Result<crate::Knowledge
         return Err(CliError::new(
             3,
             "BUILD_REQUIRED",
-            "The build index is missing. Run knowledge-nest build first.",
+            "The build index is missing. Run nest build first.",
         ));
     }
     let keyword = build.get("keyword");

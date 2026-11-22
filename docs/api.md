@@ -164,7 +164,7 @@ console.log(result.stopReason, result.issues);
 
 ## Wiki と PARA
 
-Wiki と PARA のページは、KnowledgeNestfile のプロジェクト（`knowledge-nest init wiki`、`knowledge-nest init para`）で書きます。資料の取り込み、質問、検査、アーカイブ、内容への指示、画面は CLI のコマンドで行います。ページはモデルが書き、Knowledge-Nest が引用を原本の版と範囲に照らして確かめてから保存します。 [Wiki・PARA の操作](wiki.md)
+Wiki と PARA のページは、KnowledgeNestfile のプロジェクト（`nest init wiki`、`nest init para`）で書きます。資料の取り込み、質問、検査、アーカイブ、内容への指示、画面は CLI のコマンドで行います。ページはモデルが書き、Knowledge-Nest が引用を原本の版と範囲に照らして確かめてから保存します。 [Wiki・PARA の操作](wiki.md)
 
 Node.js からは、CLI と同じ Rust の実装を `KnowledgeNest.wiki(request)` と `KnowledgeNest.wikiServe(request)` で呼べます。`request` には、プロジェクトの場所、検証済みの設定（`about`、`plan`、`pages`）、解決済みのモデル、コマンドと引数を渡します。形は `WikiCommandRequest` 型のとおりで、CLI もこの形で呼びます。`KnowledgeNest.wiki` は `{ status: 'done', output, warnings }` か `{ status: 'failed', error }` を返します。`output` は CLI の `--json` の `data` と同じです。
 
@@ -192,4 +192,4 @@ const server = await kb.serveMcp({ transport: 'stdio' });
 
 ## Node.js から CLI を実行する
 
-`knowledge-nest` コマンドの入口は、`KnowledgeNest.runCli(args, options)` を呼ぶだけの起動役です。コマンドの解釈、実行、表示はすべて Rust で行います。`args` には `process.argv.slice(2)` と同じ形の引数を渡します。結果は標準出力と標準エラーに書かれ、戻り値は終了コードです。`options` には、`serve --print-config` が示す `execPath` と `cli`、パッケージのフォルダ（`package`）、ホームディレクトリ（`home`）を渡します。`serving(active)` はサーバーの開始と終了を知らせるので、その間だけ SIGINT と SIGTERM で `signal` を止めます。コマンドと使用法の一覧は `KnowledgeNest.cliCommands()` で読めます。
+`nest` コマンドの入口は、`KnowledgeNest.runCli(args, options)` を呼ぶだけの起動役です。コマンドの解釈、実行、表示はすべて Rust で行います。`args` には `process.argv.slice(2)` と同じ形の引数を渡します。結果は標準出力と標準エラーに書かれ、戻り値は終了コードです。`options` には、`serve --print-config` が示す `execPath` と `cli`、パッケージのフォルダ（`package`）、ホームディレクトリ（`home`）を渡します。`serving(active)` はサーバーの開始と終了を知らせるので、その間だけ SIGINT と SIGTERM で `signal` を止めます。コマンドと使用法の一覧は `KnowledgeNest.cliCommands()` で読めます。

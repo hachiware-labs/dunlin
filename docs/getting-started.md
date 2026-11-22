@@ -2,119 +2,34 @@
 
 [English](getting-started.en.md)
 
-この文書は、Knowledge-Nest を初めて使う人のための道案内です。まず、手元の資料を Claude などのエージェントが引けるようにします。モデルの準備は要りません。そのあと、回答する API、AI が書く Wiki、検索を数字で良くする新しいコマンドへと進みます。
+Knowledge-Nest を初めて使う人のための入口です。作りたいものを1つ選び、その入門に進んでください。どれも、手元の資料フォルダ1つから始められます。
 
-作りたいものが決まっていれば、その章から読んでも構いません。どれを作るか迷うときは、README の [どんな時に、どの文書データベースを作るか](../README.md#どんな時にどの文書データベースを作るか) を先に見てください。
+## 1 どれから始めるか
 
-| 作りたいもの | 章 |
-|---|---|
-| エージェント用の検索（MCP） | [2](#2-エージェントに資料を引かせる)〜[4](#4-何ができたのか) |
-| 出典付きで答える API（RAG） | [5](#5-アプリに答えを返すrag) |
-| AI が書く Wiki、PARA のノート | [6](#6-ai-に-wiki-を書かせるwikipara) |
-| 検索を数字で良くする | [7](#7-次の段階版として残し数字で測る新しいコマンド) |
+| 作りたいもの | こんなときに | モデル | 入門 |
+|---|---|---|---|
+| **MCP**：エージェント用の検索 | Claude などに、資料を引いて答えさせたい | 要らない | [MCP 入門](start-mcp.md) |
+| **RAG**：出典付きで答える API | 自分のアプリやチャットボットで、答えを受け取りたい | 回答に要る | [RAG 入門](start-rag.md) |
+| **Wiki**：AI が書く知識のページ | 資料を、人もエージェントも読めるページにまとめたい | 執筆に要る | [Wiki 入門](start-wiki.md) |
+| **PARA**：AI が整理するノート | 溜まった資料やメモを、仕事の進め方に沿って整理したい | 執筆に要る | [PARA 入門](start-para.md) |
 
-## 1 用意するもの
+- **迷ったら MCP から。** モデルの準備が要らず、数分で試せます。
+- **検索型と蓄積型。** MCP と RAG は、質問のたびに資料を探します。Wiki と PARA は、AI が先に資料を読んで、ページやノートにまとめておきます。
+- **どれも出典付き。** 検索結果も、答えも、ページの文も、元の資料の場所を指します。
 
-- Knowledge-Nest のインストール。いまはソースからのビルドです。手順は [README のインストール](../README.md#インストール) にあります。`knowledge-nest --help` が表示されれば準備完了です。
-- 資料を入れたフォルダ。この文書では、リポジトリに同梱の [examples/manuals](../examples/manuals/maintenance.md) を使います。中身は、ポンプの保全手順を書いた短い Markdown です。
+もっと詳しい選び方は、README の [どんな時に、どの文書データベースを作るか](../README.md#どんな時にどの文書データベースを作るか) にあります。
 
-コマンドは、リポジトリのルートから始めます。
+## 2 用意するもの
 
-## 2 エージェントに資料を引かせる
+- Knowledge-Nest のインストール。いまはソースからのビルドです。手順は [README のインストール](../README.md#インストール) にあります。`nest --help` が表示されれば準備完了です。
+- 資料を入れたフォルダ。手元にない場合は、リポジトリに同梱の [examples/manuals](../examples/manuals/maintenance.md) を使えます。ポンプの保全手順を書いた短い Markdown です。
+- RAG、Wiki、PARA では、モデルが要ります。入門では、手元で動く Ollama の `qwen3:4b` を使います。
 
-```sh
-knowledge-nest init mcp ./kb --source ./examples/manuals
-cd kb
-knowledge-nest build
-knowledge-nest search "ポンプの点検はいつ実施しますか"
-```
+4つの形をサンプル資料で一度に試すなら [クイックスタート](quickstart.md) もあります。
 
-検索結果に「ポンプの点検は毎月最初の営業日に行う。」と、その出典が出れば成功です。
+## 3 検索を数字で良くする（新しいコマンド）
 
-| コマンド | 起きること |
-|---|---|
-| `init mcp ./kb --source ...` | `./kb` にプロジェクトを作る。設定は `KnowledgeNestfile.yaml` に書き出される |
-| `build` | 資料を読み、検索の単位（チャンク）に分け、キーワード索引を作る |
-| `search` | 日本語の文で検索し、出典付きで結果を出す |
-
-次に、エージェントとつなぎます。
-
-```sh
-knowledge-nest serve --print-config
-```
-
-表示された `mcpServers` の項目を、MCP クライアント（Claude Desktop の `claude_desktop_config.json`、Claude Code の `.mcp.json` など）の設定に貼ります。クライアントを起動し直して、聞いてみます。
-
-```text
-あなた   ポンプの点検って、いつやるんだっけ？
-Claude   毎月最初の営業日です。点検の前にポンプを止め、電源が切れていることを確かめます。
-         出典: maintenance.md 3行目、5行目
-```
-
-（やり取りはイメージです。言い回しはエージェントによって変わります。）
-
-エージェントは、Knowledge-Nest の `knowledge.search` で資料を探し、`knowledge.read` で原文を読みます。答えを書くのはエージェント自身のモデルなので、Knowledge-Nest 側にモデルは要りません。
-
-`build` が「未対応のファイルがある」と止まったときは、一覧を確かめます。飛ばしてよければ `knowledge-nest build --skip-unsupported` で進めます。
-
-## 3 資料を更新する
-
-資料を足したり直したりしたら、`knowledge-nest build` をもう一度実行します。
-
-- 変わった文書だけが処理されます。
-- 動いている `serve` は、次の質問から新しい索引を使います。止める必要はありません。
-- 何が変わるかを先に見たいときは `knowledge-nest build --dry-run` です。
-
-## 4 何ができたのか
-
-`kb` の `KnowledgeNestfile.yaml` には、Knowledge-Nest が何をどう処理するかが書かれています。
-
-```text
-資料のフォルダ → 抽出したテキスト → チャンク → 索引 → 検索
-   (source)        (source)       (transform)  (index)  (search)
-```
-
-チャンクの大きさを変えたい、PDF を読みたい、といったときは、この設定を書き換えます。`knowledge-nest validate` で実行前に確かめられ、`knowledge-nest modules list` で使える部品が分かります。 [KnowledgeNestfile の設定と既定値](config.md)
-
-## 5 アプリに答えを返す（RAG）
-
-MCP では答えを書くのはエージェントでした。RAG では、Knowledge-Nest がモデルを呼んで、出典付きの答えまで書きます。違いの詳しい説明は [README](../README.md#mcp-と-rag-は何が違うのか) にあります。
-
-ここでは、起動済みの Ollama に `qwen3:4b` を用意します。リポジトリのルートから始めます。
-
-```sh
-knowledge-nest init rag ./rag --source ./examples/manuals --llm-provider ollama --llm-model qwen3:4b
-cd rag
-knowledge-nest build
-knowledge-nest ask "ポンプの点検はいつ実施しますか"
-knowledge-nest serve
-```
-
-`ask` は、答えに出典の番号を付け、出典ごとにファイルと行を示します。`serve` は `127.0.0.1:4318` で、答え（`/v1/responses`）、検索（`/v1/search`）、MCP（`/mcp`）を提供します。OpenAI の SDK なら、`baseURL` を `http://127.0.0.1:4318/v1` にするだけで呼べます。 [MCP と RAG](mcp.md)
-
-## 6 AI に Wiki を書かせる（Wiki・PARA）
-
-Wiki では、AI が資料を読み、引用付きのページを書き溜めます。PARA は同じ操作で、Projects・Areas・Resources・Archives の4分類にノートを整理します。モデルは RAG と同じものを使います。`serve` を動かしている場合は止めてから、リポジトリのルートで始めます。
-
-```sh
-knowledge-nest init wiki ./wiki --purpose "ポンプの保全手順をまとめる" --llm-provider ollama --llm-model qwen3:4b
-cd wiki
-knowledge-nest ingress ../examples/manuals
-knowledge-nest serve
-```
-
-ブラウザで `http://127.0.0.1:4319` を開くと、左に資料とページの一覧、中央に本文と出典、右に質問と操作が並びます。PARA は `init para ./para` に読み替えます。
-
-- ページの文には、原文への引用が付きます。引用が資料と一字一句一致しない文は保存されません。
-- 原本は書き換えられません。変更は作業ごとに記録され、`knowledge-nest undo <作業ID>` で取り消せます。
-- `knowledge-nest verify` で引用とリンクを、`knowledge-nest verify --content` でページ同士の食い違いを確かめます。
-- 質問は `knowledge-nest query`、ページの修正は `knowledge-nest instruct`、引用の確認は `knowledge-nest cite` です。
-
-[Wiki・PARA の使い方](wiki.md)
-
-## 7 次の段階：版として残し、数字で測る（新しいコマンド）
-
-ここからは、開発中の新しいコマンドです。作ったデータを版として残し、検索がどれだけ答えを拾えているかを数字で測ります。いまはテキストと Markdown、キーワード検索に対応していて、`serve` はまだこの索引を提供しません。
+MCP と RAG の検索を、数字で測って良くするための、開発中の新しいコマンドです。作ったデータを版として残し、検索がどれだけ答えを拾えているかを数字で測ります。いまはテキストと Markdown、キーワード検索に対応していて、`serve` はまだこの索引を提供しません。
 
 ### 設定を書いて、構築する
 
@@ -148,9 +63,9 @@ search:
 ```
 
 ```sh
-knowledge-nest build
-knowledge-nest search "ポンプの点検はいつ実施しますか"
-knowledge-nest list
+nest build
+nest search "ポンプの点検はいつ実施しますか"
+nest list
 ```
 
 `build` は、動いた段階と文書の増減を表示します。もう一度 `build` すると、何も変わっていなければ `Nothing ran: every result was there already.` と出て、何も作り直しません。`list` は、名前の付いた版（文書、チャンク、索引、評価データ、評価の結果）を一覧します。
@@ -187,8 +102,8 @@ eval:
 ```
 
 ```sh
-knowledge-nest eval-data import cases.json
-knowledge-nest eval
+nest eval-data import cases.json
+nest eval
 ```
 
 ```text
@@ -197,26 +112,11 @@ Recall: 1.000 (1 of 1 cases)
 
 `Recall`（回収率）は、正解の引用が検索結果に入っていた質問の割合です。質問を増やし、設定を変えて測り直し、比べて選ぶ。この続きは [使いこなす](guide.md) にあります。
 
-## 8 うまくいかないとき
-
-失敗したコマンドに `--json` を付けると、`errors` の `code` と `message` が分かります。
-
-| 症状 | 対処 |
-|---|---|
-| `knowledge-nest` が見つからない | `npm link` を実行し、`npm prefix -g` の場所を `PATH` に加える |
-| `PROJECT_REQUIRED` | `KnowledgeNestfile.yaml` のあるディレクトリで実行するか、`--project <directory>` を付ける |
-| `SOURCE_MISSING` | `--source` や `source.filesystem` の `path` が、あるフォルダを指しているか確かめる |
-| `MODEL_REQUIRED`、モデルにつながらない | Ollama が起動しているか、モデルを取得済みかを確かめる |
-| `... is not on the new store yet.` | その部品は新しいコマンドではまだ使えない。`init` が作る形の設定で使う（[付録](#付録-2つの設定の形)） |
-| `No loader takes N files` | 新しいコマンドが読むのは `.md`、`.markdown`、`.txt` だけ |
-
-そのほかは [困ったときは](troubleshooting.md) にあります。
-
-## 9 次に読むもの
+## 4 次に読むもの
 
 - 検索を数字で良くする：[使いこなす](guide.md)
-- 4種別をサンプルで順に試す：[クイックスタート](quickstart.md)
 - コマンドの一覧：[CLI リファレンス](cli.md)
+- 困ったとき：[困ったときは](troubleshooting.md)
 
 ## 付録 2つの設定の形
 
@@ -224,8 +124,8 @@ Recall: 1.000 (1 of 1 cases)
 
 | 設定ファイルの形 | 例 | 仕組み | 使えるコマンド |
 |---|---|---|---|
-| `modules:` と `use:` を使う形 | `knowledge-nest init mcp`・`init rag` が作るもの（2〜5章） | これまでのビルド | `build`、`search`、`eval`、`eval-data`、`source`、`transform`、`index`、`status`、`use`、`tag`、`serve`、`ask` |
-| 段階ごとの並び（`extract:` の下に `- source.filesystem: ...`） | 7章の設定 | 版の保管（`.knowledge-nest/store`） | `build`、`search`、`eval`、`eval-data import`、`list`、`results`、`optimize`、`release` |
+| `modules:` と `use:` を使う形 | `nest init mcp`・`init rag` が作るもの（MCP 入門、RAG 入門） | これまでのビルド | `build`、`search`、`eval`、`eval-data`、`source`、`transform`、`index`、`status`、`use`、`tag`、`serve`、`ask` |
+| 段階ごとの並び（`extract:` の下に `- source.filesystem: ...`） | 3章の設定 | 版の保管（`.knowledge-nest/store`） | `build`、`search`、`eval`、`eval-data import`、`list`、`results`、`optimize`、`release` |
 
 | できること | `init` が作る形 | 段階ごとの並び |
 |---|---|---|

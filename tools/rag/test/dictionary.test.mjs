@@ -47,7 +47,7 @@ test('diagnoses evaluation misses and measures whole and partial queries against
     ['大学', 'docs:lecture.txt', '東京大学で講演します。'],
     ['点検', 'docs:maintenance.txt', '点検は毎月実施します。'],
   ]) await json('eval-data', 'add', '--question', question, '--doc', doc, '--quote', expected);
-  await rejects(json('dictionary', 'suggest'), 'REPORT_REQUIRED', 'knowledge-nest eval');
+  await rejects(json('dictionary', 'suggest'), 'REPORT_REQUIRED', 'nest eval');
 
   const config = parse(await readFile(configPath, 'utf8'));
   config.eval.modules.find(({ use }) => use === 'metric.evidence_recall').with.at = ['context', 1];

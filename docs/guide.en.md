@@ -6,7 +6,7 @@
 
 You cannot tell how good search is by looking. A setting that helps one question may break another. In Knowledge-Nest, once you register pairs of a question and its answer, every change of setting tells you how many of the questions found their answer. And since only what you changed, and what follows it, is rebuilt, trying is fast, so you can compare as many variations as you like.
 
-It assumes `build` and `eval` work, as in [section 7 of Getting started](getting-started.en.md#7-next-keep-versions-and-measure-by-numbers-new-commands).
+It assumes `build` and `eval` work, as in [section 3 of Getting started](getting-started.en.md#3-improve-search-by-numbers-new-commands).
 
 > The new commands in this guide support text and Markdown (`.md`, `.markdown`, `.txt`), keyword search, and evidence recall for now. Vector search, user dictionaries, PDF and Office loading, `serve`, and more use the form of configuration that `init` writes (see [9 What still uses the earlier flow](#9-what-still-uses-the-earlier-flow)).
 
@@ -36,8 +36,8 @@ Evaluation data is a set of questions, each with the quote that answers it. Writ
 ```
 
 ```sh
-knowledge-nest eval-data import cases.json
-knowledge-nest eval-data import cases.json --tag v2
+nest eval-data import cases.json
+nest eval-data import cases.json --tag v2
 ```
 
 - `source` and `document` say where the quote is. `source` is the `id` of `source.filesystem` (the folder name if omitted); `document` is the path inside that folder.
@@ -58,8 +58,8 @@ eval:
 ```
 
 ```sh
-knowledge-nest eval
-knowledge-nest results
+nest eval
+nest results
 ```
 
 `eval` builds what is missing, measures, and prints the recall:
@@ -68,10 +68,10 @@ knowledge-nest results
 Recall: 0.667 (2 of 3 cases)
 ```
 
-`knowledge-nest results` lists the named evaluation results, best recall first. Give it a name to see each case and where its evidence was found:
+`nest results` lists the named evaluation results, best recall first. Give it a name to see each case and where its evidence was found:
 
 ```sh
-knowledge-nest results trial-400
+nest results trial-400
 ```
 
 ```text
@@ -83,7 +83,7 @@ missed    filter       フィルターの交換
 ```
 
 - `Found at` is the rank at which the quote appeared in the result. `missed` means it did not appear; those cases are listed first.
-- Reproduce a miss with `knowledge-nest search "<question>"` and look for the cause.
+- Reproduce a miss with `nest search "<question>"` and look for the cause.
 
 | How it misses | What to try |
 |---|---|
@@ -117,12 +117,12 @@ eval:
 ```
 
 ```sh
-knowledge-nest eval candidate.yaml
-knowledge-nest results
+nest eval candidate.yaml
+nest results
 ```
 
 - `from: docs` does not scan the folder. It uses the version of documents named `docs`, so both runs are measured on the same documents.
-- The result is kept as `trial-400`. `knowledge-nest results` lists it next to the baseline's result, so you can compare recall.
+- The result is kept as `trial-400`. `nest results` lists it next to the baseline's result, so you can compare recall.
 - A comparison is meaningful only if the evaluation data and method are the same. Keep `data` and `split` of `eval.evidence` identical.
 
 ## 5 Give chunks some context
@@ -178,7 +178,7 @@ optimize:
 ```
 
 ```sh
-knowledge-nest optimize tune.yaml
+nest optimize tune.yaml
 ```
 
 Progress is printed one line at a time (an example; numbers and names depend on the instruction):
@@ -210,9 +210,9 @@ Trial  Recall  To base  Ran                  Time   What
 To look at results again:
 
 ```sh
-knowledge-nest results            # evaluation results, and the optimizations that were run
-knowledge-nest results tune       # the table of the optimization called tune
-knowledge-nest results tune/010   # the cases of one trial
+nest results            # evaluation results, and the optimizations that were run
+nest results tune       # the table of the optimization called tune
+nest results tune/010   # the cases of one trial
 ```
 
 Without `--name`, an optimization is called after the instruction file (without its extension).
@@ -220,7 +220,7 @@ Without `--name`, an optimization is called after the instruction file (without 
 Each trial's configuration file is written to `.knowledge-nest/trials/<name>/<number>.yaml`. To rerun one trial, give that file:
 
 ```sh
-knowledge-nest eval .knowledge-nest/trials/tune/010.yaml
+nest eval .knowledge-nest/trials/tune/010.yaml
 ```
 
 > For now you can vary `transform`, `index`, and `search`. Options that rewrite `extract`, measures other than recall, and choosing the next values from earlier results are not there yet.
@@ -228,14 +228,14 @@ knowledge-nest eval .knowledge-nest/trials/tune/010.yaml
 ## 7 Release
 
 ```sh
-knowledge-nest list indexes
-knowledge-nest release tune/010
-knowledge-nest release main --name release
+nest list indexes
+nest release tune/010
+nest release main --name release
 ```
 
 - `release <index> [--name <name>]` gives a served name to an index. The default name is `release`.
 - Pointing the name at another index says which one it replaced. To go back, release the earlier index again. The record is never erased.
-- `knowledge-nest list indexes` shows which index is served under which name.
+- `nest list indexes` shows which index is served under which name.
 - `build --release` gives the index that `build` just made the served name directly.
 
 > `serve` does not read these served names yet. To serve over MCP or HTTP, use the earlier flow.
@@ -257,14 +257,14 @@ extract:
 
 ## 9 What still uses the earlier flow
 
-These are not in the new flow yet. Use the configuration that `knowledge-nest init` writes.
+These are not in the new flow yet. Use the configuration that `nest init` writes.
 
 | To do this | Earlier command or page |
 |---|---|
 | Vector search, hybrid search, reranking | Embedding settings with `index.vector` and `fusion.rrf`. [MCP and RAG](mcp.md) · [Modules](modules.md) |
 | User dictionary | `dictionary suggest` and `dictionary add`. [Evaluation and dictionary](evaluation.md) |
 | Generate and review questions | `eval-data generate` and `eval-data review`. [Evaluation and dictionary](evaluation.md) |
-| PDF, Office, HTML, OCR | `loader.auto` and `knowledge-nest add ocr`. [PDF extraction](pdf-extraction.md) |
+| PDF, Office, HTML, OCR | `loader.auto` and `nest add ocr`. [PDF extraction](pdf-extraction.md) |
 | Serve over MCP or HTTP, `ask` | `serve`, `ask`. [MCP and RAG](mcp.md) |
 | Tuning with an agent | [Agents and trials](agents.md) |
 
@@ -274,17 +274,18 @@ Which flow a command uses depends on the form of the configuration file it reads
 
 Wiki and PARA are a separate mechanism and are not in this guide's versioned store. See [Wiki and PARA](wiki.md) (Japanese). The essentials:
 
-- Ingest with `knowledge-nest ingress <path>`. A statement whose citation does not match the source word for word is not saved and is reported as a `CITATION_REJECTED` warning.
-- `knowledge-nest verify` checks citations, source versions, and links. `knowledge-nest verify --content` uses a model to look for contradictions between pages.
-- Ask a page to change with `knowledge-nest instruct <page> "instruction"`. Add a rule for all future work with `knowledge-nest instruct --persistent "rule"`.
-- Changes are recorded as jobs. `knowledge-nest undo <job-id>` undoes one. Originals are never rewritten.
-- Follow a long ingest with `knowledge-nest progress <job-id>`.
+- Ingest with `nest ingress <path>`. A statement whose citation does not match the source word for word is not saved and is reported as a `CITATION_REJECTED` warning.
+- `nest verify` checks citations, source versions, and links. `nest verify --content` uses a model to look for contradictions between pages.
+- Ask a page to change with `nest instruct <page> "instruction"`. Add a rule for all future work with `nest instruct --persistent "rule"`.
+- Changes are recorded as jobs. `nest undo <job-id>` undoes one. Originals are never rewritten.
+- Follow a long ingest with `nest progress <job-id>`.
+- `serve` offers the pages both on the web and over MCP. What people fix in the browser becomes the knowledge agents use over MCP.
 
 ## 11 Checklist
 
 - [ ] At least 10 evaluation cases, phrased like real questions
-- [ ] The baseline is measured with `knowledge-nest eval` and its result has a name
+- [ ] The baseline is measured with `nest eval` and its result has a name
 - [ ] Trials use the same evaluation method and data as the baseline
 - [ ] You looked at how the `missed` cases changed, not only the average
 - [ ] You measured with `split: test` before adopting a change
-- [ ] You checked the released index with `knowledge-nest list indexes`
+- [ ] You checked the released index with `nest list indexes`

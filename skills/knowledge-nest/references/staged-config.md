@@ -1,8 +1,8 @@
 # The staged configuration file
 
 A staged `KnowledgeNestfile.yaml` says what each stage does, as a list of modules that run in
-order. Any file name works: the file is given to `knowledge-nest build <file>` or
-`knowledge-nest eval <file>`; without one they read `KnowledgeNestfile.yaml` of the project.
+order. Any file name works: the file is given to `nest build <file>` or
+`nest eval <file>`; without one they read `KnowledgeNestfile.yaml` of the project.
 
 ## A complete file
 
@@ -41,7 +41,7 @@ Paths are relative to the project folder, not to the configuration file. A trial
 | `transform` | the chunks | yes, or `- from: <name>` |
 | `index` | the index | yes, or `- from: <name>` |
 | `search` | nothing; how the index is searched | yes |
-| `eval` | an evaluation result | only for `knowledge-nest eval` |
+| `eval` | an evaluation result | only for `nest eval` |
 | `serve` | nothing; the name an index is served under | only for `--release` |
 
 Two entries are not modules:
@@ -86,7 +86,7 @@ PDF and Office loaders and LLM modules are not supported in the staged style yet
 
 A list of `add`, `update`, `delete`. The default is all three. Leaving one out means that
 kind of change is not taken in: with `[add, update]` a file deleted from the folder stays
-in the documents. `knowledge-nest build` prints what was left out.
+in the documents. `nest build` prints what was left out.
 
 ### `context`: a chunk knows where it is
 
@@ -122,14 +122,14 @@ For a single configuration, `default` is enough.
 ## Checking a file
 
 ```sh
-knowledge-nest validate                      # KnowledgeNestfile.yaml of the project
-knowledge-nest validate --config other.yaml
+nest validate                      # KnowledgeNestfile.yaml of the project
+nest validate --config other.yaml
 ```
 
 ```text
 KnowledgeNestfile.yaml can run: extract, transform, index, eval.
 ```
 
-`validate` builds nothing. `knowledge-nest build` makes the same check before it does anything, so
+`validate` builds nothing. `nest build` makes the same check before it does anything, so
 a file that is wrong never half-runs. The messages are specific ("chunk.length needs
 overlap smaller than size"); fix what they name.

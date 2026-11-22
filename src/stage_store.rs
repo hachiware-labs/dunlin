@@ -233,7 +233,7 @@ fn missing_document(source_id: &str, object_id: &str) -> StageError {
     StageError::coded(
         "STAGE_REQUIRED",
         format!(
-            "The extraction result of {source_id}:{object_id} is missing from the corpus. Run knowledge-nest build."
+            "The extraction result of {source_id}:{object_id} is missing from the corpus. Run nest build."
         ),
         3,
     )
@@ -525,7 +525,7 @@ pub(crate) fn expand_transform(
                 let data = data.ok_or_else(|| {
                     StageError::coded(
                         "STAGE_REQUIRED",
-                        "A saved chunk set is missing from the corpus. Run knowledge-nest build.",
+                        "A saved chunk set is missing from the corpus. Run nest build.",
                         3,
                     )
                 })?;

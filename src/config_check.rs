@@ -1,7 +1,7 @@
 //! Validation of MCP and RAG `KnowledgeNestfile.yaml` configurations (spec 26.8).
 //!
 //! The checks, their order, codes, paths and messages follow the JavaScript validation that
-//! this replaced, so that `knowledge-nest validate` reports the same diagnostics.
+//! this replaced, so that `nest validate` reports the same diagnostics.
 
 use std::collections::HashSet;
 
@@ -504,7 +504,7 @@ pub fn validate_rag(
             "VERSION_UNSUPPORTED",
             path!["init", "version"],
             Expected::Number(1.0),
-            "Generate a version 1 configuration with knowledge-nest init.",
+            "Generate a version 1 configuration with nest init.",
             Details {
                 received: version.cloned(),
                 ..Details::none()
@@ -520,9 +520,7 @@ pub fn validate_rag(
                 "SECTION_MISSING",
                 path![*stage],
                 *stage,
-                format!(
-                    "Generate the standard section with knowledge-nest init {project_type} <directory>."
-                ),
+                format!("Generate the standard section with nest init {project_type} <directory>."),
                 Details::none(),
             );
             continue;
@@ -594,7 +592,7 @@ pub fn validate_rag(
                     "MODULE_UNKNOWN",
                     with_path(path!["use"]),
                     "A registered module name",
-                    "Run knowledge-nest modules list.",
+                    "Run nest modules list.",
                     Details::module(name)
                         .received(ConfigValue::String(name.into()))
                         .suggestions(nearby(&ConfigValue::String(name.into()), &all)),
@@ -702,9 +700,7 @@ pub fn validate_rag(
                         "ARG_UNKNOWN",
                         with_path(path!["with", &key]),
                         Expected::List(defined.clone()),
-                        format!(
-                            "Use an argument listed by knowledge-nest modules describe {name}."
-                        ),
+                        format!("Use an argument listed by nest modules describe {name}."),
                         Details::module(name)
                             .received(ConfigValue::String(key.clone()))
                             .suggestions(nearby(&ConfigValue::String(key.clone()), &defined)),
@@ -861,7 +857,7 @@ fn module_checks(
             "REQUIREMENT_MISSING",
             at(path!["use"]),
             "The ocr tool",
-            "Run knowledge-nest add ocr.",
+            "Run nest add ocr.",
             Details::module(name),
         );
     }
@@ -897,7 +893,7 @@ fn module_checks(
             "REQUIREMENT_MISSING",
             at(path!["use"]),
             format!("The {tool} tool"),
-            format!("Run knowledge-nest add {tool}."),
+            format!("Run nest add {tool}."),
             Details::module(name),
         );
     }
@@ -1360,7 +1356,7 @@ fn check_command(
     }
     let warning = (planned.arg("version").is_none() && planned.arg("version_command").is_none()).then(|| {
         (path!["version"], "version or version_command".to_owned(),
-            "Without a version, Knowledge-Nest cannot detect tool updates. Run knowledge-nest build --force after updating the tool.".to_owned())
+            "Without a version, Knowledge-Nest cannot detect tool updates. Run nest build --force after updating the tool.".to_owned())
     });
     (issues, warning)
 }
@@ -1635,7 +1631,7 @@ pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], re
             "ARG_TYPE",
             path!["tools"],
             "A list of tool names and versions",
-            "Use knowledge-nest add --list.",
+            "Use nest add --list.",
             Details::none(),
         );
         return;
@@ -1660,7 +1656,7 @@ pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], re
                 "ARG_CONFLICT",
                 path!["tools", i],
                 "One OCR tool",
-                "Remove the other OCR tool with knowledge-nest remove.",
+                "Remove the other OCR tool with nest remove.",
                 Details::none(),
             );
         } else if valid {
@@ -1670,7 +1666,7 @@ pub fn check_tools(tools: Option<&ConfigValue>, catalog: &[(String, String)], re
                 "REQUIREMENT_MISSING",
                 path!["tools", i],
                 "A unique tool and version from the bundled catalog",
-                "Use knowledge-nest add --list.",
+                "Use nest add --list.",
                 Details::none(),
             );
         }
@@ -1721,7 +1717,7 @@ fn validate_evaluation(config: &ConfigValue, report: &mut Report) -> Option<Conf
                 "ARG_TYPE",
                 path!["eval-data"],
                 "A mapping with a dataset reference in use",
-                "Select data with knowledge-nest eval-data use.",
+                "Select data with nest eval-data use.",
                 Details::none(),
             );
         }

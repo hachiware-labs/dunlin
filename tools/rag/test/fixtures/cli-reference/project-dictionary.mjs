@@ -155,7 +155,7 @@ export async function suggestDictionary(report, misses, dictionary) {
   return { report_id: report.id, build_id: report.build_id,
     counts: Object.fromEntries(Object.entries(classes).map(([key, questions]) => [key, questions.size])),
     candidates: [...candidates.values()], findings,
-    ...(findings.some(({ reason }) => reason === 'legacy_mixed_recovery') && { hint: 'Run knowledge-nest eval again for per-evidence diagnostics.' }) };
+    ...(findings.some(({ reason }) => reason === 'legacy_mixed_recovery') && { hint: 'Run nest eval again for per-evidence diagnostics.' }) };
 }
 
 export function dictionaryText(data) {

@@ -573,7 +573,7 @@ export class KnowledgeNest {
   }
 
   /**
-   * Runs the `knowledge-nest` CLI in Rust with `process.argv.slice(2)` (spec 28.13 step 6c). It prints the
+   * Runs the `nest` CLI in Rust with `process.argv.slice(2)` (spec 28.13 step 6c). It prints the
    * result and resolves to the exit code. `serving` hears when a server starts and stops, and
    * `opened` each index a server opens. Aborting `signal` stops a running server.
    */

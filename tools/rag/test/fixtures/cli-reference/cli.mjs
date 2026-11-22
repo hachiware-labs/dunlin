@@ -27,6 +27,6 @@ if (process.exitCode === undefined) {
   } else if (Object.hasOwn(projectCommands, command)) {
     await runProjectCommand(command, options, project);
   } else {
-    fail(command, `Unknown command: ${command}. See knowledge-nest --help.`);
+    fail(command, `Unknown command: ${command}. See nest --help.`);
   }
 }

@@ -25,7 +25,7 @@ export function projectOcr(tools) {
   return { tool: entry.name === 'ocr' ? 'lightonocr' : entry.name, version: entry.version };
 }
 
-/** The tools that knowledge-nest add --list shows. */
+/** The tools that nest add --list shows. */
 export function listedTools() {
   return [...toolsCatalog.values()].filter(({ legacy }) => !legacy).map(({ ocr, legacy, ...tool }) => tool);
 }
@@ -40,12 +40,12 @@ export function checkTools(config, issue) {
 export async function changeTool(project, requested, remove, writeTemplate) {
   const fail = (code, message, exitCode = 2) => Object.assign(new Error(message), { code, exitCode });
   const recorded = (project.config.tools ?? []).find((entry) => toolsCatalog.get(entry?.name)?.ocr);
-  // knowledge-nest add ocr prepares the OCR tool the project records, or the standard one.
+  // nest add ocr prepares the OCR tool the project records, or the standard one.
   const name = requested === 'ocr' ? recorded?.name ?? (remove ? 'ocr' : 'oar-ocr') : requested;
   const tool = toolsCatalog.get(name);
-  if (!tool) throw fail('TOOL_UNKNOWN', 'Use knowledge-nest add --list to see the available tools.');
+  if (!tool) throw fail('TOOL_UNKNOWN', 'Use nest add --list to see the available tools.');
   if (!remove && tool.ocr && recorded && recorded.name !== name && !(name === 'lightonocr' && recorded.name === 'ocr')) {
-    throw fail('TOOL_CONFLICT', 'A project uses one OCR tool. Run knowledge-nest remove ' + recorded.name + ' first.');
+    throw fail('TOOL_CONFLICT', 'A project uses one OCR tool. Run nest remove ' + recorded.name + ' first.');
   }
   if (name === 'hannoy' && !isSearchProject(project.config.init.type)) throw fail('WRONG_PROJECT_TYPE', 'The hannoy tool requires a RAG/MCP project.');
   if (remove && ['source', 'ingress', 'index', 'search'].some((section) => project.config[section]?.modules?.some(({ use, with: args }) =>

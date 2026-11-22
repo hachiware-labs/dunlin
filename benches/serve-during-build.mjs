@@ -1,4 +1,4 @@
-// Search latency of `knowledge-nest serve` while a build adds documents to the shared corpus. Builds a
+// Search latency of `nest serve` while a build adds documents to the shared corpus. Builds a
 // project, serves it over HTTP, sends searches one after another, then adds documents and builds
 // again. Prints the latency before, during and after that build.
 //

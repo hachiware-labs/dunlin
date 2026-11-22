@@ -31,39 +31,39 @@ const configName = 'KnowledgeNestfile.yaml';
 let DatabaseSync;
 const projectTypes = ['mcp', 'rag', 'wiki', 'para'];
 export const projectCommands = {
-  init: 'knowledge-nest init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]',
-  config: 'knowledge-nest config list | knowledge-nest config set <embedding|llm> --model <name> [--provider <name>] | knowledge-nest config set ocr [--tool oar-ocr|lightonocr] | knowledge-nest config unset <embedding|llm|ocr> [--json]',
-  build: 'knowledge-nest build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]',
-  source: 'knowledge-nest source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]',
-  transform: 'knowledge-nest transform [--project <directory>] [--config <file>] [--dry-run] [--json]',
-  index: 'knowledge-nest index [--project <directory>] [--config <file>] [--dry-run] [--json]',
-  search: 'knowledge-nest search <query> [--project <directory>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]',
-  ask: 'knowledge-nest ask <question> [--project <directory>] [--build <ref>] [--config <file>] [--json]',
-  serve: 'knowledge-nest serve [--project <directory>] [--transport <http|stdio>] [--host <address>] [--port <port>] [--print-config [--json]]',
-  status: 'knowledge-nest status [--project <directory>] [--json]',
-  validate: 'knowledge-nest validate [--project <directory>] [--config <file>] [--json]',
-  defaults: 'knowledge-nest defaults [--apply <section>] [--project <directory>] [--json]',
-  modules: 'knowledge-nest modules <list|describe <name>> [--project <directory>] [--json]',
-  add: 'knowledge-nest add <tool> | knowledge-nest add --list [--project <directory>] [--json]',
-  remove: 'knowledge-nest remove <tool> [--project <directory>] [--json]',
-  use: 'knowledge-nest use <build> [--project <directory>] [--json]',
-  tag: 'knowledge-nest tag <name> [build] [--move] [--project <directory>] [--json]',
-  'eval-data': 'knowledge-nest eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]',
-  eval: 'knowledge-nest eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]',
-  report: 'knowledge-nest report <show|list|compare> [--project <directory>] [--json]',
-  dictionary: 'knowledge-nest dictionary suggest [--report <ref>] | knowledge-nest dictionary add <file> --config <candidate> [--project <directory>] [--json]',
-  'evidence-map': 'knowledge-nest evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]',
-  ingress: 'knowledge-nest ingress <path...> | knowledge-nest ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]',
-  query: 'knowledge-nest query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]',
-  verify: 'knowledge-nest verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]',
-  issue: 'knowledge-nest issue <id> <open|resolved|dismissed> [--project <directory>] [--json]',
-  rules: 'knowledge-nest rules [--project <directory>] [--json]',
-  progress: 'knowledge-nest progress <work-id> [--project <directory>] [--json]',
-  cite: 'knowledge-nest cite <page> <number> [--project <directory>] [--json]',
-  instruct: 'knowledge-nest instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | knowledge-nest instruct --persistent <rule> [--project <directory>] [--json]',
-  'save-answer': 'knowledge-nest save-answer <query-run> <page> <title> [--project <directory>] [--json]',
-  archive: 'knowledge-nest archive <page> [--project <directory>] [--restore] [--json]',
-  undo: 'knowledge-nest undo <work-id> [--project <directory>] [--json]',
+  init: 'nest init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]',
+  config: 'nest config list | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config unset <embedding|llm|ocr> [--json]',
+  build: 'nest build [--project <directory>] [--from <stage>] [--input <build>] [--until <stage>] [--force] [--skip-unsupported] [--dry-run] [--config <file>] [--tag <name>] [--json]',
+  source: 'nest source [--project <directory>] [--config <file>] [--dry-run] [--skip-unsupported] [--json]',
+  transform: 'nest transform [--project <directory>] [--config <file>] [--dry-run] [--json]',
+  index: 'nest index [--project <directory>] [--config <file>] [--dry-run] [--json]',
+  search: 'nest search <query> [--project <directory>] [--build <ref>] [--config <file>] [--limit <n>] [--budget-chars <n>] [--source-id <id>] [--json]',
+  ask: 'nest ask <question> [--project <directory>] [--build <ref>] [--config <file>] [--json]',
+  serve: 'nest serve [--project <directory>] [--transport <http|stdio>] [--host <address>] [--port <port>] [--print-config [--json]]',
+  status: 'nest status [--project <directory>] [--json]',
+  validate: 'nest validate [--project <directory>] [--config <file>] [--json]',
+  defaults: 'nest defaults [--apply <section>] [--project <directory>] [--json]',
+  modules: 'nest modules <list|describe <name>> [--project <directory>] [--json]',
+  add: 'nest add <tool> | nest add --list [--project <directory>] [--json]',
+  remove: 'nest remove <tool> [--project <directory>] [--json]',
+  use: 'nest use <build> [--project <directory>] [--json]',
+  tag: 'nest tag <name> [build] [--move] [--project <directory>] [--json]',
+  'eval-data': 'nest eval-data <add|import|export|list|show|split|generate|review|sync|diff|tag|use> [--project <directory>] [--json]',
+  eval: 'nest eval [--project <directory>] [--build <ref>] [--config <file>] [--split dev|test] [--tag <name>] [--json]',
+  report: 'nest report <show|list|compare> [--project <directory>] [--json]',
+  dictionary: 'nest dictionary suggest [--report <ref>] | nest dictionary add <file> --config <candidate> [--project <directory>] [--json]',
+  'evidence-map': 'nest evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]',
+  ingress: 'nest ingress <path...> | nest ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]',
+  query: 'nest query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]',
+  verify: 'nest verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]',
+  issue: 'nest issue <id> <open|resolved|dismissed> [--project <directory>] [--json]',
+  rules: 'nest rules [--project <directory>] [--json]',
+  progress: 'nest progress <work-id> [--project <directory>] [--json]',
+  cite: 'nest cite <page> <number> [--project <directory>] [--json]',
+  instruct: 'nest instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | nest instruct --persistent <rule> [--project <directory>] [--json]',
+  'save-answer': 'nest save-answer <query-run> <page> <title> [--project <directory>] [--json]',
+  archive: 'nest archive <page> [--project <directory>] [--restore] [--json]',
+  undo: 'nest undo <work-id> [--project <directory>] [--json]',
 };
 
 class ProjectError extends Error {
@@ -195,14 +195,14 @@ async function initialize(type, directory, values) {
     if (error.code !== 'EEXIST') throw error;
   });
   let next;
-  if (type === 'mcp') next = 'Add documents, then run knowledge-nest build and knowledge-nest serve --print-config.';
-  else if (type === 'rag') next = 'Add documents and run knowledge-nest build. ' + (models.llm?.model
-    ? 'Run knowledge-nest ask or knowledge-nest serve.' : 'Set models.answerer.model before using ask or the responses endpoint.');
+  if (type === 'mcp') next = 'Add documents, then run nest build and nest serve --print-config.';
+  else if (type === 'rag') next = 'Add documents and run nest build. ' + (models.llm?.model
+    ? 'Run nest ask or nest serve.' : 'Set models.answerer.model before using ask or the responses endpoint.');
   else {
     const missing = [!models.llm?.model && 'models.writer.model', !purpose && 'about.purpose'].filter(Boolean);
-    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run knowledge-nest ingress.' : 'Run knowledge-nest ingress <path>.';
+    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run nest ingress.' : 'Run nest ingress <path>.';
   }
-  return { config: configPath, type, next: ocr ? next + ' To prepare ' + ocr + ', run knowledge-nest add ocr.' : next };
+  return { config: configPath, type, next: ocr ? next + ' To prepare ' + ocr + ', run nest add ocr.' : next };
 }
 
 function normalizeProjectType(config, warnings) {
@@ -214,7 +214,7 @@ function normalizeProjectType(config, warnings) {
 
 async function loadProject(configPath, command, candidate, warnings) {
   if (!configPath || !await exists(configPath)) {
-    throw new ProjectError(3, 'PROJECT_REQUIRED', 'No KnowledgeNestfile.yaml found. Run knowledge-nest init <mcp|rag|wiki|para> <directory>.');
+    throw new ProjectError(3, 'PROJECT_REQUIRED', 'No KnowledgeNestfile.yaml found. Run nest init <mcp|rag|wiki|para> <directory>.');
   }
   const root = dirname(configPath);
   const file = candidate === undefined ? configPath : resolve(candidate);
@@ -237,7 +237,7 @@ async function loadProject(configPath, command, candidate, warnings) {
   const type = config?.init?.type;
   const authoring = ['ingress', 'query', 'verify', 'archive', 'undo', 'issue', 'rules', 'cite', 'instruct', 'save-answer', 'progress'].includes(command);
   if (!projectTypes.includes(type)) {
-    const error = new ProjectError(2, 'SECTION_MISSING', 'Expected init.type in the KnowledgeNestfile. Generate a new standard file with knowledge-nest init.');
+    const error = new ProjectError(2, 'SECTION_MISSING', 'Expected init.type in the KnowledgeNestfile. Generate a new standard file with nest init.');
     error.diagnostics = [{ code: error.code, file, line: line(['init', 'type']), section: 'init', module: null,
       arg: 'type', received: null, expected: projectTypes, suggestions: [], hint: error.message }];
     throw error;
@@ -266,7 +266,7 @@ async function loadProject(configPath, command, candidate, warnings) {
   }
   const paths = projectPaths(root);
   if (!await exists(paths.state)) {
-    throw new ProjectError(3, 'STATE_REQUIRED', 'Project state is missing. Initialize a project with knowledge-nest init ' + type + '.');
+    throw new ProjectError(3, 'STATE_REQUIRED', 'Project state is missing. Initialize a project with nest init ' + type + '.');
   }
   const hannoyModule = isSearchProject(type) && ['build', 'index', 'eval', 'search', 'ask', 'serve', 'validate'].includes(command)
     && ['index', 'search'].flatMap((stage) => checked.plan[stage] ?? []).find(({ module }) => module.tool === 'hannoy');
@@ -310,8 +310,8 @@ function currentBuild(paths, required = true, reference) {
     db.close();
   }
   // An unknown reference names itself, as the Rust CLI reports it since the usability review.
-  if (required && reference !== undefined) throw new ProjectError(3, 'BUILD_NOT_FOUND', `Unknown build: ${reference}. Pass a build tag or ID; knowledge-nest status shows the current build.`);
-  if (required) throw new ProjectError(3, 'BUILD_REQUIRED', 'No searchable build. Run knowledge-nest build first.');
+  if (required && reference !== undefined) throw new ProjectError(3, 'BUILD_NOT_FOUND', `Unknown build: ${reference}. Pass a build tag or ID; nest status shows the current build.`);
+  if (required) throw new ProjectError(3, 'BUILD_REQUIRED', 'No searchable build. Run nest build first.');
   return null;
 }
 
@@ -881,7 +881,7 @@ function keywordOptions(args, paths) {
 async function openBuild(paths, build) {
   const index = join(paths.artifacts, build.index);
   if (!await KnowledgeNest.inspectIndex(index)) {
-    throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run knowledge-nest build first.');
+    throw new ProjectError(3, 'BUILD_REQUIRED', 'The build index is missing. Run nest build first.');
   }
   return KnowledgeNest.open(index, { corpusBackend: 'sqlite', corpusDirectory: build.shared_corpus ? paths.corpus : undefined,
     ...keywordOptions(build.keyword, paths) });
@@ -1251,7 +1251,7 @@ export async function runProjectCommand(command, args, explicitProject) {
       console.log(`${data.build_id} ${data.search_config_id} ${data.evaluation_status}${data.evaluation_report ? ' ' + JSON.stringify(data.evaluation_report.scores) : ''}\n${JSON.stringify(data, null, 2)}`);
     }
     else if (command === 'build' && data.build_id) {
-      console.log(`${data.build_id} ${data.config_id}\nDocuments: ${data.documents}/${data.files}; skipped: ${data.skipped.length}; index ${data.reused ? 'reused' : 'built'} (${data.elapsed_ms} ms).\nServing changed: ${data.serving_changed}\nNext: knowledge-nest search "手順"`);
+      console.log(`${data.build_id} ${data.config_id}\nDocuments: ${data.documents}/${data.files}; skipped: ${data.skipped.length}; index ${data.reused ? 'reused' : 'built'} (${data.elapsed_ms} ms).\nServing changed: ${data.serving_changed}\nNext: nest search "手順"`);
       for (const file of data.skipped) console.log(`${file.source_id}:${file.path} — ${file.reason}`);
       for (const [stage, result] of Object.entries(data.stages)) console.log(`${stage}: ${result.reused ? 'reused' : 'executed'} (${result.id})`);
     } else console.log(JSON.stringify(data, null, 2));

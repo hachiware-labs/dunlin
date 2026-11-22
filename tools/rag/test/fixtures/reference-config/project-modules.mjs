@@ -124,7 +124,7 @@ export function writeTemplate(config) {
   let yaml = stringify(config);
   if (isSearchProject(config.init.type)) {
     for (const [stage, example] of Object.entries({
-      source: 'Additional parser: loader.ocr (requires knowledge-nest add ocr).',
+      source: 'Additional parser: loader.ocr (requires nest add ocr).',
       transform: 'Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.',
       index: 'Additional index: use: index.vector, with: { model: local-embed }.',
       search: 'For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.',
@@ -225,11 +225,11 @@ export function validateRag(config, file, line) {
       }
     }
   }
-  if (config.init.version !== 1) issue('VERSION_UNSUPPORTED', ['init', 'version'], 1, 'Generate a version 1 configuration with knowledge-nest init.', { received: config.init.version });
+  if (config.init.version !== 1) issue('VERSION_UNSUPPORTED', ['init', 'version'], 1, 'Generate a version 1 configuration with nest init.', { received: config.init.version });
   for (const [stage, names] of configuredStages) {
     const section = config[stage];
     if (section === undefined) {
-      issue('SECTION_MISSING', [stage], stage, 'Generate the standard section with knowledge-nest init ' + config.init.type + ' <directory>.');
+      issue('SECTION_MISSING', [stage], stage, 'Generate the standard section with nest init ' + config.init.type + ' <directory>.');
       continue;
     }
     if (!isMapping(section) || !Array.isArray(section.modules)) {
@@ -256,7 +256,7 @@ export function validateRag(config, file, line) {
       const module = modules.get(name);
       const details = { module: name };
       if (!module) {
-        issue('MODULE_UNKNOWN', [...path, 'use'], 'A registered module name', 'Run knowledge-nest modules list.', {
+        issue('MODULE_UNKNOWN', [...path, 'use'], 'A registered module name', 'Run nest modules list.', {
           ...details, received: name, suggestions: nearby(name, [...modules.keys()]),
         });
         chainValid = false;
@@ -293,7 +293,7 @@ export function validateRag(config, file, line) {
       }
       for (const key of Object.keys(args)) {
         if (!Object.hasOwn(module.args, key)) issue('ARG_UNKNOWN', [...path, 'with', key], Object.keys(module.args),
-          'Use an argument listed by knowledge-nest modules describe ' + name + '.', { ...details, received: key, suggestions: nearby(key, Object.keys(module.args)) });
+          'Use an argument listed by nest modules describe ' + name + '.', { ...details, received: key, suggestions: nearby(key, Object.keys(module.args)) });
       }
       const values = {};
       for (const { key, value, defaulted, code, expected } of KnowledgeNest.readModuleArgs(name, args)) {
@@ -314,7 +314,7 @@ export function validateRag(config, file, line) {
         issue('ARG_CONFLICT', [...path, 'with', 'overlap'], 'overlap less than size', 'Reduce overlap or increase size.', { ...details, received: values.overlap });
       }
       if ((name === 'loader.ocr' || values.ocr === 'loader.ocr') && !config.tools?.some?.((tool) => tool?.name === 'ocr')) {
-        issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ocr tool', 'Run knowledge-nest add ocr.', details);
+        issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ocr tool', 'Run nest add ocr.', details);
       }
       if (name === 'loader.command' && values.command) {
         const { issues, warning } = checkCommand(values, file);
@@ -322,7 +322,7 @@ export function validateRag(config, file, line) {
         if (warning) diagnostic(warnings, 'ARG_RECOMMENDED', [...path, 'with', ...warning.field], warning.expected, warning.hint, details);
       }
       if (module.tool && !config.tools?.some?.((tool) => tool?.name === module.tool)) {
-        issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ' + module.tool + ' tool', 'Run knowledge-nest add ' + module.tool + '.', details);
+        issue('REQUIREMENT_MISSING', [...path, 'use'], 'The ' + module.tool + ' tool', 'Run nest add ' + module.tool + '.', details);
       }
       if (name === 'index.keyword') {
         if (values.tokenizer === 'trigram') values.short_query ??= 'bigram';
@@ -414,7 +414,7 @@ const latencyArgs = z.strictObject({ percentiles: z.array(z.number().int().min(1
 function validateEvaluation(config, issue) {
   if (config['eval-data'] !== undefined && (!isMapping(config['eval-data'])
     || Object.keys(config['eval-data']).some((key) => key !== 'use') || typeof config['eval-data'].use !== 'string')) {
-    issue('ARG_TYPE', ['eval-data'], 'A mapping with a dataset reference in use', 'Select data with knowledge-nest eval-data use.');
+    issue('ARG_TYPE', ['eval-data'], 'A mapping with a dataset reference in use', 'Select data with nest eval-data use.');
   }
   if (config.eval === undefined) return null;
   const settings = config.eval;

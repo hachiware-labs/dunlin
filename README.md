@@ -9,8 +9,8 @@ Knowledge-Nest は、手元の資料から AI のための文書データベー�
 ```text
 資料フォルダ ──→  Knowledge-Nest  ──┬─ MCP    Claude などのエージェントが、資料を引いて答える
 (Markdown、PDF、                     ├─ RAG    自分のアプリが、API で出典付きの答えを受け取る
- Word、Excel …)                     ├─ Wiki   AI が資料を読み、引用付きのページを書き溜める
-                                    └─ PARA   AI が資料やメモを、PARA の4分類に整理する
+ Word、Excel …)                     ├─ Wiki   AI が資料を読み、引用付きのページを書き溜める（Web と MCP で提供）
+                                    └─ PARA   AI が資料やメモを、PARA の4分類に整理する（Web と MCP で提供）
 ```
 
 ## こんなことができます
@@ -45,14 +45,14 @@ curl http://127.0.0.1:4318/v1/responses -d '{"input":"メカニカルシール�
 モデルの準備は要りません。日本語のキーワード検索が、手元ですぐに動きます。
 
 ```sh
-knowledge-nest init mcp ./kb --source ./manuals
+nest init mcp ./kb --source ./manuals
 cd kb
-knowledge-nest build
-knowledge-nest search "ポンプの点検はいつ実施しますか"
-knowledge-nest serve --print-config
+nest build
+nest search "ポンプの点検はいつ実施しますか"
+nest serve --print-config
 ```
 
-最後のコマンドが出す設定を、Claude Desktop や Claude Code などの MCP クライアントの設定に貼れば、エージェントがあなたの資料を引けるようになります。資料を直したら `knowledge-nest build` をもう一度。変わった文書だけが処理されます。
+最後のコマンドが出す設定を、Claude Desktop や Claude Code などの MCP クライアントの設定に貼れば、エージェントがあなたの資料を引けるようになります。資料を直したら `nest build` をもう一度。変わった文書だけが処理されます。
 
 インストールは [こちら](#インストール)。順を追った説明は [入門](docs/getting-started.md) にあります。
 
@@ -61,20 +61,22 @@ knowledge-nest serve --print-config
 ### 2つの問いで決める
 
 ```text
-Q1 その知識を、主に読むのは誰？
+Q1 資料を、いつ読む？
    │
-   ├─ AI（エージェントやアプリ）が、質問のたびに引く
+   ├─ 質問が来るたびに、資料から探す（検索型）
    │     │
    │     Q2 答えの文章を書くのは誰？
    │     ├─ エージェント自身（Claude など） ………………… MCP
    │     └─ Knowledge-Nest（アプリは答えを受け取るだけ） …… RAG
    │
-   └─ 人が、ページとして読み、育てていく
+   └─ 先に AI が読んで、ページにまとめておく（蓄積型）
          │
          Q2 どう並べたい？
          ├─ テーマごとの知識のページに …………………… Wiki
          └─ 仕事の進め方（PARA の4分類）に沿って ……… PARA
 ```
+
+検索型は、資料をそのまま根拠として引きます。資料が多くても、更新が多くても、すぐ反映できます。蓄積型は、AI が資料を読んで整理した結果を、人はブラウザで、エージェントは MCP で使います。まとめ直された知識なので、そのまま読んで分かる形になっています。
 
 ### 場面から選ぶ
 
@@ -84,11 +86,11 @@ Q1 その知識を、主に読むのは誰？
 | 資料を社外のモデルに渡したくない。まずは手元だけで試したい | **MCP** | キーワード検索は手元で完結する。答えるのは、すでに使っているエージェント |
 | 社内ポータルやチャットボットに「資料に基づく Q&A」を付けたい | **RAG** | HTTP で質問すると、出典付きの答えが返る。OpenAI の SDK がそのまま使える |
 | 問い合わせ対応で、回答の根拠を必ず示したい | **RAG** | 答えの引用が、資料の版と原文の範囲まで指す |
-| 散らばった手順書や議事録から、新人が読めるナレッジベースを作りたい | **Wiki** | AI がテーマごとのページにまとめ、すべての文に引用を付ける |
+| 散らばった手順書や議事録から、新人が読めるナレッジベースを作りたい | **Wiki** | AI がテーマごとのページにまとめ、すべての文に引用を付ける。Web で公開できる |
+| 人が読むナレッジベースを、エージェントにも同じ内容で引かせたい | **Wiki** | 同じページを、ブラウザにも MCP にも出す。人とエージェントで知識がずれない |
 | 規程やマニュアルの間の食い違い、古くなった記述を見つけたい | **Wiki** | `verify --content` がページ同士の矛盾を、`verify` が古い引用を探す |
 | 調べもののメモや資料が溜まり、どこに何があるか分からない | **PARA** | AI が、案件・継続業務・参考資料・完了済みに振り分ける |
-| 案件ごとの資料と、続けて担当する業務の資料を分けて管理したい | **PARA** | Projects と Areas を分けて持てる。終わった案件は Archives へ |
-| 人も読み、エージェントも引けるようにしたい | **Wiki と MCP** | 同じ資料フォルダを、`wiki` と `mcp` の2つのプロジェクトに渡す |
+| 案件ごとの資料と、続けて担当する業務の資料を分けて管理したい | **PARA** | Projects と Areas を分けて持てる。終わった案件は Archives へ。エージェントにも MCP で引かせられる |
 | 検索の精度を、根拠を持って説明・改善したい | **MCP か RAG** | 質問と正解の組で回収率を測り、設定を比べて選べる |
 
 ### 4つの形の早見表
@@ -96,12 +98,14 @@ Q1 その知識を、主に読むのは誰？
 | | MCP | RAG | Wiki | PARA |
 |---|---|---|---|---|
 | できるもの | エージェント用の検索 | 出典付きで答える API | 引用付きの知識のページ | PARA 形式のノート |
-| 主に使うのは | エージェント | 自分のアプリ | 人（エージェントは `query` で） | 人（エージェントは `query` で） |
+| 使う人 | エージェント | 自分のアプリ | 人とエージェント | 人とエージェント |
 | 資料を読むとき | 質問のたび | 質問のたび | 取り込むとき | 取り込むとき |
+| エージェントが受け取るもの | 資料の該当箇所 | 資料の該当箇所（`/mcp`） | AI がまとめたページ | AI が整理したノート |
 | モデル | 要らない | 回答に要る | 執筆に要る | 執筆に要る |
 | 資料の更新 | `build` で、変わった文書だけ | `build` で、変わった文書だけ | `ingress` で、ページを書き足す | `ingress` で、ノートを書き足す |
-| 提供のしかた | MCP（stdio） | HTTP（回答・検索・MCP） | ブラウザの画面 | ブラウザの画面 |
+| 提供のしかた | MCP | HTTP（回答・検索）と MCP | Web（ページと操作画面）と MCP | Web（ノートと操作画面）と MCP |
 
+- **どの形も MCP で引ける。** エージェントから見ると、MCP と RAG は「資料そのもの」を、Wiki と PARA は「AI がまとめた知識」を引く違いです。
 - **モデルの手間**: MCP だけは、Knowledge-Nest 側にモデルが要りません。RAG は質問のたびに、Wiki と PARA は取り込むたびにモデルを呼びます。
 - **迷ったら MCP から。** 資料フォルダ1つで、すぐに試せます。あとから同じ資料で RAG や Wiki を作っても、MCP はそのまま使えます。
 
@@ -134,10 +138,10 @@ RAG   質問 ─→ Knowledge-Nest ─→ 検索 ─→ 根拠 ─→ Knowledge-
 
 - **準備はフォルダ1つ。** GPU も埋め込みモデルも要らず、日本語の自然文でそのまま引けます。資料は手元から出ません。
 - **答えに、行まで付いた出典。** 結果には資料名・行・見出しが付き、エージェントは `knowledge.read` で原文まで読み戻せます。
-- **つなぐのは貼るだけ。** `knowledge-nest serve --print-config` の出力を、MCP クライアントの設定に貼ります。
-- **資料の更新に、止めずについていく。** `knowledge-nest build` を再実行すると、変わった文書だけを処理し、動いている検索は次の質問から新しい索引を使います。
+- **つなぐのは貼るだけ。** `nest serve --print-config` の出力を、MCP クライアントの設定に貼ります。
+- **資料の更新に、止めずについていく。** `nest build` を再実行すると、変わった文書だけを処理し、動いている検索は次の質問から新しい索引を使います。
 
-日本語は Lindera と IPADIC で分かち書きします。「する」「こと」のような軽い語だけが合う文書は返しません。専門用語はユーザー辞書で足せます。ベクトルを足したハイブリッド検索、PDF・Office・HTML・OCR にも対応します。 [MCP と RAG](docs/mcp.md)
+日本語は Lindera と IPADIC で分かち書きします。「する」「こと」のような軽い語だけが合う文書は返しません。専門用語はユーザー辞書で足せます。ベクトルを足したハイブリッド検索、PDF・Office・HTML・OCR にも対応します。 [MCP 入門](docs/start-mcp.md) · [MCP と RAG](docs/mcp.md)
 
 ### RAG：アプリに、出典付きで答える API
 
@@ -147,37 +151,58 @@ RAG   質問 ─→ Knowledge-Nest ─→ 検索 ─→ 根拠 ─→ Knowledge-
 - **モデルは手元でも API でも。** ローカルの Ollama も、外部の API も選べます。外に公開するときは、トークン認証と接続制限を設定できます。
 
 ```sh
-knowledge-nest config set llm --provider ollama --model qwen3:4b
-knowledge-nest init rag ./rag --source ./manuals
+nest config set llm --provider ollama --model qwen3:4b
+nest init rag ./rag --source ./manuals
 cd rag
-knowledge-nest build
-knowledge-nest ask "ポンプの点検周期は？"
-knowledge-nest serve
+nest build
+nest ask "ポンプの点検周期は？"
+nest serve
 ```
 
-[MCP と RAG](docs/mcp.md)
+[RAG 入門](docs/start-rag.md) · [MCP と RAG](docs/mcp.md)
 
 ### Wiki：AI が書き、根拠のない文は残らない
 
+#### LLM-Wiki とは
+
+LLM-Wiki は、Andrej Karpathy が提案した、LLM で知識ベースを作る考え方です（[原文の gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)）。
+
+RAG は、質問のたびに元の資料から断片を探し、その場で答えを組み立てます。毎回ゼロから読み直すので、読んだ結果は残りません。LLM-Wiki では、LLM が資料を読んだ結果を、相互にリンクした Wiki のページとして書き溜めます。新しい資料が来ると、関係するページを書き足し、要約を直し、食い違いがあれば印を付けます。知識は「一度まとめて、育てていく」ものになります。
+
+人がするのは、資料を選んで入れることと、問いを立てることです。要約、ページ同士のつなぎ、更新といった面倒な整理は LLM が受け持ちます。仕組みは次の3つの操作でできていて、Knowledge-Nest のコマンドにそのまま対応します。
+
+| LLM-Wiki の操作 | 内容 | Knowledge-Nest |
+|---|---|---|
+| 取り込み（ingest） | 資料を読み、関係するページを書いたり直したりする | `nest ingress` |
+| 問い合わせ（query） | 元の資料ではなく、Wiki のページに対して質問する | `nest query` |
+| 点検（lint） | 孤立したページ、リンク切れ、矛盾、古い記述を見つける | `nest verify`（引用・原本の版・リンク）、`--content`（ページ同士の矛盾） |
+
+LLM が書いた文は、もっともらしい誤りを含むことがあります。Knowledge-Nest は、LLM-Wiki のこの弱点を、引用の検証で埋めています。
+
+#### Knowledge-Nest の Wiki の特徴
+
 - **知識が、ページとして育つ。** 質問のたびに資料を引き直す代わりに、AI が資料を読んで、整ったページに書き溜めます。資料を足すたびにページが育ちます。
 - **AI の書いた文を、1文ずつ検証。** 記述には原文の引用が付き、引用が資料と一字一句一致しない文は保存されません。
-- **何をしても戻せる。** 資料の原本は書き換えません。変更は作業ごとに記録され、`knowledge-nest undo` で取り消せます。
-- **古くなった所を見つける。** `knowledge-nest verify` がリンク切れや古い引用を、`--content` を付けるとページ同士の食い違いも見つけます。
+- **何をしても戻せる。** 資料の原本は書き換えません。変更は作業ごとに記録され、`nest undo` で取り消せます。
+- **古くなった所を見つける。** `nest verify` がリンク切れや古い引用を、`--content` を付けるとページ同士の食い違いも見つけます。
+- **人には Web で、エージェントには MCP で。** 同じページを、ブラウザ向けの Web サーバーと MCP の両方で提供します。人が確かめた知識を、エージェントもそのまま使えます。
 - **ブラウザで読み、頼む。** 画面で資料・ページ・出典を並べて読み、「点検前の確認事項を箇条書きに」のようにページへ指示できます。
 
 ```sh
-knowledge-nest config set llm --provider ollama --model qwen3:4b
-knowledge-nest init wiki ./wiki --purpose "設備保全の手順と部品情報をまとめる"
+nest config set llm --provider ollama --model qwen3:4b
+nest init wiki ./wiki --purpose "設備保全の手順と部品情報をまとめる"
 cd wiki
-knowledge-nest ingress ../manuals
-knowledge-nest serve        # http://127.0.0.1:4319 をブラウザで開く
+nest ingress ../manuals
+nest serve        # ページを Web と MCP で提供。http://127.0.0.1:4319 をブラウザで開く
 ```
 
-エージェントからは `knowledge-nest query "質問" --json` でページに基づく答えを、プロジェクトの `site/` から HTML のページを読めます。Wiki の `serve` は人が使うブラウザの画面で、MCP のサーバーではありません。エージェントが MCP で引く形が欲しいときは、同じ資料で `mcp` のプロジェクトも作ります。 [Wiki・PARA の使い方](docs/wiki.md)
+エージェントは MCP でページを引けます。MCP クライアントの設定に Knowledge-Nest の Wiki を登録すれば、Claude などが、AI のまとめたページを根拠に答えます。ほかに `nest query "質問" --json` でページに基づく答えを、プロジェクトの `site/` から HTML のページを得られます。 [Wiki 入門](docs/start-wiki.md) · [Wiki・PARA の使い方](docs/wiki.md)
 
 ### PARA：AI が、資料とメモを整理する
 
-PARA は、情報を「いま何に使うか」で4つに分ける整理法です。
+PARA は、Tiago Forte が提唱した、デジタルの情報を整理する方法です（[解説](https://fortelabs.com/the-p-a-r-a-method-a-universal-system-for-organizing-digital-information-75a9da8bfb37/)）。考え方の中心は、**テーマではなく「行動にどれだけ近いか」で分ける**ことです。
+
+「ポンプ」「規程」のようにテーマで分けると、フォルダは増え続け、いま必要なものが埋もれます。PARA は「この情報を、いまの仕事に使うか」で4つに分けます。上ほど行動に近く、下ほど遠くなります。
 
 | 分類 | 入るもの | 例 |
 |---|---|---|
@@ -186,10 +211,11 @@ PARA は、情報を「いま何に使うか」で4つに分ける整理法で�
 | Resources | いつか役立つ参考資料 | 部品メーカーのカタログ |
 | Archives | 終わったもの | 昨年度の点検記録 |
 
+- **情報は、状況に合わせて動かす。** 案件が終われば Projects の資料は Archives へ、担当を離れた領域も Archives へ移します。分類は固定の棚ではなく、いまの仕事を映すものです。
 - **振り分けを AI に任せられる。** 資料を取り込むと、AI がノートを書いて分類に置きます。
-- **Wiki と同じ安心。** 引用の検証、原本を書き換えない保管、作業の取り消しは Wiki と共通です。
+- **Wiki と同じ安心と届け方。** 引用の検証、原本を書き換えない保管、作業の取り消し、Web と MCP での提供は Wiki と共通です。
 
-`init wiki` を `init para ./para` に読み替えるだけで始められます。
+`init wiki` を `init para ./para` に読み替えるだけで始められます。 [PARA 入門](docs/start-para.md)
 
 ## Knowledge-Nest を選ぶ理由
 
@@ -197,7 +223,7 @@ PARA は、情報を「いま何に使うか」で4つに分ける整理法で�
 - **いつも出典が付く。** 検索結果も、答えも、Wiki の文も、元の資料の場所を指します。
 - **勘ではなく、数字で良くする。** 「この質問なら、この文が答え」という組を登録すると、検索が根拠を拾えている割合（回収率）を測れます。設定を変えて測り直し、比べてから選べます（MCP・RAG）。
 - **試すのが速い。** 同じ入力と同じ処理は2度実行しません。チャンクの大きさだけ変えた試しなら、資料の読み直しは起きません。だから何通りも試せます。
-- **構成が見える。** 何をどう処理するかは `KnowledgeNestfile.yaml` に書き出され、`knowledge-nest validate` で実行前に確かめられます。
+- **構成が見える。** 何をどう処理するかは `KnowledgeNestfile.yaml` に書き出され、`nest validate` で実行前に確かめられます。
 
 LangChain やベクトルデータベースとの比べ方は [Knowledge-Nest が向いている構成](docs/comparison.md) にあります。
 
@@ -206,11 +232,11 @@ LangChain やベクトルデータベースとの比べ方は [Knowledge-Nest �
 検索結果やデータを版として残し、設定の候補をまとめて測って比べる仕組みを作っています。
 
 ```sh
-knowledge-nest eval-data import cases.json   # 質問と、答えになる引用の組を入れる
-knowledge-nest eval                          # いまの設定で回収率を測る
-knowledge-nest optimize tune.yaml            # 変えたい所を書いた指示から、候補を作って順に測る
-knowledge-nest results tune                  # 候補を、回収率の高い順に並べる
-knowledge-nest release tune/010              # 選んだ索引に、提供用の名前を付ける
+nest eval-data import cases.json   # 質問と、答えになる引用の組を入れる
+nest eval                          # いまの設定で回収率を測る
+nest optimize tune.yaml            # 変えたい所を書いた指示から、候補を作って順に測る
+nest results tune                  # 候補を、回収率の高い順に並べる
+nest release tune/010              # 選んだ索引に、提供用の名前を付ける
 ```
 
 `results` の表示の例です（一部の列を省いています）。
@@ -233,14 +259,14 @@ cd knowledge-nest
 npm ci
 npm run build
 npm link
-knowledge-nest --help
+nest --help
 ```
 
 ## ドキュメント
 
 | 目的 | 文書 |
 | --- | --- |
-| 初めて使う | [入門](docs/getting-started.md) · [クイックスタート](docs/quickstart.md) |
+| 初めて使う | [入門の一覧](docs/getting-started.md) · [MCP 入門](docs/start-mcp.md) · [RAG 入門](docs/start-rag.md) · [Wiki 入門](docs/start-wiki.md) · [PARA 入門](docs/start-para.md) · [クイックスタート](docs/quickstart.md) |
 | 使いこなす | [使いこなす](docs/guide.md) |
 | 検索・回答・ページを使う | [MCP と RAG](docs/mcp.md) · [Wiki と PARA](docs/wiki.md) |
 | 検索を改善する | [検索評価とユーザー辞書](docs/evaluation.md) · [エージェントと試行する](docs/agents.md) · [精度を上げる手法の候補](docs/retrieval-techniques.md) |

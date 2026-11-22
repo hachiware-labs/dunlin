@@ -101,7 +101,7 @@ async function project(t, root, { tokenizer, vector, hannoy, type = 'mcp' }) {
     await writeFile(join(base, 'docs', name), text);
   }
   const configPath = join(base, 'KnowledgeNestfile.yaml');
-  // knowledge-nest add records the tool in the KnowledgeNestfile, so it runs first.
+  // nest add records the tool in the KnowledgeNestfile, so it runs first.
   const tool = hannoy ? (await run('add', 'hannoy')).data : null;
   const config = parse(await readFile(configPath, 'utf8'));
   config.transform.modules[1].with = { ...config.transform.modules[1].with, size: 60, overlap: 20 };

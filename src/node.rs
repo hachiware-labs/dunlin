@@ -2077,7 +2077,7 @@ impl crate::cli_run::CliEvents for CliHost {
     }
 }
 
-/// Runs the `knowledge-nest` CLI with `process.argv.slice(2)` (see `cli_run`). It prints the result and
+/// Runs the `nest` CLI with `process.argv.slice(2)` (see `cli_run`). It prints the result and
 /// resolves to the exit code. `host(id, kind, args)` hears `serving` (`true` while a server runs,
 /// when SIGINT and SIGTERM should abort `cancel`) and `opened` (an index a server opened).
 #[napi]

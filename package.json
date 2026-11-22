@@ -11,7 +11,7 @@
   "mcpName": "io.github.hachiware-labs/knowledge-nest",
   "type": "module",
   "bin": {
-    "knowledge-nest": "./tools/rag/cli.mjs"
+    "nest": "./tools/rag/cli.mjs"
   },
   "engines": {
     "node": "^22.13.0 || >=24"

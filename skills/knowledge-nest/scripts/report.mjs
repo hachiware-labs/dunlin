@@ -6,8 +6,8 @@
 // Without a name: every named result. With the name of an optimization: its trials and a
 // table of cases by trial. With the name of a result: its cases with what was returned.
 //
-// It reads everything from `knowledge-nest results ... --json`, so it shows what the store holds
-// and nothing else. Set KNOWLEDGE_NEST to the command that runs Knowledge-Nest when it is not `knowledge-nest`.
+// It reads everything from `nest results ... --json`, so it shows what the store holds
+// and nothing else. Set KNOWLEDGE_NEST to the command that runs Knowledge-Nest when it is not `nest`.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -36,10 +36,10 @@ function fail(message) {
 
 const quote = (value) => `"${String(value).replaceAll('"', '\\"')}"`;
 
-/** Runs `knowledge-nest results` and gives its data, or stops with what Knowledge-Nest said. */
+/** Runs `nest results` and gives its data, or stops with what Knowledge-Nest said. */
 function results(of) {
   const command = [
-    process.env.KNOWLEDGE_NEST ?? 'knowledge-nest',
+    process.env.KNOWLEDGE_NEST ?? 'nest',
     'results',
     ...(of === undefined ? [] : [quote(of)]),
     '--project',
@@ -154,7 +154,7 @@ function overviewPage(data) {
 <table>
 <thead><tr><th>Result</th><th>Recall</th><th></th><th>Found</th><th>Index</th><th>Evaluation data</th><th>Version</th></tr></thead>
 <tbody>
-${rows || '<tr><td colspan="7" class="dim">No result has a name yet. Run knowledge-nest eval.</td></tr>'}
+${rows || '<tr><td colspan="7" class="dim">No result has a name yet. Run nest eval.</td></tr>'}
 </tbody></table>`,
   };
 }
@@ -319,7 +319,7 @@ footer { margin-top:48px; color:var(--dim); font-size:12px; }
 <h1>${escape(heading)}</h1>
 <div class="dim">${escape(project)}</div>
 ${body}
-<footer>Made from <code>knowledge-nest results${name === undefined ? '' : ` ${escape(name)}`} --json</code> on ${new Date().toISOString().slice(0, 16).replace('T', ' ')}Z.</footer>
+<footer>Made from <code>nest results${name === undefined ? '' : ` ${escape(name)}`} --json</code> on ${new Date().toISOString().slice(0, 16).replace('T', ' ')}Z.</footer>
 </main>
 </body>
 </html>

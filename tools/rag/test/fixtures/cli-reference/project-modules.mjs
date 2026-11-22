@@ -112,7 +112,7 @@ export function writeTemplate(config) {
   let yaml = stringify(config);
   if (isSearchProject(config.init.type)) {
     for (const [stage, example] of Object.entries({
-      source: 'Additional parser: loader.ocr (requires knowledge-nest add ocr).',
+      source: 'Additional parser: loader.ocr (requires nest add ocr).',
       transform: 'Alternative chunking: use: chunk.structure, with: { max_chars: 1600 }.',
       index: 'Additional index: use: index.vector, with: { model: local-embed }.',
       search: 'For hybrid search, add retrieval.vector and fusion.rrf before context.assemble.',

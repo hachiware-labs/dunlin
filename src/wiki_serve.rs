@@ -631,6 +631,20 @@ fn snippet(markdown: &str) -> String {
             Some(close) if close > 0 && after[..close].bytes().all(|b| b.is_ascii_digit()) => {
                 rest = &after[close + 1..];
             }
+            // A link keeps its words and loses its target.
+            Some(close) if after[close + 1..].starts_with('(') => {
+                let target = &after[close + 1..];
+                match target.find(')') {
+                    Some(end) => {
+                        plain.push_str(&after[..close]);
+                        rest = &target[end + 1..];
+                    }
+                    None => {
+                        plain.push('[');
+                        rest = after;
+                    }
+                }
+            }
             _ => {
                 plain.push('[');
                 rest = after;

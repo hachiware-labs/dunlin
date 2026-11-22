@@ -1,6 +1,6 @@
 ---
 name: knowledge-nest
-description: Build, evaluate, tune and serve document search (RAG, MCP, wiki) with the Knowledge-Nest CLI. Use this skill whenever the user works in a project that has a KnowledgeNestfile.yaml or a .knowledge-nest folder, mentions knowledge-nest, or wants to index a folder of documents for search, measure retrieval quality with evaluation data, compare chunking or search settings, run an optimization, see which questions a search misses, release or roll back an index, or get an HTML report of evaluation results. Use it also for writing or fixing Knowledge-Nest configuration files and optimization instructions, even when the user only says "improve the search" or "why is this question not found".
+description: Build, evaluate, tune and serve document search (RAG, MCP, wiki) with the Knowledge-Nest CLI, whose command is `nest`. Use this skill whenever the user works in a project that has a KnowledgeNestfile.yaml or a .knowledge-nest folder, mentions Knowledge-Nest, runs or asks about a `nest` command (nest build, nest eval, nest optimize and the like), or wants to index a folder of documents for search, measure retrieval quality with evaluation data, compare chunking or search settings, run an optimization, see which questions a search misses, release or roll back an index, or get an HTML report of evaluation results. Use it also for writing or fixing Knowledge-Nest configuration files and optimization instructions, even when the user only says "improve the search" or "why is this question not found".
 ---
 
 # Knowledge-Nest

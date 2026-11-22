@@ -333,7 +333,7 @@ serve:
 - **Client.** With `allowed_clients`, only the listed address ranges and the machine running the server may connect; anyone else gets `403 CLIENT_FORBIDDEN`. Write an address and the number of leading bits a client shares with it, such as `192.168.11.0/24` for every `192.168.11.*` address, or a single address such as `192.168.11.7`. Left out, clients are not limited by address.
 - **Host.** A request whose `Host` is not in `allowed_hosts` gets `403 HOST_FORBIDDEN`. Write a host name or IP address without a port. If people reach the server by an internal name such as `nest.example.internal`, add that name.
 - **Origin.** A browser request whose `Origin` is neither the server itself nor in `allowed_origins` gets `403 ORIGIN_FORBIDDEN`. Write it with the scheme and no path, such as `https://app.example.com`. Left empty, pages on other sites cannot call the server, so a page you open cannot send requests to the server on your machine.
-- **Token.** When `host` is not a loopback address such as `127.0.0.1`, `auth.type: token` is required. Keep the token out of the configuration file: `token_env` names the environment variable that holds it. Clients send `Authorization: Bearer <token>`. The Wiki and PARA pages also accept Basic authentication, with the user name `knowledge-nest` and the token as the password.
+- **Token.** When `host` is not a loopback address such as `127.0.0.1`, `auth.type: token` is required, unless `allowed_clients` lists only the ranges of home and office networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local addresses and `fc00::/7`); then the server also starts with `auth.type: none`. Keep the token out of the configuration file: `token_env` names the environment variable that holds it. Clients send `Authorization: Bearer <token>`. The Wiki and PARA pages also accept Basic authentication, with the user name `knowledge-nest` and the token as the password.
 
 An example that opens the server to other machines:
 
@@ -354,8 +354,9 @@ serve:
   access:
     allowed_hosts: [localhost, 127.0.0.1, 192.168.11.16]
     allowed_clients: [192.168.11.0/24]
-    auth: { type: token, token_env: NEST_TOKEN }
 ```
+
+This example has no token: every device in the range can read and write. On the Wiki and PARA pages, it can also take in a file of the server's machine by its path. If the network has devices you do not trust, add `auth: { type: token, token_env: NEST_TOKEN }`.
 
 ```sh
 export NEST_TOKEN=...      # use a long random value

@@ -260,4 +260,22 @@ test('lets in the machine itself and the clients of the listed ranges', { timeou
   const open = await start(['192.0.2.0/24', own + '/24']);
   assert.equal((await send(open.port, { headers, address: own })).status, 200);
   assert.equal((await send(open.port, { address: own })).status, 401);
+  await open.stop();
+
+  // Without a token, the screen opens outside loopback only to home and office networks.
+  config.serve.access.auth = { type: 'none', token_env: null };
+  const conflict = (error) => error.code === 2 && JSON.parse(error.stdout).errors[0].code === 'ARG_CONFLICT';
+  for (const clients of [undefined, ['0.0.0.0/0'], ['192.168.11.0/24', '203.0.113.0/24'], ['192.168.0.0/15']]) {
+    await save(clients);
+    await assert.rejects(validate(), conflict, JSON.stringify(clients));
+  }
+  await save(['192.168.11.0/24', 'fd00::/8']);
+  assert.equal(JSON.parse((await validate()).stdout).data.valid, true);
+  const home = Object.values(networkInterfaces()).flat()
+    .find((entry) => entry.family === 'IPv4' && /^(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))\./u.test(entry.address))?.address;
+  if (!home) return t.diagnostic('no private address: the screen without a token was not tried');
+  config.serve.access.allowed_hosts.push(home);
+  const free = await start([home + '/24']);
+  assert.equal((await send(free.port, { address: home })).status, 200);
+  assert.equal((await send(free.port, {})).status, 200);
 });

@@ -45,7 +45,7 @@ PARA を作る場合は `init para ./para-demo` に読み替えます。ブラ�
 
 URL は http と https に対応し、HTML、PDF、Markdown、テキスト、Office 文書を取り込めます。Shift_JIS や EUC-JP のページは UTF-8 に直して保存します。取得した内容は `.knowledge-nest/artifacts/uploads/` に原本として残り、ページの出典は元の URL を指します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。CLI でも `nest ingress https://example.com/page` のように URL を渡せます。
 
-`serve` の画面を他の人にも開く場合（`serve.host` を `127.0.0.1` 以外にする場合）は、`serve.access.auth` で認証を付けてください。家や職場の LAN の中だけに開くなら、`serve.access.allowed_clients` に `192.168.11.0/24` のような範囲を書くと、範囲の外からの接続を断ります。設定の例は [ガイド](guide.md) の `serve` の節にあります。画面から渡した URL は、`serve` を動かしているマシンから取得されます。
+`serve` の画面を他の人にも開く場合（`serve.host` を `127.0.0.1` 以外にする場合）は、`serve.access.auth` で認証を付けてください。家や職場の LAN の中だけに開くなら、`serve.access.allowed_clients` に `192.168.11.0/24` のような範囲を書くと、範囲の外からの接続を断ります。この場合は認証なしでも起動できますが、範囲の中の端末はだれでも読み書きでき、画面からこのマシンのファイルをパスで取り込めます。設定の例は [ガイド](guide.md) の `serve` の節にあります。画面から渡した URL は、`serve` を動かしているマシンから取得されます。
 
 CLI の `ingress` も作業 ID を表示します。別の端末でプロジェクトを開き、`WORK_ID` を表示された ID に置き換えると進捗を確認できます。
 

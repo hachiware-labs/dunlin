@@ -2151,6 +2151,45 @@ impl Network {
     }
 }
 
+/// The ranges of a home or an office network, and of the machine itself: private, link-local
+/// and loopback addresses.
+const PRIVATE_RANGES: [&str; 8] = [
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "169.254.0.0/16",
+    "127.0.0.0/8",
+    "::1",
+    "fc00::/7",
+    "fe80::/10",
+];
+
+impl Network {
+    /// Whether every address of the range belongs to a home or an office network.
+    pub fn is_private(&self) -> bool {
+        PRIVATE_RANGES
+            .iter()
+            .filter_map(|range| Network::parse(range))
+            .any(|range| self.prefix >= range.prefix && range.contains(self.address))
+    }
+}
+
+/// Whether `allowed_clients` names somebody, and nobody outside home and office networks.
+pub fn private_clients(access: Option<&ConfigValue>) -> bool {
+    match access.and_then(|access| access.get("allowed_clients")) {
+        Some(ConfigValue::Array(ranges)) => {
+            !ranges.is_empty()
+                && ranges.iter().all(|range| {
+                    range
+                        .as_str()
+                        .and_then(Network::parse)
+                        .is_some_and(|range| range.is_private())
+                })
+        }
+        _ => false,
+    }
+}
+
 /// Whether a client may connect: any client when no range is listed, else the machine itself
 /// and the clients inside a listed range.
 pub fn client_allowed(networks: &[Network], address: std::net::IpAddr) -> bool {
@@ -2304,7 +2343,9 @@ pub fn validate_serve(
         .get("host")
         .and_then(ConfigValue::as_str)
         .unwrap_or_default();
-    if !is_loopback(host) && auth_type != "token" {
+    // Outside loopback, a token is asked of every client, unless only the clients of home and
+    // office networks are let in.
+    if !is_loopback(host) && auth_type != "token" && !private_clients(selected.get("access")) {
         report.issue(
             "ARG_CONFLICT",
             path!["serve", "host"],
@@ -2586,7 +2627,8 @@ fn serve_issues(input: &ConfigValue) -> Vec<(Issue, Vec<String>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Network, client_allowed};
+    use super::{Network, client_allowed, private_clients};
+    use crate::config_value::ConfigValue;
 
     fn ranges(values: &[&str]) -> Vec<Network> {
         values
@@ -2651,5 +2693,41 @@ mod tests {
             &ranges(&["192.168.11.7"]),
             "192.168.11.8".parse().unwrap()
         ));
+    }
+
+    #[test]
+    fn tells_home_and_office_ranges_from_the_others() {
+        let access = |values: &[&str]| {
+            ConfigValue::Object(vec![(
+                "allowed_clients".into(),
+                ConfigValue::Array(
+                    values
+                        .iter()
+                        .map(|value| ConfigValue::String((*value).into()))
+                        .collect(),
+                ),
+            )])
+        };
+        for values in [
+            &["192.168.11.0/24"][..],
+            &["192.168.11.7", "10.0.0.0/8", "172.16.0.0/12"],
+            &["fd00::/8", "fe80::/10", "::1", "127.0.0.1"],
+        ] {
+            assert!(private_clients(Some(&access(values))), "{values:?}");
+        }
+        for values in [
+            &[][..],
+            &["0.0.0.0/0"],
+            &["192.168.0.0/15"],
+            &["172.16.0.0/11"],
+            &["192.168.11.0/24", "203.0.113.0/24"],
+            &["100.64.0.0/10"],
+            &["::/0"],
+            &["192.168.11.*"],
+        ] {
+            assert!(!private_clients(Some(&access(values))), "{values:?}");
+        }
+        assert!(!private_clients(None));
+        assert!(!private_clients(Some(&ConfigValue::Object(Vec::new()))));
     }
 }

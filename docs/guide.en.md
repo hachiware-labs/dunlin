@@ -227,16 +227,25 @@ nest eval .knowledge-nest/trials/tune/010.yaml
 
 ## 7 Release
 
+What is served changes only when you say so. `build`, `eval`, and `optimize` never change it. Even after you add documents and rebuild, the previous index stays served until you check the new one and `release` it. A deleted document or a wrong setting never reaches users before you have looked.
+
 ```sh
-nest list indexes
-nest release tune/010
-nest release main --name release
+nest build                  # make; what is served does not change
+nest list indexes           # see the indexes made, and the one being served
+nest search "..." --index main
+nest eval                   # check
+nest release main           # serve the index you checked
 ```
 
-- `release <index> [--name <name>]` gives a served name to an index. The default name is `release`.
-- Pointing the name at another index says which one it replaced. To go back, release the earlier index again. The record is never erased.
+| Operation | What is served |
+|---|---|
+| `nest build`, `nest eval`, `nest optimize` | Unchanged |
+| `nest build --release` | Switches to the index just made. A shortcut if you want to serve every build |
+| `nest release <index> [--name <name>]` | Switches to the index you name. The default name is `release` |
+
+- **By name or by number.** `release` takes an index's name (`main`, `tune/010`) or the version number shown by `nest list indexes`. For the index listed as `v7`, run `nest release 7`.
+- **Go back to an earlier version.** Release that index again. It says which version it switched from and to, and the record is never erased.
 - `nest list indexes` shows which index is served under which name.
-- `build --release` gives the index that `build` just made the served name directly.
 
 > `serve` does not read these served names yet. To serve over MCP or HTTP, use the earlier flow.
 

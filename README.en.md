@@ -248,6 +248,8 @@ Trial  Recall  To base  What
 000    0.667   -        base
 ```
 
+Rebuilding, evaluating, and optimizing never change the index being served. It switches only when you check and `release` (to switch on every build, use `nest build --release`).
+
 For now this supports text and Markdown with keyword search, and `serve` does not yet serve its indexes. The steps and the details are in the [Guide](docs/guide.en.md).
 
 ## Install

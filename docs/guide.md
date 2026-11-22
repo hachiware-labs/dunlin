@@ -225,16 +225,25 @@ nest eval .knowledge-nest/trials/tune/010.yaml
 
 ## 7 リリースする
 
+提供する索引が切り替わるのは、あなたが明示したときだけです。`build`、`eval`、`optimize` は、どれも提供を動かしません。資料を足して作り直しても、確かめて `release` するまでは、前の索引が提供され続けます。文書の削除や設定の誤りが、確かめる前に利用者へ届くことはありません。
+
 ```sh
-nest list indexes
-nest release tune/010
-nest release main --name release
+nest build                  # 作る。提供は動かない
+nest list indexes           # できた索引と、いま提供している索引を見る
+nest search "..." --index main
+nest eval                   # 確かめる
+nest release main           # 確かめた索引を提供する
 ```
 
-- `release <索引> [--name <名前>]` は、索引を提供用の名前に付けます。名前の既定は `release` です。
-- 名前に別の索引を付けると、置き換えたことが表示されます。前の索引に戻すには、もう一度その索引を `release` します。記録は消えません。
+| 操作 | 提供 |
+|---|---|
+| `nest build`、`nest eval`、`nest optimize` | 動かさない |
+| `nest build --release` | 作り終えた索引へ切り替える。作るたびに提供したいときの近道 |
+| `nest release <索引> [--name <名前>]` | 指した索引へ切り替える。名前の既定は `release` |
+
+- **名前でも番号でも指せる。** `release` には、索引の名前（`main`、`tune/010`）のほか、`nest list indexes` に出る版の番号も渡せます。`v7` と表示された索引なら `nest release 7` です。
+- **前の版に戻す。** 戻したい索引をもう一度 `release` します。どの版からどの版へ切り替えたかが表示され、記録は消えません。
 - `nest list indexes` に、どの索引がどの名前で提供されているかが出ます。
-- 設定の `build --release` は、`build` で作った索引をそのまま提供用の名前にします。
 
 > `serve` は、この提供用の名前をまだ読みません。MCP や HTTP で提供するときは、従来の流れを使います。
 

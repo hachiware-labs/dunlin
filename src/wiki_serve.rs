@@ -78,11 +78,6 @@ const STYLE: &str = concat!(
     ".brand strong{font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
     ".logo{flex:none;width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#2563eb,#7c3aed);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}",
     ".kind{margin-left:auto;flex:none;font-size:11px;font-weight:700;padding:1px 9px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}",
-    ".home{display:flex;gap:6px;margin:0 0 14px}",
-    ".home a{flex:1;text-align:center;font-size:13px;padding:5px 8px;border-radius:8px;color:var(--text);text-decoration:none;background:var(--card);border:1px solid var(--line)}",
-    ".home a:hover{border-color:var(--accent)}.home a[aria-current]{background:var(--accent-soft);border-color:transparent;color:var(--accent);font-weight:600}",
-    ".add{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 12px 14px;box-shadow:var(--shadow)}",
-    "main>nav .add h2{margin:0 0 4px}",
     ".field{display:block;margin:8px 0 0}.field span{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}",
     "input,textarea{font:inherit;font-size:14px;line-height:1.5;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}",
     "input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}",
@@ -91,8 +86,6 @@ const STYLE: &str = concat!(
     "button{font:inherit;font-size:13px;line-height:1.4;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:8px;padding:6px 12px;cursor:pointer;margin:8px 6px 0 0}",
     "button:hover{border-color:var(--accent);color:var(--accent)}",
     "button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:600}button.primary:hover{filter:brightness(1.08);color:var(--accent-text)}",
-    ".add button{width:100%;margin:10px 0 0}",
-    "main>nav h2{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);margin:24px 8px 6px}",
     ".empty{font-size:13px;color:var(--muted);margin:0 8px}",
     ".tree{list-style:none;margin:0;padding:0}.tree .tree{margin-left:10px;padding-left:8px;border-left:1px solid var(--line)}",
     ".tree summary{list-style:none;display:flex;align-items:center;gap:6px;cursor:pointer;padding:3px 8px;border-radius:6px;font-size:13.5px;font-weight:600;color:var(--muted)}",
@@ -122,22 +115,46 @@ const STYLE: &str = concat!(
     ".source-text{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:18px 22px;font-size:14.5px}.source-text>:first-child{margin-top:0}.source-text>:last-child{margin-bottom:0}",
     "pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;margin:0}",
     "blockquote{margin:8px 0;padding:4px 14px;border-left:3px solid var(--line);color:var(--muted)}",
-    "section[data-work-status]{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;padding:12px 18px;margin-bottom:16px;box-shadow:var(--shadow);overflow-wrap:anywhere}",
-    "section[data-work-status=succeeded]{border-left-color:var(--ok)}section[data-work-status=failed]{border-left-color:var(--bad)}",
-    "section[data-work-status] h3{margin:0;font-size:15px}section[data-work-status=succeeded] h3{color:var(--ok)}section[data-work-status=failed] h3{color:var(--bad)}",
-    "section[data-work-status] h3+p{margin:0;font-size:12px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}",
-    "section[data-work-status] summary{cursor:pointer;font-size:13px;color:var(--muted)}",
+    ".work{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:12px;padding:14px 18px;margin-bottom:16px;box-shadow:var(--shadow);overflow-wrap:anywhere}",
+    ".work.succeeded{border-left-color:var(--ok)}.work.failed{border-left-color:var(--bad)}",
+    ".work header{display:flex;align-items:center;gap:10px;font-size:15px}.work header span:last-child{font-size:13px;color:var(--muted)}",
+    ".work>p{margin:8px 0 0;font-size:14px}.work>blockquote{margin:10px 0 4px;color:var(--text);border-left-color:var(--accent)}.work .hint{margin:0}",
+    ".work section h3{display:none}.work section h3+p{margin:8px 0 0;font-size:11.5px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}",
+    ".work section>p{font-size:14px}.work section summary{cursor:pointer;font-size:13px;color:var(--muted)}.work section button{margin-top:6px}",
+    ".work article{border-top:1px solid var(--line);margin-top:10px;padding:10px 0 0;background:none;border-radius:0;box-shadow:none;border-left:0;border-right:0;border-bottom:0}.work article h4{margin:0 0 6px;font-size:14px}",
     "progress{width:100%;height:6px;accent-color:var(--accent)}",
-    ".ops{margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:2px 20px;box-shadow:var(--shadow)}.ops[open]{padding-bottom:18px}",
-    ".ops>summary{cursor:pointer;font-weight:600;padding:12px 0}",
-    ".ops label{display:block;font-size:12px;color:var(--muted);margin:10px 0 3px}",
-    ".ops details>summary{cursor:pointer;font-size:13px;color:var(--muted);margin-top:14px}",
-    ".ops h3{font-size:12px;letter-spacing:.06em;color:var(--muted);margin:22px 0 4px}.ops ul{padding-left:1.2em;font-size:13px;margin:0}",
+    ".menu{list-style:none;margin:14px 0 0;padding:0}.menu a{display:block;padding:6px 10px;border-radius:8px;color:var(--text);text-decoration:none;font-size:14px}",
+    ".menu a:hover{background:var(--hover)}.menu a[aria-current]{background:var(--accent-soft);color:var(--accent);font-weight:600}",
+    ".add{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}",
+    ".add>summary{list-style:none;cursor:pointer;padding:9px 12px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;color:var(--accent)}.add>summary::-webkit-details-marker{display:none}",
+    ".add>summary::before{content:'+';flex:none;width:20px;height:20px;border-radius:50%;background:var(--accent);color:var(--accent-text);display:grid;place-items:center;font-size:15px;line-height:1}",
+    ".add[open]>summary{border-bottom:1px solid var(--line)}.add form{padding:12px 12px 14px}.add .hint{margin:0}",
+    ".add form details>summary{font-size:12px;color:var(--muted);cursor:pointer;margin-top:10px}.add button{width:100%;margin:12px 0 0}",
+    "main>nav h2{display:flex;align-items:baseline;gap:8px;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);margin:24px 8px 6px}",
+    "main>nav h2 small,.archive small{font-weight:400;letter-spacing:0;opacity:.85}",
+    ".archive{margin-top:24px}.archive>summary{cursor:pointer;font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--muted);padding:0 8px 6px}.archive small{margin-left:8px}",
+    ".hint{font-size:12.5px;line-height:1.6;color:var(--muted);margin:0 0 10px}.lead{font-size:17px;margin:0 0 6px}",
+    ".ask{display:flex;gap:8px;margin-top:22px}.ask input{flex:1;padding:10px 14px;font-size:15px;border-radius:10px}.ask button{margin:0;padding:0 20px;border-radius:10px;font-size:14px}",
+    ".tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:16px}",
+    ".tile{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;color:var(--text);text-decoration:none;box-shadow:var(--shadow)}a.tile:hover{border-color:var(--accent)}",
+    ".tile b{font-size:26px;line-height:1.25}.tile span{font-size:13px;font-weight:600}.tile small{font-size:11.5px;line-height:1.5;color:var(--muted)}.tile.warn b{color:var(--warn)}",
+    ".tile form{margin-top:auto}.tile button{margin:8px 0 0;padding:3px 10px;font-size:12px}",
+    ".panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin-top:16px;box-shadow:var(--shadow)}.panel h2{font-size:15px;margin:0 0 8px}",
+    ".panel label{display:block;font-size:12px;color:var(--muted);margin:10px 0 0}.panel label input,.panel label textarea{margin-top:3px}",
+    ".panel details>summary{cursor:pointer;font-size:13px;color:var(--muted);margin-top:12px}.row button:first-of-type{margin-top:0}.row button{margin-top:0}",
+    ".cards,.works{list-style:none;margin:0;padding:0}.cards li+li{border-top:1px solid var(--line)}",
+    ".cards a{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:10px 12px;margin:0 -12px;border-radius:8px;text-decoration:none;color:var(--text)}.cards a:hover,.works a:hover{background:var(--hover)}",
+    ".cards strong{font-size:15px}.cards time{grid-row:1;grid-column:2;font-size:12px;color:var(--muted)}.cards span{grid-column:1/-1;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+    ".works a{display:flex;align-items:center;gap:10px;padding:7px 12px;margin:0 -12px;border-radius:8px;text-decoration:none;color:var(--text);font-size:14px}",
+    ".works span{font-size:13px;color:var(--muted)}.works time{margin-left:auto;font-size:12px;color:var(--muted)}",
+    ".dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--accent)}.dot.succeeded{background:var(--ok)}.dot.failed{background:var(--bad)}",
+    ".more{margin:8px 0 0;font-size:13px}form.inline{display:inline}form.inline button{margin:0 0 0 8px;padding:1px 9px;font-size:12px;color:var(--muted)}",
+    "@media(max-width:820px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}",
     ".pane>summary{display:none}",
     "@media(max-width:820px){main{display:block}main>nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.pane>summary{display:list-item;cursor:pointer;font-weight:600;margin-bottom:8px}.view{padding:16px}article{padding:22px 20px;border-radius:12px}article h1,article.top h1{font-size:23px}}",
 );
 
-const SELECTION_SCRIPT: &str = "document.addEventListener(\"pointerup\", () => { const selection = getSelection(); const section = document.getElementById(\"content\"); const text = selection && section.contains(selection.anchorNode) && section.contains(selection.focusNode) ? selection.toString().trim() : \"\"; if (text) { document.getElementById(\"action-target\").value = text.slice(0, 2000); document.getElementById(\"selection-label\").hidden = false; } });";
+const SELECTION_SCRIPT: &str = "document.addEventListener(\"pointerup\", () => { const selection = getSelection(); const section = document.getElementById(\"content\"); const text = selection && section.contains(selection.anchorNode) && section.contains(selection.focusNode) ? selection.toString().trim() : \"\"; if (text) { document.querySelectorAll(\"[data-selection]\").forEach((input) => { input.value = text.slice(0, 2000); }); document.querySelectorAll(\".selection-label\").forEach((label) => { label.hidden = false; }); } });";
 
 fn stage_label(stage: &str) -> &str {
     WORK_STAGES
@@ -461,6 +478,148 @@ impl Tree {
             out += &format!("<li>{leaf}</li>");
         }
         out + "</ul>"
+    }
+}
+
+/// What a work did, in a line or two above its details: the passage a citation quotes, the pages
+/// an instruction wrote, or how many findings a check has.
+fn work_summary(work: &ConfigValue) -> String {
+    let status = js_text(work.get("status"));
+    let command = js_text(work.get("command"));
+    let mut out = format!(
+        "<header><span class=\"dot {}\"></span><strong>{}</strong><span>{}</span></header>",
+        escape_html(&status),
+        command_label(&command),
+        escape_html(stage_label(&js_text(work.get("stage"))))
+    );
+    let Some(result) = work.get("result").filter(|_| status == "succeeded") else {
+        return out;
+    };
+    if command == "cite" {
+        let source = result
+            .get("evidence")
+            .and_then(|evidence| evidence.get("source"));
+        out += &format!(
+            "<blockquote>{}</blockquote><p class=\"hint\">{} {}</p>",
+            escape_html(&js_text(result.get("quote"))),
+            escape_html(&js_text(source.and_then(|source| source.get("objectId")))),
+            line_range(
+                result
+                    .get("evidence")
+                    .and_then(|evidence| evidence.get("range"))
+            )
+        );
+    }
+    if let Some(ConfigValue::Number(sources)) = result.get("sources") {
+        out += &format!("<p>原本 {} 件を読みました。</p>", js_number(*sources));
+    }
+    let written = items(result.get("pages"));
+    if command != "query" && !written.is_empty() {
+        out += &format!(
+            "<p>書いたページ：{}</p>",
+            written
+                .iter()
+                .map(|page| {
+                    let id = js_text(page.get("id"));
+                    let title = match page.get("title") {
+                        Some(ConfigValue::String(title)) => title.clone(),
+                        _ => id.clone(),
+                    };
+                    format!(
+                        "<a href=\"/?page={}\">{}</a>",
+                        encode_uri_component(&id),
+                        escape_html(&title)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("、")
+        );
+    }
+    if command == "verify" {
+        let issues = items(result.get("issues")).len();
+        out += &if issues == 0 {
+            "<p>指摘はありませんでした。</p>".to_owned()
+        } else {
+            format!("<p>指摘が {issues} 件あります。</p>")
+        };
+    }
+    let skipped = items(result.get("skipped")).len();
+    if skipped > 0 {
+        out += &format!("<p>読めない形式の資料 {skipped} 件を飛ばしました。</p>");
+    }
+    out
+}
+
+/// The name of a recorded command on the screen.
+fn command_label(command: &str) -> &'static str {
+    match command {
+        "ingress" => "取り込み",
+        "query" => "質問",
+        "instruct" => "指示",
+        "verify" => "検査",
+        "archive" => "アーカイブ",
+        "undo" => "取り消し",
+        "cite" => "引用の確認",
+        "save-answer" => "回答の保存",
+        "issue" => "指摘の更新",
+        _ => "作業",
+    }
+}
+
+/// Seconds since 1970 of a time written as `2026-01-02T03:04:05.678Z`.
+fn epoch_seconds(iso: &str) -> Option<i64> {
+    let number = |range: std::ops::Range<usize>| iso.get(range)?.parse::<i64>().ok();
+    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
+    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some((era * 146_097 + day_of_era - 719_468) * 86_400 + hour * 3600 + minute * 60 + second)
+}
+
+/// How long ago a time was, in words. It does not depend on the time zone of the reader.
+fn ago(iso: &str, now: i64) -> String {
+    let Some(then) = epoch_seconds(iso) else {
+        return String::new();
+    };
+    match (now - then).max(0) {
+        seconds if seconds < 60 => "たった今".into(),
+        seconds if seconds < 3600 => format!("{} 分前", seconds / 60),
+        seconds if seconds < 86_400 => format!("{} 時間前", seconds / 3600),
+        seconds => format!("{} 日前", seconds / 86_400),
+    }
+}
+
+/// The start of a page as one line of plain text, without citation numbers and Markdown marks.
+fn snippet(markdown: &str) -> String {
+    let mut plain = String::new();
+    let mut rest = markdown;
+    while let Some(open) = rest.find('[') {
+        plain.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after.find(']') {
+            Some(close) if close > 0 && after[..close].bytes().all(|b| b.is_ascii_digit()) => {
+                rest = &after[close + 1..];
+            }
+            _ => {
+                plain.push('[');
+                rest = after;
+            }
+        }
+    }
+    plain.push_str(rest);
+    let words: Vec<&str> = plain
+        .split_whitespace()
+        .map(|word| word.trim_matches(['#', '*', '`', '|', '>', '-']))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let line = words.join(" ");
+    if line.chars().count() > 90 {
+        format!("{}…", line.chars().take(90).collect::<String>())
+    } else {
+        line
     }
 }
 
@@ -1348,13 +1507,6 @@ impl WikiServer {
             .iter()
             .filter(|page| !truthy(page.get("archived")))
             .collect();
-        let page_link = |page: &&ConfigValue| {
-            format!(
-                "<li><a href=\"/?page={}\">{}</a></li>",
-                encode_uri_component(&js_text(page.get("id"))),
-                escape_html(&js_text(page.get("title")))
-            )
-        };
         let current_page = current.map(|page| js_text(page.get("id")));
         // Pages as a tree of folders: the parts of their IDs (the PARA categories come first).
         let mut page_tree = Tree::default();
@@ -1481,7 +1633,6 @@ impl WikiServer {
                 &js_text(a.get("changed")),
             )
         });
-        let recent: String = recent.iter().take(8).map(page_link).collect();
         let rules = if param("rules").is_some() {
             let file = node_path::resolve(
                 &base.config_root,
@@ -1497,6 +1648,21 @@ impl WikiServer {
         } else {
             None
         };
+        // What the right column shows. Each view has its content and the actions that belong to it.
+        enum Shown<'a> {
+            Page(&'a ConfigValue),
+            Source(&'a (String, ConfigValue, bool)),
+            Rules(&'a str),
+            History,
+            Top,
+        }
+        let shown = match (current, current_source, &rules) {
+            (Some(page), _, _) => Shown::Page(page),
+            (None, Some(source), _) => Shown::Source(source),
+            (None, None, Some(rules)) => Shown::Rules(rules),
+            (None, None, None) if param("history").is_some() => Shown::History,
+            (None, None, None) => Shown::Top,
+        };
         let selection_key = uuid::Uuid::new_v4().to_string();
         let policy = CONTENT_SECURITY_POLICY.replace("form-action 'none'", "form-action 'self'");
         let form_key = &self.form_key;
@@ -1504,61 +1670,251 @@ impl WikiServer {
             .iter()
             .map(|page| str_of(page, "id").to_owned())
             .collect();
-        let center = match (current, current_source, &rules) {
-            (Some(current), _, _) => format!(
-                "<h1>{}</h1>{}{}<h2>出典</h2><ol>{}</ol>",
-                escape_html(&js_text(current.get("title"))),
-                if truthy(current.get("archived")) {
-                    "<p>アーカイブ済み</p>"
-                } else {
-                    ""
-                },
-                display_page(current, &known),
-                items(current.get("citations"))
-                    .iter()
-                    .map(|citation| {
-                        let source = citation.get("source");
-                        let name =
-                            escape_html(&js_text(source.and_then(|source| source.get("objectId"))));
-                        let label = match source
-                            .and_then(|source| source.get("sourceId"))
-                            .and_then(ConfigValue::as_str)
-                        {
-                            Some(id) => format!(
-                                "<a href=\"/?source={}\">{name}</a>",
-                                encode_uri_component(id)
-                            ),
-                            None => name,
-                        };
-                        format!("<li>{label} {}</li>", line_range(citation.get("range")))
-                    })
-                    .collect::<String>()
-            ),
-            (None, Some((id, source, reflected)), _) => {
-                self.source_view(id, source, *reflected, &content)?
+        let current_id = current.map(|page| js_text(page.get("id")));
+        let action = current_id.as_deref().map_or_else(String::new, |id| {
+            format!("?page={}", encode_uri_component(id))
+        });
+        // The start of a form that queues an instruction for the shown page, if any.
+        let form = |class: &str| {
+            format!(
+                "<form class=\"{class}\" method=\"post\" action=\"/action{action}\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\"><input type=\"hidden\" name=\"page\" value=\"{}\">",
+                escape_html(current_id.as_deref().unwrap_or_default())
+            )
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs() as i64);
+        let work_list = |works: &[ConfigValue]| {
+            if works.is_empty() {
+                return "<p class=\"empty\">まだありません</p>".to_owned();
             }
-            (None, None, Some(rules)) => render(rules),
-            (None, None, None) => format!(
-                "<h1>{}</h1><h2>目的と範囲</h2><p>{}</p><p>{}</p><p>原本 {} 件、未反映 {count} 件</p>{}<h2>最近更新したページ</h2><ul>{recent}</ul>",
-                escape_html(&js_text(about.get("title"))),
-                escape_html(&js_text(about.get("purpose"))),
-                escape_html(&js_text(about.get("out_of_scope"))),
-                sources.len(),
-                match (open_issues, inspection) {
+            format!(
+                "<ul class=\"works\">{}</ul>",
+                works
+                    .iter()
+                    .map(|item| format!(
+                        "<li><a href=\"/?{}\"><span class=\"dot {}\"></span><strong>{}</strong><span>{}</span><time>{}</time></a></li>",
+                        escape_html(&work_link(item)),
+                        escape_html(&js_text(item.get("status"))),
+                        command_label(&js_text(item.get("command"))),
+                        escape_html(stage_label(&js_text(item.get("stage")))),
+                        escape_html(&ago(&js_text(item.get("queued_at")), now))
+                    ))
+                    .collect::<String>()
+            )
+        };
+        let (name, center, panels) = match &shown {
+            Shown::Page(page) => {
+                let archived = truthy(page.get("archived"));
+                let center = format!(
+                    "<h1>{}</h1>{}{}<h2>出典</h2><ol>{}</ol>",
+                    escape_html(&js_text(page.get("title"))),
+                    if archived {
+                        "<p>アーカイブ済み</p>"
+                    } else {
+                        ""
+                    },
+                    display_page(page, &known),
+                    items(page.get("citations"))
+                        .iter()
+                        .enumerate()
+                        .map(|(index, citation)| {
+                            let source = citation.get("source");
+                            let name = escape_html(&js_text(
+                                source.and_then(|source| source.get("objectId")),
+                            ));
+                            let label = match source
+                                .and_then(|source| source.get("sourceId"))
+                                .and_then(ConfigValue::as_str)
+                            {
+                                Some(id) => format!(
+                                    "<a href=\"/?source={}\">{name}</a>",
+                                    encode_uri_component(id)
+                                ),
+                                None => name,
+                            };
+                            format!(
+                                "<li>{label} {}{}<input type=\"hidden\" name=\"value\" value=\"{}\"><button name=\"action\" value=\"cite\">引用箇所を見る</button></form></li>",
+                                line_range(citation.get("range")),
+                                form("inline"),
+                                index + 1
+                            )
+                        })
+                        .collect::<String>()
+                );
+                let manage = format!(
+                    "<section class=\"panel\"><h2>このページの管理</h2><p class=\"hint\">検査は引用とリンクを確かめます。内容の検査は AI が関連ページとの食い違いを調べます。</p>{}<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button>{}</form></section>",
+                    form("row"),
+                    if archived {
+                        "<button name=\"action\" value=\"restore\">アーカイブから戻す</button>"
+                    } else {
+                        "<button name=\"action\" value=\"archive\">アーカイブする</button>"
+                    }
+                );
+                let panels = if archived {
+                    manage
+                } else {
+                    format!(
+                        concat!(
+                            "<section class=\"panel\"><h2>このページに質問する</h2>{}<input type=\"hidden\" name=\"second\" data-selection>",
+                            "<textarea name=\"value\" rows=\"2\" required placeholder=\"このページの内容について質問します\"></textarea>",
+                            "<p class=\"hint selection-label\" hidden>本文で選択した範囲について質問します</p>",
+                            "<button class=\"primary\" name=\"action\" value=\"query\">質問する</button></form></section>",
+                            "<section class=\"panel\"><h2>AI に指示して直す</h2><p class=\"hint\">ページは直接編集せず、指示で直します。引用は保たれます。</p>{}",
+                            "<textarea name=\"value\" rows=\"2\" required placeholder=\"例：点検前の確認事項を箇条書きにしてください\"></textarea>",
+                            "<label>対象の節・範囲（本文を選択すると入ります）<input name=\"second\" data-selection></label>",
+                            "<details><summary>資料にない内容を補足する</summary><label>補足の内容<textarea name=\"supplement\" rows=\"2\"></textarea></label>",
+                            "<label>記録者<input name=\"third\"></label></details>",
+                            "<button class=\"primary\" name=\"action\" value=\"instruct\">指示を実行</button></form></section>{}"
+                        ),
+                        form(""),
+                        form(""),
+                        manage
+                    )
+                };
+                ("page", center, panels)
+            }
+            Shown::Source((id, source, reflected)) => {
+                let object_id = js_text(source.get("objectId"));
+                let mut panels = String::new();
+                if !reflected {
+                    panels += &format!(
+                        "<section class=\"panel\"><h2>ページに反映する</h2><p class=\"hint\">この原本は保存されていますが、AI はまだページに書いていません。未反映の原本をまとめて反映します。</p>{}<button class=\"primary\" name=\"action\" value=\"pending\">未反映の原本を反映する</button></form></section>",
+                        form("row")
+                    );
+                }
+                if crate::wiki_fetch::is_web_address(&object_id) {
+                    panels += &format!(
+                        "<section class=\"panel\"><h2>取り直す</h2><p class=\"hint\">同じ URL をもう一度取得します。中身が変わっていれば、この原本の新しい版になります。</p>{}<input type=\"hidden\" name=\"url\" value=\"{}\"><button name=\"action\" value=\"ingress\">この URL を取り直す</button></form></section>",
+                        form("row"),
+                        escape_html(&object_id)
+                    );
+                }
+                (
+                    "source",
+                    self.source_view(id, source, *reflected, &content)?,
+                    panels,
+                )
+            }
+            Shown::Rules(rules) => (
+                "rules",
+                render(rules),
+                format!(
+                    "<section class=\"panel\"><h2>決まりを追加する</h2><p class=\"hint\">ここに足した決まりは、これ以降のすべての取り込みと指示に効きます。</p>{}<textarea name=\"value\" rows=\"2\" required placeholder=\"例：手順は番号付きで書く\"></textarea><button class=\"primary\" name=\"action\" value=\"rule\">決まりを追加</button></form></section>",
+                    form("")
+                ),
+            ),
+            Shown::History => (
+                "history",
+                format!(
+                    "<h1>作業の履歴</h1><p class=\"meta\">取り込み、質問、指示、検査は、1回ごとに作業として記録されます。開くと結果を見られ、取り消せるものは取り消せます。</p>{}",
+                    work_list(&history)
+                ),
+                String::new(),
+            ),
+            Shown::Top => {
+                let scope = js_text(about.get("out_of_scope"));
+                let center = format!(
+                    "<h1>{}</h1><p class=\"lead\">{}</p>{}{}<input name=\"value\" required placeholder=\"この {kind} に質問する\"><button class=\"primary\" name=\"action\" value=\"query\">質問する</button></form>",
+                    escape_html(&js_text(about.get("title"))),
+                    escape_html(&js_text(about.get("purpose"))),
+                    if scope.is_empty() {
+                        String::new()
+                    } else {
+                        format!("<p class=\"meta\">範囲外：{}</p>", escape_html(&scope))
+                    },
+                    form("ask"),
+                    kind = if base.kind == "para" { "PARA" } else { "Wiki" },
+                );
+                let issues = match (open_issues, inspection) {
                     (Some(open), Some(inspection)) => format!(
-                        "<p><a href=\"/?{}\">前回の検査で未対応 {open} 件</a></p>",
+                        "<a class=\"tile\" href=\"/?{}\"><b>{open}</b><span>未対応の指摘</span><small>前回の検査の結果を開く</small></a>",
                         escape_html(&work_link(inspection))
                     ),
-                    _ => String::new(),
-                }
-            ),
+                    _ => "<div class=\"tile\"><b>–</b><span>未対応の指摘</span><small>まだ検査していません</small></div>".to_owned(),
+                };
+                let tiles = format!(
+                    concat!(
+                        "<div class=\"tiles\"><a class=\"tile\" href=\"#pages\"><b>{}</b><span>ページ</span><small>AI がまとめた記事</small></a>",
+                        "<div class=\"tile\"><b>{}</b><span>原本</span><small>取り込んだ資料</small></div>",
+                        "<div class=\"tile{}\"><b>{count}</b><span>未反映</span><small>まだページに書かれていない原本</small>{}</div>{issues}</div>"
+                    ),
+                    active.len(),
+                    sources.len(),
+                    if count > 0 { " warn" } else { "" },
+                    if count > 0 {
+                        format!(
+                            "{}<button name=\"action\" value=\"pending\">反映する</button></form>",
+                            form("row")
+                        )
+                    } else {
+                        String::new()
+                    },
+                    count = count,
+                    issues = issues,
+                );
+                let categories = if base.kind == "para" {
+                    format!(
+                        "<div class=\"tiles\">{}</div>",
+                        CATEGORIES
+                            .iter()
+                            .map(|category| format!(
+                                "<div class=\"tile\"><b>{}</b><span>{category}</span><small>{}</small></div>",
+                                active
+                                    .iter()
+                                    .filter(|page| str_of(page, "id")
+                                        .starts_with(&format!("{category}/")))
+                                    .count(),
+                                match *category {
+                                    "Projects" => "期限のある取り組み",
+                                    "Areas" => "続けて担当する領域",
+                                    "Resources" => "関心のあるテーマの資料",
+                                    _ => "終わったもの、休止中のもの",
+                                }
+                            ))
+                            .collect::<String>()
+                    )
+                } else {
+                    String::new()
+                };
+                let pages_panel = if recent.is_empty() {
+                    "<section class=\"panel\" id=\"pages\"><h2>最近更新したページ</h2><p class=\"empty\">まだページがありません。左上の「資料を取り込む」に URL かファイルを渡すと、AI が読んでページを書きます。</p></section>".to_owned()
+                } else {
+                    format!(
+                        "<section class=\"panel\" id=\"pages\"><h2>最近更新したページ</h2><ul class=\"cards\">{}</ul></section>",
+                        recent
+                            .iter()
+                            .take(8)
+                            .map(|page| format!(
+                                "<li><a href=\"/?page={}\"><strong>{}</strong><span>{}</span><time>{}</time></a></li>",
+                                encode_uri_component(&js_text(page.get("id"))),
+                                escape_html(&js_text(page.get("title"))),
+                                escape_html(&snippet(str_of(page, "markdown"))),
+                                escape_html(&ago(&js_text(page.get("changed")), now))
+                            ))
+                            .collect::<String>()
+                    )
+                };
+                let panels = format!(
+                    concat!(
+                        "{tiles}{categories}{pages_panel}",
+                        "<section class=\"panel\"><h2>最近の作業</h2>{}<p class=\"more\"><a href=\"/?history\">作業の履歴をすべて見る</a></p></section>",
+                        "<section class=\"panel\"><h2>点検する</h2><p class=\"hint\">検査は、引用が原本にあるか、版が古くないか、リンク切れがないかを確かめます。内容の検査は、AI がページ同士の食い違いを調べます。</p>",
+                        "{}<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button></form></section>"
+                    ),
+                    work_list(&history[..history.len().min(5)]),
+                    form("row"),
+                    tiles = tiles,
+                    categories = categories,
+                    pages_panel = pages_panel,
+                );
+                ("top", center, panels)
+            }
         };
-        let current_id = current.map(|page| js_text(page.get("id")));
-        let at_top = current.is_none() && current_source.is_none();
         // Where the shown item sits: its section and folders, then its name.
         let mut crumbs: Vec<String> = Vec::new();
-        let shown = match (current, current_source, &rules) {
-            (Some(page), _, _) => {
+        match &shown {
+            Shown::Page(page) => {
                 crumbs.push(
                     if truthy(page.get("archived")) {
                         "アーカイブ"
@@ -1572,21 +1928,17 @@ impl WikiServer {
                 parts.pop();
                 crumbs.extend(parts);
                 crumbs.push(js_text(page.get("title")));
-                "page"
             }
-            (None, Some((_, source, _)), _) => {
+            Shown::Source((_, source, _)) => {
                 let (parts, label) = source_path(&js_text(source.get("objectId")));
                 crumbs.push("原本".into());
                 crumbs.extend(parts);
                 crumbs.push(label);
-                "source"
             }
-            (None, None, Some(_)) => {
-                crumbs.push("運用の決まり".into());
-                "rules"
-            }
-            (None, None, None) => "top",
-        };
+            Shown::Rules(_) => crumbs.push("運用の決まり".into()),
+            Shown::History => crumbs.push("作業の履歴".into()),
+            Shown::Top => {}
+        }
         let crumbs = if crumbs.is_empty() {
             String::new()
         } else {
@@ -1605,34 +1957,27 @@ impl WikiServer {
                 tree.html()
             }
         };
+        let current_mark = |on: bool| {
+            if on { " aria-current=\"page\"" } else { "" }
+        };
         let body = format!(
             concat!(
                 "<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
                 "{refresh}<title>{title}</title><style>{style}</style>",
-                "<main><nav><details class=\"pane\" open><summary>ファイル</summary>",
+                "<main><nav><details class=\"pane\" open><summary>メニュー</summary>",
                 "<a class=\"brand\" href=\"/\"><span class=\"logo\"></span><strong>{title}</strong><span class=\"kind\">{kind}</span></a>",
-                "<p class=\"home\"><a href=\"/\"{top_current}>トップ</a><a href=\"/?rules\"{rules_current}>運用の決まり</a></p>",
-                "<form class=\"add\" method=\"post\" enctype=\"multipart/form-data\" action=\"/action{action}\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\">",
-                "<input type=\"hidden\" name=\"page\" value=\"{page}\"><h2>資料を取り込む</h2>",
+                "<details class=\"add\"{add_open}><summary>資料を取り込む</summary>",
+                "<form method=\"post\" enctype=\"multipart/form-data\" action=\"/action\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\">",
+                "<p class=\"hint\">URL かファイルを渡すと、原本として保存し、AI が読んでページに書きます。</p>",
                 "<label class=\"field\"><span>URL</span><input type=\"url\" name=\"url\" placeholder=\"https://example.com/page\"></label>",
                 "<label class=\"field\"><span>ファイル</span><input type=\"file\" name=\"upload\"></label>",
-                "<button class=\"primary\" name=\"action\" value=\"ingress\">取り込む</button>{pending}</form>",
-                "<h2>ページ</h2>{menu}<h2>原本</h2>{sources}",
-                "<h2>アーカイブ</h2>{archived}</details></nav>",
-                "<section class=\"view\">{crumbs}{work}<article id=\"content\" class=\"{shown}\">{center}</article>",
-                "<details class=\"ops\"{ops_open}><summary>質問と操作</summary>{target}",
-                "<form method=\"post\" enctype=\"multipart/form-data\" action=\"/action{action}\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\">",
-                "<input type=\"hidden\" name=\"page\" value=\"{page}\">",
-                "<label>質問、資料のパス、ページ ID、または作業 ID<textarea name=\"value\" rows=\"3\"></textarea></label><button class=\"primary\" name=\"action\" value=\"query\">質問する</button>",
-                "<button name=\"action\" value=\"ingress\">パスの資料を追加</button>",
-                "<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button>",
-                "<button name=\"action\" value=\"archive\">アーカイブ</button><button name=\"action\" value=\"restore\">復元</button><button name=\"action\" value=\"undo\">取り消す</button>",
-                "<details><summary>変更・出典</summary><label>対象の節・範囲、保存先ページ ID、または指摘の状態<input name=\"second\" id=\"action-target\"></label>",
-                "<label>補足の記録者、またはページのタイトル<input name=\"third\"></label><label>利用者の補足<textarea name=\"supplement\" rows=\"2\"></textarea></label>",
-                "{page_actions}",
-                "<button name=\"action\" value=\"save-answer\">回答をページに保存</button><button name=\"action\" value=\"issue\">指摘の状態を更新</button>",
-                "<button name=\"action\" value=\"rule\">今後の決まりに追記</button></details></form>",
-                "<h3>最近の作業</h3><ul>{history}</ul></details></section></main>",
+                "<details><summary>プロジェクト内のファイルを指定する</summary><label class=\"field\"><span>プロジェクトからのパス</span><input name=\"value\" placeholder=\"manuals/pump.md\"></label></details>",
+                "<button class=\"primary\" name=\"action\" value=\"ingress\">取り込む</button></form></details>",
+                "<ul class=\"menu\"><li><a href=\"/\"{top_current}>ホーム</a></li><li><a href=\"/?history\"{history_current}>作業の履歴</a></li>",
+                "<li><a href=\"/?rules\"{rules_current}>運用の決まり</a></li></ul>",
+                "<h2>ページ<small>AI がまとめた記事</small></h2>{menu}<h2>原本<small>取り込んだ資料</small></h2>{sources}",
+                "{archived}</details></nav>",
+                "<section class=\"view\">{crumbs}{work}<article id=\"content\" class=\"{name}\">{center}</article>{panels}</section></main>",
                 "{script}</html>"
             ),
             refresh = if working {
@@ -1642,62 +1987,41 @@ impl WikiServer {
             },
             title = escape_html(&js_text(about.get("title"))),
             style = STYLE,
-            top_current = if at_top && rules.is_none() {
-                " aria-current=\"page\""
-            } else {
-                ""
-            },
-            rules_current = if at_top && rules.is_some() {
-                " aria-current=\"page\""
-            } else {
-                ""
-            },
-            pending = if count > 0 {
-                format!(
-                    "<button name=\"action\" value=\"pending\">未反映の資料を取り込む（{count} 件）</button>"
-                )
-            } else {
-                String::new()
-            },
             kind = if base.kind == "para" { "PARA" } else { "Wiki" },
-            crumbs = crumbs,
-            shown = shown,
+            add_open = if sources.is_empty() { " open" } else { "" },
+            form_key = form_key,
+            top_current = current_mark(matches!(shown, Shown::Top)),
+            history_current = current_mark(matches!(shown, Shown::History)),
+            rules_current = current_mark(matches!(shown, Shown::Rules(_))),
             menu = tree_or_empty(&page_tree),
             sources = tree_or_empty(&source_tree),
-            archived = tree_or_empty(&archive_tree),
-            center = center,
-            ops_open = if current.is_some() { " open" } else { "" },
-            target = match current {
-                Some(current) => format!(
-                    "<p>対象 {}</p><p id=\"selection-label\" hidden>選択範囲を対象にします</p>",
-                    escape_html(&js_text(current.get("title")))
+            archived = if archive_tree.leaves.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<details class=\"archive\"{}><summary>アーカイブ<small>{} 件</small></summary>{}</details>",
+                    if current.is_some_and(|page| truthy(page.get("archived"))) {
+                        " open"
+                    } else {
+                        ""
+                    },
+                    archive_tree.leaves.len(),
+                    archive_tree.html()
+                )
+            },
+            crumbs = crumbs,
+            work = match &work {
+                Some(item) => format!(
+                    "<div class=\"work {}\">{}{}</div>",
+                    escape_html(&js_text(item.get("status"))),
+                    work_summary(item),
+                    render_work(Some(item), form_key, current_id.as_deref())
                 ),
                 None => String::new(),
             },
-            action = current_id.as_deref().map_or_else(String::new, |id| format!(
-                "?page={}",
-                encode_uri_component(id)
-            )),
-            form_key = form_key,
-            page = escape_html(current_id.as_deref().unwrap_or_default()),
-            page_actions = if current.is_some() {
-                "<button name=\"action\" value=\"instruct\">ページへの指示を実行</button><button name=\"action\" value=\"cite\">指定した番号の出典を開く</button>"
-            } else {
-                ""
-            },
-            work = render_work(work.as_ref(), form_key, current_id.as_deref()),
-            history = history
-                .iter()
-                .map(|item| format!(
-                    "<li><a href=\"/?{}\">{}</a></li>",
-                    escape_html(&work_link(item)),
-                    escape_html(&format!(
-                        "{} · {}",
-                        js_text(item.get("command")),
-                        stage_label(&js_text(item.get("stage")))
-                    ))
-                ))
-                .collect::<String>(),
+            name = name,
+            center = center,
+            panels = panels,
             script = if current.is_some() {
                 format!("<script nonce=\"{selection_key}\">{SELECTION_SCRIPT}</script>")
             } else {

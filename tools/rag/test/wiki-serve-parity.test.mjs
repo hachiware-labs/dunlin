@@ -75,14 +75,20 @@ function equalText(left, right, label) {
   assert.equal(left.length, right.length, label);
 }
 
-/** What both screens show of a full screen: the content and the work, without the layout. */
+/**
+ * What both screens show of a full screen: the content and the work, without the layout and the
+ * forms around them. The top page is the Rust screen's own (a home with the state of the project),
+ * so only its work is compared.
+ */
 function screenParts(body) {
   if (!body.startsWith('<!doctype html>')) return body;
-  const center = /<article id="content"[^>]*>([\s\S]*?)<\/article>/u.exec(body)?.[1]
-    ?? /<\/nav><section>([\s\S]*?)<\/section><aside>/u.exec(body)?.[1] ?? '';
+  const own = /<article id="content" class="([^"]*)">([\s\S]*?)<\/article>/u.exec(body);
+  let center = own ? own[2] : /<\/nav><section>([\s\S]*?)<\/section><aside>/u.exec(body)?.[1] ?? '';
+  if (own ? own[1] === 'top' : /^<h1>[^<]*<\/h1><h2>目的と範囲<\/h2>/u.test(center)) center = '';
   const work = /<section aria-live="polite"[\s\S]*?<\/section>/u.exec(body)?.[0] ?? '';
-  // Citations link to their source on the Rust screen.
-  return 'content: ' + center.replace(/<a href="\/\?source=[^"]*">(.*?)<\/a>/gu, '$1') + '\nwork: ' + work;
+  // On the Rust screen citations link to their source and open their quoted passage.
+  center = center.replace(/<form class="inline"[\s\S]*?<\/form>/gu, '').replace(/<a href="\/\?source=[^"]*">(.*?)<\/a>/gu, '$1');
+  return 'content: ' + center + '\nwork: ' + work;
 }
 
 /** Replaces form keys, nonces, work IDs, times, digests, ports and project paths by placeholders. */

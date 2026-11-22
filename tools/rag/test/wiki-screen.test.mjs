@@ -132,10 +132,17 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   const top = await send(port, {});
   assert.equal(top.status, 200);
   const host = new URL(web).host;
-  assert.match(top.body, /<nav>.*<h2>資料を取り込む<\/h2>.*<input type="url" name="url"/su);
-  assert.match(top.body, new RegExp(`<h2>原本</h2><ul class="tree"><li><details open><summary>Web</summary><ul class="tree"><li><details open><summary>${host.replace(/\./gu, '\\.')}</summary>`, 'u'));
+  assert.match(top.body, /<nav>.*<summary>資料を取り込む<\/summary>.*<input type="url" name="url"/su);
+  assert.match(top.body, new RegExp(`<h2>原本<small>取り込んだ資料</small></h2><ul class="tree"><li><details open><summary>Web</summary><ul class="tree"><li><details open><summary>${host.replace(/\./gu, '\\.')}</summary>`, 'u'));
   assert.match(top.body, /<a class="web" href="\/\?source=source-[0-9a-f]{24}" title="http:\/\/127\.0\.0\.1:\d+\/notes\.md"><span class="name">\/notes\.md<\/span><span class="badge">未反映<\/span><\/a>/u);
-  assert.match(top.body, /未反映の資料を取り込む（1 件）/u);
+  // The home: what the project is for, a question box, and its state with the next thing to do.
+  assert.match(top.body, /<article id="content" class="top"><h1>kb<\/h1><p class="lead">設備保全の手順<\/p><form class="ask"/u);
+  assert.match(top.body, /<a class="tile" href="#pages"><b>0<\/b><span>ページ<\/span>/u);
+  assert.match(top.body, /<div class="tile warn"><b>1<\/b><span>未反映<\/span>.*?<button name="action" value="pending">反映する<\/button>/u);
+  assert.match(top.body, /<h2>最近の作業<\/h2><ul class="works"><li><a href="\/\?work=run-[0-9a-f-]+"><span class="dot failed"><\/span><strong>取り込み<\/strong>/u);
+  const history = await send(port, { path: '/?history' });
+  assert.match(history.body, /<a href="\/\?history" aria-current="page">作業の履歴<\/a>/u);
+  assert.match(history.body, /<article id="content" class="history"><h1>作業の履歴<\/h1>/u);
 
   // The right column: a source shows where it came from and its text.
   const sourceLink = /href="\/\?(source=source-[0-9a-f]{24})"/u.exec(top.body)[1];
@@ -143,6 +150,9 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   assert.match(source.body, /<div class="crumbs"><span>原本<\/span><span>Web<\/span><span>127\.0\.0\.1:\d+<\/span><span>\/notes\.md<\/span><\/div><article id="content" class="source"><h1>http:\/\/127\.0\.0\.1:\d+\/notes\.md<\/h1>/u);
   assert.match(source.body, /<a href="http:\/\/127\.0\.0\.1:\d+\/notes\.md" rel="noreferrer noopener" target="_blank">/u);
   assert.match(source.body, /点検の記録を保管する。/u);
+  // What can be done with it: write it into the pages, or fetch its address again.
+  assert.match(source.body, /<button class="primary" name="action" value="pending">未反映の原本を反映する<\/button>/u);
+  assert.match(source.body, /<input type="hidden" name="url" value="http:\/\/127\.0\.0\.1:\d+\/notes\.md"><button name="action" value="ingress">この URL を取り直す<\/button>/u);
   assert.match(source.body, new RegExp(`href="/\\?${sourceLink}" title="[^"]*" aria-current="page"`, 'u'));
 
   // Adding a page by its address from the browser.
@@ -159,14 +169,26 @@ test('shows pages and sources as a tree and adds sources by web address', { time
     else await delay(50);
   }
   assert.match(done.body, /data-work-status="succeeded"/u, done.body);
+  assert.match(done.body, /<div class="work succeeded"><header><span class="dot succeeded"><\/span><strong>取り込み<\/strong><span>完了<\/span><\/header><p>原本 1 件を読みました。<\/p><p>書いたページ：<a href="\/\?page=guides%2Fnote-1">/u);
 
   // The new page sits in its folder; the page cites the web page, decoded from Shift_JIS.
   const after = await send(port, {});
-  assert.match(after.body, /<h2>ページ<\/h2><ul class="tree"><li><details open><summary>guides<\/summary>/u);
+  assert.match(after.body, /<h2>ページ<small>AI がまとめた記事<\/small><\/h2><ul class="tree"><li><details open><summary>guides<\/summary>/u);
   assert.match(after.body, /title="http:\/\/127\.0\.0\.1:\d+\/manuals\/pump"><span class="name">\/manuals\/pump<\/span><\/a><\/li>/u);
   const pageId = /href="\/\?page=([^"]+)"/u.exec(after.body)[1];
   const page = await send(port, { path: '/?page=' + pageId });
   assert.match(page.body, /<h2>出典<\/h2><ol><li><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a>/u);
+  // The actions of a page sit under it: ask about it, have it revised, and manage it.
+  assert.match(page.body, /<h2>このページに質問する<\/h2>.*<h2>AI に指示して直す<\/h2>.*<h2>このページの管理<\/h2>/su);
+  const cited = await post({ action: 'cite', page: decodeURIComponent(pageId), value: '1' });
+  assert.equal(cited.status, 303);
+  let quoted;
+  for (let attempt = 0; attempt < 200 && !quoted; attempt++) {
+    const shown = await send(port, { path: cited.headers.location });
+    if (/data-work-status="(?:succeeded|failed)"/u.test(shown.body)) quoted = shown;
+    else await delay(50);
+  }
+  assert.match(quoted.body, /<strong>引用の確認<\/strong><span>完了<\/span><\/header><blockquote>[^<]*ポンプの点検[^<]*<\/blockquote>/u);
   const pumpLink = /<a href="\/\?(source=source-[0-9a-f]{24})">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a>/u.exec(page.body)[1];
   const pump = await send(port, { path: '/?' + pumpLink });
   assert.match(pump.body, /毎月第一営業日に点検する。/u);

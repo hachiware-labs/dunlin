@@ -9,6 +9,7 @@
 ```text
 nest init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]
 nest config list [--project <directory>] | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config set serve [--host <address>] [--port <port>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>] | nest config unset <embedding|llm|ocr|serve> [--project <directory>] [--json]
+nest browser [<url>] [--browser <auto|chrome|edge|path>] [--status | --reset] [--json]
 nest validate [--project <directory>] [--config <file>] [--json]
 nest defaults [--apply <section>] [--project <directory>] [--json]
 nest modules <list|describe <name>> [--project <directory>] [--json]
@@ -48,7 +49,7 @@ nest results [<name>] [--project <directory>] [--json]
 ## Wiki・PARA の操作
 
 ```text
-nest ingress <path or URL...> | nest ingress --pending [--project <directory>] [--fetch browser|http] [--dry-run] [--source-only] [--json]
+nest ingress <path or URL...> | nest ingress --pending [--project <directory>] [--fetch browser|http] [--scroll <n>] [--dry-run] [--source-only] [--json]
 nest query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]
 nest verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]
 nest issue <id> <open|resolved|dismissed> [--project <directory>] [--json]

@@ -23,14 +23,21 @@ pub(crate) struct Fetched {
     pub with: String,
     /// What the user should know about how it was taken.
     pub warning: Option<String>,
+    /// How the page was scrolled for more, when it was.
+    pub scrolled: Option<crate::wiki_browser::Scrolled>,
 }
 
-/// How web pages are taken: `browser` opens them in the Chrome or Edge of the machine and keeps
-/// them as drawn, `http` downloads them as the server sends them.
+/// How web pages are taken: `browser` opens them in the Chrome or Edge of the machine, in the
+/// profile of nest, and keeps them as drawn; `http` downloads them as the server sends them.
 pub(crate) struct Method<'a> {
     pub method: &'a str,
     /// `auto`, `chrome`, `edge` or the path of a browser.
     pub browser: &'a str,
+    /// The folders the user settings are found from: the current one and the home.
+    pub cwd: &'a str,
+    pub home: &'a str,
+    /// How many times a page is scrolled for more: 0 for none.
+    pub scroll: u32,
 }
 
 /// The folder of raw sources: the project's `raw/`, when it has one.
@@ -134,26 +141,46 @@ pub(crate) fn fetch(
     if how.method != "browser" {
         return download(url, root, artifacts, None);
     }
-    let auto = matches!(how.browser.trim(), "" | "auto");
-    let Some(browser) = crate::wiki_browser::find(how.browser) else {
-        if auto {
-            return download(
-                url,
-                root,
-                artifacts,
-                Some("No Chrome or Edge was found, so the page was downloaded without running its scripts.".to_owned()),
-            );
-        }
+    // Pages are read only in the profile of nest, where the user has signed in; without it they
+    // are not read at all, so that a page never comes in as a stranger sees it.
+    let browsers = crate::wiki_browser::installed(how.browser);
+    if browsers.is_empty() {
         return Err(coded(
             3,
             "BROWSER_NOT_FOUND",
+            if matches!(how.browser.trim(), "" | "auto") {
+                "No Chrome or Edge was found. Install one of them, then run nest browser.".to_owned()
+            } else {
+                format!(
+                    "The browser {} was not found. Install Chrome or Edge, or set the browser of loader.auto to auto.",
+                    how.browser
+                )
+            },
+        ));
+    }
+    let profiles = crate::wiki_browser::profiles(how.cwd, how.home);
+    let Some((browser, profile)) = browsers.into_iter().find_map(|browser| {
+        let profile = profiles.join(browser.key());
+        profile.is_dir().then_some((browser, profile))
+    }) else {
+        return Err(coded(
+            3,
+            "BROWSER_NOT_READY",
             format!(
-                "The browser {} was not found. Install Chrome or Edge, or set the browser of loader.auto to auto.",
-                how.browser
+                "nest has no browser profile yet, so {url} was not read. Run nest browser, sign in to the sites to read, close the browser, and run this again."
             ),
         ));
     };
-    let opened = crate::wiki_browser::open(&browser, url.as_str())
+    if crate::wiki_browser::in_use(&profile) {
+        return Err(coded(
+            3,
+            "BROWSER_BUSY",
+            format!(
+                "The browser profile of nest is open, so {url} was not read. Close the browser of nest browser, or wait for the other ingest, and run this again."
+            ),
+        ));
+    }
+    let opened = crate::wiki_browser::open(&browser, &profile, url.as_str(), how.scroll)
         .map_err(|message| coded(1, "FETCH_FAILED", format!("{url}: {message}")))?;
     let crate::wiki_browser::Opened::Page(page) = opened else {
         // A PDF or another file is taken as the server sends it.
@@ -163,6 +190,15 @@ pub(crate) fn fetch(
         .ok()
         .filter(|landed| ["http", "https"].contains(&landed.scheme()))
         .unwrap_or_else(|| url.clone());
+    if signed_out(&url, &landed) {
+        return Err(coded(
+            3,
+            "BROWSER_SIGNED_OUT",
+            format!(
+                "{url} led to {landed}, a page to sign in, so it was not read. Run nest browser {url}, sign in, close the browser, and run this again."
+            ),
+        ));
+    }
     let name = file_name(&landed, "text/html");
     let file = keep_source(
         root,
@@ -174,12 +210,48 @@ pub(crate) fn fetch(
     Ok(Fetched {
         file,
         url: url.to_string(),
+        warning: warning(&page),
         with: page.version,
-        warning: (!page.settled).then(|| {
-            "The page did not finish loading within 30 seconds; it was kept as it was drawn by then."
-                .to_owned()
-        }),
+        scrolled: page.scrolled,
     })
+}
+
+/// What the user should know about how a page was drawn: that it did not finish loading, and
+/// that it had more when the scrolls ran out.
+fn warning(page: &crate::wiki_browser::Rendered) -> Option<String> {
+    let mut notes = Vec::new();
+    if !page.settled {
+        notes.push(
+            "The page did not finish loading within 30 seconds; it was kept as it was drawn by then."
+                .to_owned(),
+        );
+    }
+    if let Some(scrolled) = page.scrolled.as_ref().filter(|scrolled| scrolled.cut) {
+        notes.push(format!(
+            "The page still had more after {} scrolls; raise --scroll to take more of it.",
+            scrolled.steps
+        ));
+    }
+    (!notes.is_empty()).then(|| notes.join(" "))
+}
+
+/// Whether a page sent the browser to a page to sign in instead: it ended at another address,
+/// whose host or path speaks of signing in.
+fn signed_out(asked: &url::Url, landed: &url::Url) -> bool {
+    if asked.host_str() == landed.host_str() && asked.path() == landed.path() {
+        return false;
+    }
+    let place = format!(
+        "{}{}",
+        landed.host_str().unwrap_or_default(),
+        landed.path()
+    )
+    .to_ascii_lowercase();
+    [
+        "login", "log-in", "log_in", "signin", "sign-in", "sign_in", "/auth", "accounts.", "/sso",
+    ]
+    .iter()
+    .any(|word| place.contains(word))
 }
 
 /// Downloads a page or a file once over HTTP, as the server sends it.
@@ -242,6 +314,7 @@ fn download(
         url: url.to_string(),
         with: "http".to_owned(),
         warning,
+        scrolled: None,
     })
 }
 
@@ -447,6 +520,30 @@ mod tests {
 
     fn name(address: &str, media: &str) -> String {
         file_name(&url::Url::parse(address).unwrap(), media)
+    }
+
+    #[test]
+    fn a_page_that_ends_at_a_sign_in_page_is_signed_out() {
+        let check = |asked: &str, landed: &str| {
+            signed_out(
+                &url::Url::parse(asked).unwrap(),
+                &url::Url::parse(landed).unwrap(),
+            )
+        };
+        assert!(check(
+            "https://x.com/i/bookmarks",
+            "https://x.com/i/flow/login?redirect_after_login=%2Fi%2Fbookmarks"
+        ));
+        assert!(check(
+            "https://mail.example.com/inbox",
+            "https://accounts.example.com/v3/signin/identifier"
+        ));
+        // Another page that is no sign-in page, and the page itself, are pages as they are.
+        assert!(!check("https://x.com/i/bookmarks", "https://x.com/i/history"));
+        assert!(!check(
+            "https://example.com/login",
+            "https://example.com/login?from=menu"
+        ));
     }
 
     #[test]

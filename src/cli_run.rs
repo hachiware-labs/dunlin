@@ -373,6 +373,30 @@ fn text_output(
     }
     let field = |name: &str| js_string(data.get(name));
     match command {
+        "browser" => {
+            let yes = |name: &str| truthy(data.get(name));
+            match field("action").as_str() {
+                "reset" => format!("Removed the browser profile of nest: {}", field("profile")),
+                "opened" => format!(
+                    "The browser profile of nest is kept in {}. wiki and para read web pages in it.",
+                    field("profile")
+                ),
+                _ => [
+                    format!("browser  {} ({})", field("browser"), field("path")),
+                    format!("profile  {}", field("profile")),
+                    format!(
+                        "ready  {}",
+                        if yes("ready") {
+                            "yes"
+                        } else {
+                            "no: run nest browser to make it"
+                        }
+                    ),
+                    format!("open  {}", if yes("open") { "yes" } else { "no" }),
+                ]
+                .join("\n"),
+            }
+        }
         "init" => {
             let next = data.get("next").filter(|next| truthy(Some(next)));
             format!(
@@ -590,6 +614,7 @@ fn dispatch(
                 }
             }
             "init" | "cite" | "issue" => 2,
+            "browser" => positionals.len().min(1) as i64,
             // A page and an instruction; a page alone when it only gets a category.
             "instruct" if !flag("persistent") && value("category").is_none() => 2,
             "modules" if first == Some("describe") => 2,
@@ -745,6 +770,16 @@ fn dispatch(
     }
     if command == "add" && flag("list") {
         return Ok(Done::Data(crate::cli_tools::listed_tools()));
+    }
+    if command == "browser" {
+        return browser(
+            env,
+            kind.as_deref(),
+            value("browser").unwrap_or("auto"),
+            flag("status"),
+            flag("reset"),
+        )
+        .map(Done::Data);
     }
     if command == "config" {
         if kind.as_deref() != Some("list") {
@@ -1803,13 +1838,17 @@ fn initialize(
             .into_iter()
             .flatten()
             .collect();
-            if missing.is_empty() && kind == "wiki" {
-                "Put sources in raw/, then run nest ingest raw/<file>.".into()
+            let first = if missing.is_empty() && kind == "wiki" {
+                "Put sources in raw/, then run nest ingest raw/<file>.".to_owned()
             } else if missing.is_empty() {
-                "Run nest ingress <path>.".into()
+                "Run nest ingress <path>.".to_owned()
             } else {
                 format!("Set {}, then run nest ingress.", missing.join(" and "))
-            }
+            };
+            // Web pages are read only in the browser profile of nest.
+            format!(
+                "{first} To take in web pages, run nest browser first and sign in to the sites."
+            )
         }
     };
     let next = match &ocr {
@@ -1821,6 +1860,86 @@ fn initialize(
         ("type", text(kind)),
         ("next", text(&next)),
     ]))
+}
+
+// ---------------------------------------------------------------------------------------------
+// browser
+
+/// `nest browser`: opens the browser profile of nest with a window, so that the user signs in to
+/// the sites that `ingress` reads, and returns when the user closes it. `--status` tells where the
+/// profile is, and `--reset` removes it with its sign-ins.
+fn browser(
+    env: &CliEnv,
+    address: Option<&str>,
+    choice: &str,
+    status: bool,
+    reset: bool,
+) -> Result<ConfigValue, CliError> {
+    if status && reset {
+        return Err(invalid("Use --status or --reset, not both."));
+    }
+    if address.is_some() && (status || reset) {
+        return Err(invalid(
+            "Give an address only to open the browser, without --status or --reset.",
+        ));
+    }
+    let address = address.map(crate::wiki_fetch::normalize).transpose()?;
+    let installed = crate::wiki_browser::installed(choice);
+    let profiles = crate::wiki_browser::profiles(&env.cwd, &env.home);
+    // The browser that has a profile already, or else the first one.
+    let chosen = installed
+        .iter()
+        .position(|browser| profiles.join(browser.key()).is_dir())
+        .or((!installed.is_empty()).then_some(0));
+    let Some(browser) = chosen.map(|at| &installed[at]) else {
+        return Err(CliError::new(
+            3,
+            "BROWSER_NOT_FOUND",
+            if matches!(choice.trim(), "" | "auto") {
+                "No Chrome or Edge was found. Install one of them.".to_owned()
+            } else {
+                format!("The browser {choice} was not found.")
+            },
+        ));
+    };
+    let profile = profiles.join(browser.key());
+    let open = profile.is_dir() && crate::wiki_browser::in_use(&profile);
+    let report = |action: &str| {
+        object(vec![
+            ("action", text(action)),
+            ("browser", text(browser.name)),
+            ("path", text(&browser.path.to_string_lossy())),
+            ("profile", text(&profile.to_string_lossy())),
+            ("ready", ConfigValue::Bool(profile.is_dir())),
+            ("open", ConfigValue::Bool(open)),
+        ])
+    };
+    if status {
+        return Ok(report("status"));
+    }
+    if open {
+        return Err(CliError::new(
+            3,
+            "BROWSER_BUSY",
+            "The browser profile of nest is open already. Close that browser, or wait for the ingest that uses it.",
+        ));
+    }
+    if reset {
+        if profile.is_dir() {
+            std::fs::remove_dir_all(&profile).map_err(|error| {
+                CliError::from(fs_error("rm", &profile.to_string_lossy(), &error))
+            })?;
+        }
+        return Ok(report("reset"));
+    }
+    print_error(&format!(
+        "Opening {} with the browser profile of nest ({}). Sign in to the sites that wiki and para read, then close the browser.",
+        browser.name,
+        profile.display()
+    ));
+    crate::wiki_browser::show(browser, &profile, address.as_ref().map(url::Url::as_str))
+        .map_err(|message| CliError::new(1, "BROWSER_FAILED", message))?;
+    Ok(report("opened"))
 }
 
 // ---------------------------------------------------------------------------------------------

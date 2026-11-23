@@ -67,7 +67,7 @@ When you add documents to `raw/`, ingest the new files one at a time with `nest 
 
 This can take a few minutes. Give the job ID it prints to `nest progress <job-id>` to follow it. To save the originals now and read and write later, add `--source-only`, then run `nest ingress --pending` afterwards.
 
-Web pages can be ingested by URL too. HTML, PDF, Markdown, and Office documents are downloaded, and their content at that moment is saved as the original in `raw/<host>/<path>`. Ingesting the same URL again saves a new version of the same document.
+Web pages can be ingested by URL too. HTML, PDF, Markdown, and Office documents are downloaded, and their content at that moment is saved as the original in `raw/<host>/<path>`. Ingesting the same URL again saves a new version of the same document. Web pages are opened in a browser profile of nest's own. Run `nest browser` once first, sign in to the sites to read in the browser it opens, then close it. Without that profile, ingesting a URL stops with `BROWSER_NOT_READY` ([details](wiki.md)).
 
 ```sh
 nest ingress https://example.com/manuals/pump

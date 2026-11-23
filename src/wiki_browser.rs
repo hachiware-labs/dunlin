@@ -1,6 +1,10 @@
 //! Web pages opened in the Chrome or Edge of the machine (spec 14.5): the browser starts
-//! without a window and with a profile of its own, opens the page, waits until it has drawn it,
-//! and gives the HTML it shows. It is driven from Rust over the Chrome DevTools Protocol.
+//! without a window in the profile of nest, opens the page, waits until it has drawn it, and
+//! gives the HTML it shows. It is driven from Rust over the Chrome DevTools Protocol.
+//!
+//! The profile of nest is a folder beside the user settings (`~/.knowledge-nest/browser/chrome`),
+//! one for each browser. `nest browser` opens it with a window, so that the user signs in to the
+//! sites to read; pages are read only in it, with the sign-ins kept there.
 
 // The entry points are called from `node`, which test builds leave out.
 #![cfg_attr(test, allow(dead_code))]
@@ -8,7 +12,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::io::ErrorKind;
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -20,6 +24,76 @@ pub(crate) struct Browser {
     /// What it is, as `Chrome` or `Edge`.
     pub name: &'static str,
     pub path: PathBuf,
+}
+
+impl Browser {
+    /// The name of its profile folder: `chrome`, `edge`, `chromium`, or `browser` for one given
+    /// by its path.
+    pub fn key(&self) -> String {
+        self.name.to_ascii_lowercase()
+    }
+}
+
+/// The folder of the profiles of nest: `browser` beside the user settings, which are
+/// `KNOWLEDGE_NEST_GLOBAL_CONFIG` or `~/.knowledge-nest/config.yaml`.
+pub(crate) fn profiles(cwd: &str, home: &str) -> PathBuf {
+    let settings = match std::env::var("KNOWLEDGE_NEST_GLOBAL_CONFIG") {
+        Ok(path) if !path.is_empty() => crate::node_path::resolve(cwd, &path),
+        _ => crate::node_path::join(home, &[".knowledge-nest", "config.yaml"]),
+    };
+    PathBuf::from(crate::node_path::dirname(&settings)).join("browser")
+}
+
+/// Whether a browser has the profile open: Chrome and Edge hold `lockfile` (Windows) or
+/// `SingletonLock` (macOS, Linux) in it while they run.
+pub(crate) fn in_use(profile: &Path) -> bool {
+    if cfg!(windows) {
+        let lock = profile.join("lockfile");
+        // The browser keeps the file open for itself; a file left by a browser that crashed
+        // opens.
+        lock.exists()
+            && std::fs::OpenOptions::new()
+                .write(true)
+                .open(&lock)
+                .is_err()
+    } else {
+        // The link points at `<host>-<process>`.
+        let Ok(target) = std::fs::read_link(profile.join("SingletonLock")) else {
+            return false;
+        };
+        let target = target.to_string_lossy().into_owned();
+        let Some(process) = target.rsplit('-').next().filter(|id| id.parse::<u32>().is_ok())
+        else {
+            return true;
+        };
+        Command::new("kill")
+            .args(["-0", process])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+}
+
+/// Opens the profile of nest in the browser with a window, at an address or a new tab, and
+/// returns when the user closes it. The profile is made when there is none.
+pub(crate) fn show(browser: &Browser, profile: &Path, address: Option<&str>) -> Result<(), String> {
+    std::fs::create_dir_all(profile).map_err(|error| error.to_string())?;
+    let mut command = Command::new(&browser.path);
+    command
+        .args(["--no-first-run", "--no-default-browser-check"])
+        .arg(format!("--user-data-dir={}", profile.display()));
+    if let Some(address) = address {
+        command.arg(address);
+    }
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("{} could not start: {error}", browser.path.display()))?;
+    child.wait().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 /// The places browsers are installed in, by name, in the order they are tried.
@@ -92,9 +166,10 @@ fn candidates() -> Vec<(&'static str, PathBuf)> {
     found
 }
 
-/// The browser to open pages in: `auto` takes the first of Chrome, Edge and Chromium that is
-/// installed; `chrome` or `edge` takes only that one; anything else is the path of a browser.
-pub(crate) fn find(choice: &str) -> Option<Browser> {
+/// The browsers of a choice that are installed, in the order they are tried, each once: `auto`
+/// takes Chrome, Edge and Chromium; `chrome` or `edge` takes only that one; anything else is the
+/// path of a browser.
+pub(crate) fn installed(choice: &str) -> Vec<Browser> {
     let wanted = match choice.trim().to_ascii_lowercase().as_str() {
         "" | "auto" => None,
         "chrome" => Some("Chrome"),
@@ -102,17 +177,26 @@ pub(crate) fn find(choice: &str) -> Option<Browser> {
         "chromium" => Some("Chromium"),
         _ => {
             let path = PathBuf::from(choice.trim());
-            return path.is_file().then_some(Browser {
-                name: "Browser",
-                path,
-            });
+            return if path.is_file() {
+                vec![Browser {
+                    name: "Browser",
+                    path,
+                }]
+            } else {
+                Vec::new()
+            };
         }
     };
-    candidates()
-        .into_iter()
-        .filter(|(name, _)| wanted.is_none_or(|wanted| wanted == *name))
-        .find(|(_, path)| path.is_file())
-        .map(|(name, path)| Browser { name, path })
+    let mut found: Vec<Browser> = Vec::new();
+    for (name, path) in candidates() {
+        if wanted.is_none_or(|wanted| wanted == name)
+            && !found.iter().any(|browser| browser.name == name)
+            && path.is_file()
+        {
+            found.push(Browser { name, path });
+        }
+    }
+    found
 }
 
 /// A page as the browser drew it.
@@ -124,7 +208,52 @@ pub(crate) struct Rendered {
     pub settled: bool,
     /// The browser and its version, as `Chrome/131.0.6778.86`.
     pub version: String,
+    /// How the page was scrolled for more, when it was.
+    pub scrolled: Option<Scrolled>,
 }
+
+/// What scrolling a page for more did.
+pub(crate) struct Scrolled {
+    /// The times it was scrolled.
+    pub steps: u32,
+    /// The items (`article` elements) it showed in all, each once.
+    pub items: usize,
+    /// Whether it ran out of scrolls while the page still grew.
+    pub cut: bool,
+}
+
+/// Collects the items the page shows now into `window.__nestKept`, each once by its link or
+/// text, and tells how many there are and where the page is. Pages that load more as they are
+/// scrolled often drop the items that went far out of view, so they are kept as they come.
+const COLLECT: &str = r#"(() => {
+  const kept = window.__nestKept || (window.__nestKept = { order: [], items: new Map() });
+  const selector = 'article, [role="article"]';
+  for (const item of document.querySelectorAll(selector)) {
+    if (item.parentElement && item.parentElement.closest(selector)) continue;
+    const time = item.querySelector('a[href] time');
+    const key = time ? time.closest('a').href : (item.id || item.innerText.trim().slice(0, 300));
+    if (!key) continue;
+    if (!kept.items.has(key)) kept.order.push(key);
+    kept.items.set(key, item.outerHTML);
+  }
+  const root = document.scrollingElement || document.documentElement;
+  return JSON.stringify({ items: kept.order.length, height: root.scrollHeight, top: Math.round(root.scrollTop) });
+})()"#;
+
+/// Scrolls the page down by most of a screen.
+const SCROLL: &str = "window.scrollBy(0, Math.max(200, Math.round(window.innerHeight * 0.8))); ''";
+
+/// The kept items as one page, in the order they came, with the title and address of the page.
+const KEPT: &str = r#"(() => {
+  const kept = window.__nestKept;
+  const escape = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const items = kept.order.map((key) => kept.items.get(key)).join('');
+  return '<!doctype html><html><head><meta charset="utf-8"><base href="' + escape(location.href) + '"><title>'
+    + escape(document.title) + '</title></head><body><main>' + items + '</main></body></html>';
+})()"#;
+
+/// How long one scroll waits for what it loads.
+const STEP: Duration = Duration::from_secs(2);
 
 /// What opening an address gave.
 pub(crate) enum Opened {
@@ -134,23 +263,25 @@ pub(crate) enum Opened {
     File,
 }
 
-/// The running browser and its profile, which go when it is dropped.
+/// The running browser, which stops when it is dropped. It is asked to close first, so that it
+/// leaves its profile as a browser that was closed; it is stopped when it does not.
 struct Running {
     child: Child,
-    profile: PathBuf,
+    /// Whether it was asked to close.
+    closing: bool,
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
+        let started = Instant::now();
+        while self.closing && started.elapsed() < Duration::from_secs(5) {
+            if !matches!(self.child.try_wait(), Ok(None)) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
-        // The browser may hold its files for a moment after it stops.
-        for _ in 0..20 {
-            if std::fs::remove_dir_all(&self.profile).is_ok() || !self.profile.exists() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
-        }
     }
 }
 
@@ -224,19 +355,103 @@ impl Session {
             .receive()?
             .filter(|message| message.get("method").is_some()))
     }
+
+    /// The value of an expression in the page, as text.
+    fn evaluate(&mut self, expression: &str) -> Result<String, String> {
+        let result = self.call(
+            "Runtime.evaluate",
+            json!({ "expression": expression, "returnByValue": true }),
+        )?;
+        if let Some(error) = result.get("exceptionDetails") {
+            return Err(format!("the page could not run a script: {error}"));
+        }
+        Ok(result
+            .get("result")
+            .and_then(|result| result.get("value"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned())
+    }
+
+    /// Waits until the requests the page makes are done and it has been quiet for a moment, or
+    /// until `limit` has passed.
+    fn wait_quiet(&mut self, limit: Duration) -> Result<(), String> {
+        let started = Instant::now();
+        let mut pending: HashSet<String> = HashSet::new();
+        let mut quiet_since = Instant::now();
+        while started.elapsed() < limit {
+            if pending.is_empty() && quiet_since.elapsed() >= QUIET {
+                break;
+            }
+            let Some(event) = self.event()? else {
+                continue;
+            };
+            let id = event
+                .get("params")
+                .and_then(|params| params.get("requestId"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            match event
+                .get("method")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+            {
+                "Network.requestWillBeSent" => {
+                    pending.insert(id);
+                }
+                "Network.loadingFinished" | "Network.loadingFailed" => {
+                    pending.remove(&id);
+                    if pending.is_empty() {
+                        quiet_since = Instant::now();
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
 }
 
-/// Starts the browser without a window and with a new profile, and returns the port of its
-/// DevTools.
-fn start(browser: &Browser) -> Result<(Running, u16), String> {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    let profile = std::env::temp_dir().join(format!(
-        "knowledge-nest-browser-{}-{stamp}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&profile).map_err(|error| error.to_string())?;
+/// Scrolls the page down up to `limit` times, keeping the items it shows, and stops early when
+/// three scrolls in a row bring nothing new. Returns what it did and the kept items as a page,
+/// or none when the page shows fewer than two items.
+fn scroll_for_more(session: &mut Session, limit: u32) -> Result<(Scrolled, Option<String>), String> {
+    let mut state = session.evaluate(COLLECT)?;
+    let mut steps = 0;
+    let mut still = 0;
+    while steps < limit && still < 3 {
+        session.evaluate(SCROLL)?;
+        steps += 1;
+        session.wait_quiet(STEP)?;
+        let next = session.evaluate(COLLECT)?;
+        still = if next == state { still + 1 } else { 0 };
+        state = next;
+    }
+    let items = serde_json::from_str::<Value>(&state)
+        .ok()
+        .and_then(|state| state.get("items").and_then(Value::as_u64))
+        .unwrap_or(0) as usize;
+    let html = if items >= 2 {
+        Some(session.evaluate(KEPT)?)
+    } else {
+        None
+    };
+    Ok((
+        Scrolled {
+            steps,
+            items,
+            cut: still < 3,
+        },
+        html,
+    ))
+}
+
+/// Starts the browser without a window in a profile, and returns the port of its DevTools.
+fn start(browser: &Browser, profile: &Path) -> Result<(Running, u16), String> {
+    // The port of an earlier start may be left in the profile.
+    let file = profile.join("DevToolsActivePort");
+    let _ = std::fs::remove_file(&file);
     let child = Command::new(&browser.path)
         .args([
             "--headless=new",
@@ -252,6 +467,8 @@ fn start(browser: &Browser) -> Result<(Running, u16), String> {
             "--deny-permission-prompts",
             "--mute-audio",
             "--hide-scrollbars",
+            // A tall window draws more of a page at once, and scrolls further each time.
+            "--window-size=1280,2000",
         ])
         .arg(format!("--user-data-dir={}", profile.display()))
         .arg("about:blank")
@@ -260,9 +477,11 @@ fn start(browser: &Browser) -> Result<(Running, u16), String> {
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| format!("{} could not start: {error}", browser.path.display()))?;
-    let running = Running { child, profile };
+    let mut running = Running {
+        child,
+        closing: false,
+    };
     // The browser writes the port of its DevTools to its profile when it is ready.
-    let file = running.profile.join("DevToolsActivePort");
     let started = Instant::now();
     while started.elapsed() < START {
         if let Ok(text) = std::fs::read_to_string(&file)
@@ -272,6 +491,12 @@ fn start(browser: &Browser) -> Result<(Running, u16), String> {
                 .and_then(|line| line.trim().parse().ok())
         {
             return Ok((running, port));
+        }
+        if !matches!(running.child.try_wait(), Ok(None)) {
+            return Err(format!(
+                "{} stopped as it started; another browser may have the profile open",
+                browser.name
+            ));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -298,10 +523,16 @@ fn devtools_json(port: u16, path: &str) -> Result<Value, String> {
 }
 
 /// Opens an address in the browser and gives the page as it drew it, once the page has loaded
-/// and the network has been quiet for a moment, or when the time runs out. A file that is not a
-/// page is left for an ordinary download.
-pub(crate) fn open(browser: &Browser, address: &str) -> Result<Opened, String> {
-    let (_running, port) = start(browser)?;
+/// and the network has been quiet for a moment, or when the time runs out; with `scroll`, after
+/// scrolling it for more up to that many times. A file that is not a page is left for an
+/// ordinary download.
+pub(crate) fn open(
+    browser: &Browser,
+    profile: &Path,
+    address: &str,
+    scroll: u32,
+) -> Result<Opened, String> {
+    let (mut running, port) = start(browser, profile)?;
     let version = devtools_json(port, "/json/version")?
         .get("Browser")
         .and_then(Value::as_str)
@@ -328,6 +559,19 @@ pub(crate) fn open(browser: &Browser, address: &str) -> Result<Opened, String> {
         next: 0,
         events: VecDeque::new(),
     };
+    let read = read(&mut session, address, version, scroll);
+    // Closed as a person closes it, the browser leaves its profile in order.
+    running.closing = session.send("Browser.close", json!({})).is_ok();
+    read
+}
+
+/// Opens an address in the page of a session and gives what it drew.
+fn read(
+    session: &mut Session,
+    address: &str,
+    version: String,
+    scroll: u32,
+) -> Result<Opened, String> {
     session.call("Page.enable", json!({}))?;
     session.call("Network.enable", json!({}))?;
     let navigated = session.call("Page.navigate", json!({ "url": address }))?;
@@ -403,25 +647,28 @@ pub(crate) fn open(browser: &Browser, address: &str) -> Result<Opened, String> {
             _ => {}
         }
     };
-    let evaluate = |session: &mut Session, expression: &str| -> Result<String, String> {
-        let result = session.call(
-            "Runtime.evaluate",
-            json!({ "expression": expression, "returnByValue": true }),
-        )?;
-        Ok(result
-            .get("result")
-            .and_then(|result| result.get("value"))
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned())
+    // A page scrolled for more is kept as the items it showed; a page with fewer than two items
+    // is kept as it is drawn at the end.
+    let (scrolled, kept) = if scroll > 0 {
+        let (scrolled, kept) = scroll_for_more(session, scroll)?;
+        (Some(scrolled), kept)
+    } else {
+        (None, None)
     };
-    let html = evaluate(&mut session, "document.documentElement.outerHTML")?;
-    let url = evaluate(&mut session, "location.href")?;
+    let html = match kept {
+        Some(html) => html,
+        None => format!(
+            "<!doctype html>\n{}",
+            session.evaluate("document.documentElement.outerHTML")?
+        ),
+    };
+    let url = session.evaluate("location.href")?;
     Ok(Opened::Page(Rendered {
-        html: format!("<!doctype html>\n{html}"),
+        html,
         url,
         settled,
         version,
+        scrolled,
     }))
 }
 
@@ -429,11 +676,14 @@ pub(crate) fn open(browser: &Browser, address: &str) -> Result<Opened, String> {
 mod tests {
     #[test]
     fn a_browser_is_chosen_by_name_or_path() {
-        assert!(super::find("C:/no/such/browser.exe").is_none());
-        // `auto` finds the same browser as one of the names, when the machine has one.
-        if let Some(found) = super::find("auto") {
-            let named = super::find(found.name).expect("the same browser by its name");
-            assert_eq!(named.path, found.path);
+        assert!(super::installed("C:/no/such/browser.exe").is_empty());
+        // `auto` finds the same browsers as their names, each once, when the machine has them.
+        let found = super::installed("auto");
+        for browser in &found {
+            let named = super::installed(browser.name);
+            assert_eq!(named.len(), 1);
+            assert_eq!(named[0].path, browser.path);
+            assert_eq!(found.iter().filter(|other| other.name == browser.name).count(), 1);
         }
     }
 }

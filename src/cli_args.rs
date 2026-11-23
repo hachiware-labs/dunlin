@@ -6,7 +6,7 @@
 
 use crate::config_value::ConfigValue;
 
-pub const COMMANDS: [(&str, &str); 37] = [
+pub const COMMANDS: [(&str, &str); 38] = [
     (
         "init",
         "nest init <mcp|rag|wiki|para> <directory> [--source <directory> | --purpose <text>] [--embedding-model <name>] [--embedding-provider <ollama|openai>] [--llm-model <name>] [--llm-provider <ollama|openai|strata>] [--no-embedding] [--no-llm] [--ocr | --no-ocr] [--ocr-tool <oar-ocr|lightonocr>] [--json]",
@@ -14,6 +14,10 @@ pub const COMMANDS: [(&str, &str); 37] = [
     (
         "config",
         "nest config list [--project <directory>] | nest config set <embedding|llm> --model <name> [--provider <name>] | nest config set ocr [--tool oar-ocr|lightonocr] | nest config set serve [--host <address>] [--port <port>] [--allowed-hosts <names>] [--allowed-clients <ranges>] [--auth <none|token>] [--token-env <NAME>] [--project <directory>] | nest config unset <embedding|llm|ocr|serve> [--project <directory>] [--json]",
+    ),
+    (
+        "browser",
+        "nest browser [<url>] [--browser <auto|chrome|edge|path>] [--status | --reset] [--json]",
     ),
     (
         "build",
@@ -91,7 +95,7 @@ pub const COMMANDS: [(&str, &str); 37] = [
     ),
     (
         "ingress",
-        "nest ingress <path or URL...> | nest ingress --pending [--project <directory>] [--fetch browser|http] [--dry-run] [--source-only] [--json]",
+        "nest ingress <path or URL...> | nest ingress --pending [--project <directory>] [--fetch browser|http] [--scroll <n>] [--dry-run] [--source-only] [--json]",
     ),
     (
         "query",
@@ -164,6 +168,10 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
             (
                 "config",
                 "Set the models and OCR tool of new projects, and who may connect to serve",
+            ),
+            (
+                "browser",
+                "Open the browser of nest to sign in to the sites that wiki and para read",
             ),
             ("add", "Install an optional tool such as OCR or hannoy"),
             ("remove", "Remove an installed tool from the project"),
@@ -471,6 +479,11 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
                 options.push((key, String));
             }
         }
+        "browser" => {
+            options.push(("browser", String));
+            options.push(("status", Boolean));
+            options.push(("reset", Boolean));
+        }
         _ => options.push(("project", String)),
     }
     if command == "build" || command == "source" {
@@ -561,6 +574,7 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
         options.push(("source-only", Boolean));
         options.push(("pending", Boolean));
         options.push(("fetch", String));
+        options.push(("scroll", String));
     }
     if ["query", "verify"].contains(&command) {
         options.push(("page", String));

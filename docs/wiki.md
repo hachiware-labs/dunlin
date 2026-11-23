@@ -155,13 +155,37 @@ PARA の `nest lint` は、決まりにない取り組み（`UNKNOWN_PROJECT`）
 
 URL は http と https に対応し、HTML、PDF、Markdown、テキスト、Office 文書を取り込めます。
 
-Web のページは、このマシンの Chrome か Edge で開いて取ります。ブラウザは画面を出さずに、取り込みのたびに新しい一時プロファイルで起動します（ふだん使うプロファイルのクッキーやログインには触れません）。ページを開き、読み込みが終わって通信が 0.5 秒途切れるまで（長くても 30 秒）待ち、そのとき表示されている HTML を原本にします。スクリプトで本文を描くページも、表示されたとおりに取り込めます。PDF や Markdown のようにページでないものは、ブラウザで描かずにそのままダウンロードします。どの取り方で取ったか（ブラウザとその版、または `http`）は、作業の結果の `fetched` に残ります。
+Web のページは、このマシンの Chrome か Edge で、**nest 専用のプロファイル**を使って開きます。Wiki、PARA、`loader.auto` で URL を取り込むには、この専用プロファイルが必要です。最初に1回、次のコマンドで専用プロファイルのブラウザを開き、読ませたいサイトにログインしてからブラウザを閉じてください。
+
+```sh
+nest browser https://x.com/login
+```
+
+専用プロファイルは、ユーザー設定（`~/.knowledge-nest/config.yaml`）と同じフォルダの `browser/chrome`（Edge なら `browser/edge`）に作られます。`KNOWLEDGE_NEST_GLOBAL_CONFIG` でユーザー設定の場所を変えたときは、その隣に作られます。ふだん使うプロファイルとは別なので、ログインはここで改めて行います。ログインは取り込みのたびに引き継がれるので、定期的な取り込みも人の手なしで動きます。
+
+| コマンド | 動き |
+|---|---|
+| `nest browser [<URL>]` | 専用プロファイルのブラウザを、画面ありで開く。プロファイルがなければ作る。ブラウザを閉じるとコマンドが終わる |
+| `nest browser --status` | 使うブラウザ、専用プロファイルの場所、作られているか、いま開いているかを表示する |
+| `nest browser --reset` | 専用プロファイルを消す。ログインの状態もすべて消える |
+| `nest browser --browser edge` | Edge の専用プロファイルを開く（`--status`、`--reset` にも付けられる） |
+
+取り込むときは、ブラウザを画面を出さずに専用プロファイルで起動し、ページを開きます。読み込みが終わって通信が 0.5 秒途切れるまで（長くても 30 秒）待ち、そのとき表示されている HTML を原本にします。スクリプトで本文を描くページも、ログインが要るページも、表示されたとおりに取り込めます。終わるとブラウザを閉じます。PDF や Markdown のようにページでないものは、ブラウザで描かずにそのままダウンロードします。どの取り方で取ったか（ブラウザとその版、または `http`）は、作業の結果の `fetched` に残ります。
+
+次のときは、ページを読まずに止まります。ログインしていない状態で見えるページだけが取り込まれ、ほかが抜け落ちることのないよう、HTTP には切り替えません。
+
+| エラー | 起きるとき | 直し方 |
+|---|---|---|
+| `BROWSER_NOT_READY` | 専用プロファイルがまだない | `nest browser` を実行し、ログインしてから閉じる |
+| `BROWSER_BUSY` | 専用プロファイルが開いている（`nest browser` のウィンドウ、または別の取り込み） | ブラウザを閉じるか、別の取り込みが終わるのを待つ |
+| `BROWSER_SIGNED_OUT` | ページがログインの画面へ移した（ログインの期限切れなど） | `nest browser <URL>` でログインし直す |
+| `BROWSER_NOT_FOUND` | Chrome も Edge も見つからない。または `browser` に書いたブラウザがない | Chrome か Edge を入れる |
 
 | 指定 | 動き |
 |---|---|
-| 既定（`loader.auto` の `fetch: browser`、`browser: auto`） | Chrome、Edge、Chromium の順に、OS の標準の場所を探して使う。どれもなければ、HTTP で1回ダウンロードし、`FETCH_WARNING` の警告を出す |
-| `browser: chrome`、`browser: edge`、実行ファイルのパス | そのブラウザだけを使う。見つからなければ `BROWSER_NOT_FOUND` で止まる |
-| `fetch: http`、または `nest ingress --fetch http <URL>` | ブラウザを使わず、HTTP で1回ダウンロードする。スクリプトは動かない |
+| 既定（`loader.auto` の `fetch: browser`、`browser: auto`） | Chrome、Edge、Chromium の順に、専用プロファイルのあるものを使う |
+| `browser: chrome`、`browser: edge`、実行ファイルのパス | そのブラウザだけを使う |
+| `fetch: http`、または `nest ingress --fetch http <URL>` | ブラウザを使わず、HTTP で1回ダウンロードする。スクリプトは動かず、ログインの状態もない |
 
 ```yaml
 ingress:
@@ -172,9 +196,16 @@ ingress:
         ocr: none
         fetch: browser   # browser か http
         browser: auto    # auto、chrome、edge、または実行ファイルのパス
+        scroll: 0        # 下へ送って続きを読み込む回数（0〜500）。省くと 0
 ```
 
-ログインが必要なページは、まだ取り込めません（一時プロファイルにはログインの状態がないため）。Shift_JIS や EUC-JP のページは UTF-8 に直して保存します。取得した内容は `raw/<ホスト名>/<パス>` に原本として保存され（例：`raw/example.com/manuals/pump.html`）、ページの出典は元の URL を指します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。CLI でも `nest ingress https://example.com/page` のように URL を渡せます。
+X のブックマークのように、下へ送るほど続きが出てくるページは、`--scroll <回数>` を付けて取り込みます。
+
+```sh
+nest ingest https://x.com/i/bookmarks --scroll 100
+```
+
+ページを画面の8割ずつ下へ送り、送るたびに読み込みを待ちます（長くても2秒）。3回続けて何も増えなければ、回数の前でも止めます。このようなページは、見えなくなった投稿を画面から消していくので、送るたびに表示された投稿（`article` 要素）をその場で集め、最後に、出てきた順に1件ずつ並べた1つのページとして保存します。同じ投稿は、その投稿へのリンク（日時の付いたリンク）か本文で見分け、1度だけ入れます。投稿が2件未満のページは、最後に表示されていたとおりに保存します。回数を使い切ってもまだ続きがあったときは `FETCH_WARNING` の警告を出します。何回送り、投稿をいくつ集めたかは、作業の結果の `fetched` の `scrolled`（`steps`、`items`）に残ります。いつも送るなら、`loader.auto` の `scroll` に回数（0〜500）を書けます。`--scroll` はそれより優先です。Shift_JIS や EUC-JP のページは UTF-8 に直して保存します。取得した内容は `raw/<ホスト名>/<パス>` に原本として保存され（例：`raw/example.com/manuals/pump.html`）、ページの出典は元の URL を指します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。CLI でも `nest ingress https://example.com/page` のように URL を渡せます。
 
 `serve` の画面を他の人にも開く場合（`serve.host` を `127.0.0.1` 以外にする場合）は、`serve.access.auth` で認証を付けてください。家や職場の LAN の中だけに開くなら、`serve.access.allowed_clients` に `192.168.11.0/24` のような範囲を書くと、範囲の外からの接続を断ります。この場合は認証なしでも起動できますが、範囲の中の端末はだれでも読み書きでき、画面からこのマシンのファイルをパスで取り込めます。設定の例は [ガイド](guide.md) の `serve` の節にあります。この PC のすべてのプロジェクトにまとめて設定するなら、`nest config set serve --host 0.0.0.0 --allowed-hosts localhost,127.0.0.1,192.168.11.16 --allowed-clients 192.168.11.0/24` のようにコマンドで書けます。画面から渡した URL は、`serve` を動かしているマシンから取得されます。
 

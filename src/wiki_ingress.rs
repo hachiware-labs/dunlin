@@ -673,6 +673,25 @@ pub(crate) fn ingress(
             "Use --fetch browser or --fetch http.",
         ));
     }
+    // How many times a page in the browser is scrolled for more: the command, else the settings.
+    let scroll = match project.value_str("scroll") {
+        Some(given) => given
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|count| *count <= 500)
+            .ok_or_else(|| {
+                coded(
+                    2,
+                    "INVALID_ARGUMENT",
+                    "Use --scroll with a whole number from 0 to 500.",
+                )
+            })?,
+        None => match loader.get("scroll") {
+            Some(ConfigValue::Number(count)) => *count as u32,
+            _ => 0,
+        },
+    };
     if !dry_run && !source_only {
         if js_trim(str_of(&request.about, "purpose")).is_empty() {
             return Err(coded(
@@ -709,14 +728,17 @@ pub(crate) fn ingress(
                 addresses += 1;
                 continue;
             }
-            // Pages open in the Chrome or Edge of the machine unless the settings or the
-            // command say to download them.
+            // Pages open in the Chrome or Edge of the machine, in the profile of nest, unless
+            // the settings or the command say to download them.
             let how = crate::wiki_fetch::Method {
                 method: project
                     .value_str("fetch")
                     .or_else(|| string_field(&loader, "fetch"))
                     .unwrap_or("browser"),
                 browser: string_field(&loader, "browser").unwrap_or("auto"),
+                cwd: &request.cwd,
+                home: &request.home,
+                scroll,
             };
             let download =
                 crate::wiki_fetch::fetch(input, &request.root, &request.artifacts, &how)?;
@@ -726,10 +748,20 @@ pub(crate) fn ingress(
                     ("message", text(&format!("{}: {warning}", download.url))),
                 ]));
             }
-            taken_with.push(object(vec![
+            let mut taken = vec![
                 ("url", text(&download.url)),
                 ("with", text(&download.with)),
-            ]));
+            ];
+            if let Some(scrolled) = &download.scrolled {
+                taken.push((
+                    "scrolled",
+                    object(vec![
+                        ("steps", ConfigValue::Number(f64::from(scrolled.steps))),
+                        ("items", ConfigValue::Number(scrolled.items as f64)),
+                    ]),
+                ));
+            }
+            taken_with.push(object(taken));
             fetched.insert(download.file.clone(), download.url.clone());
             add(&mut files, download.file, download.url);
             continue;

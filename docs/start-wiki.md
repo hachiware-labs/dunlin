@@ -67,7 +67,7 @@ nest ingest raw/
 
 数分かかることがあります。表示された作業 ID を `nest progress <作業ID>` に渡すと、進み具合を見られます。原本の保存だけ先に済ませ、読み書きは後でしたいときは `--source-only` を付け、あとで `nest ingress --pending` を実行します。
 
-Web のページも、URL を渡せば取り込めます。HTML、PDF、Markdown、Office 文書を取得し、その時点の内容を原本として `raw/<ホスト名>/<パス>` に保存します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。
+Web のページも、URL を渡せば取り込めます。HTML、PDF、Markdown、Office 文書を取得し、その時点の内容を原本として `raw/<ホスト名>/<パス>` に保存します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。Web のページは、nest 専用のブラウザのプロファイルで開いて読みます。最初に1回 `nest browser` を実行し、開いたブラウザで読ませたいサイトにログインしてから閉じてください。専用プロファイルがないと、URL の取り込みは `BROWSER_NOT_READY` で止まります（[詳しく](wiki.md)）。
 
 ```sh
 nest ingress https://example.com/manuals/pump

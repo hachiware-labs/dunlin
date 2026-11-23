@@ -138,6 +138,8 @@ pub(crate) struct Entry {
     /// The day it was last written, as `2026-01-02`.
     pub changed: String,
     pub archived: bool,
+    /// The subject it is about, from the list of the rules; empty when it has none.
+    pub category: String,
 }
 
 pub(crate) fn entries<'a>(pages: impl IntoIterator<Item = &'a ConfigValue>) -> Vec<Entry> {
@@ -150,9 +152,10 @@ pub(crate) fn entries<'a>(pages: impl IntoIterator<Item = &'a ConfigValue>) -> V
                 _ => str_of(page, "id").to_owned(),
             },
             summary: summary(str_of(page, "markdown")),
-            citations: crate::wiki_html::cited_documents(items(page.get("citations"))).len(),
+            citations: crate::wiki_project::page_sources(page).len(),
             changed: str_of(page, "changed").chars().take(10).collect(),
             archived: truthy(page.get("archived")),
+            category: str_of(page, "category").trim().to_owned(),
         })
         .collect()
 }
@@ -168,20 +171,51 @@ pub(crate) struct RawFile {
     pub path: String,
     /// The source it was taken in as, when it was.
     pub source: Option<String>,
-    /// Whether the pages cite it.
+    /// Whether it has been read for the pages.
     pub reflected: bool,
+    /// Whether it added nothing to them.
+    pub nothing: bool,
 }
 
 /// What became of a raw file, in a word.
 pub(crate) fn raw_state(file: &RawFile) -> &'static str {
-    match (&file.source, file.reflected) {
-        (None, _) => "未取り込み",
-        (Some(_), false) => "未反映",
-        (Some(_), true) => "反映済み",
+    match (&file.source, file.reflected, file.nothing) {
+        (None, _, _) => "未取り込み",
+        (Some(_), false, _) => "未反映",
+        (Some(_), true, true) => "得るものなし",
+        (Some(_), true, false) => "反映済み",
     }
 }
 
-/// The sources of the state: their ID, their record and whether the pages cite them.
+/// The word on a source that is not written into pages yet, or added nothing to them.
+pub(crate) fn source_badge(reflected: bool, record: &ConfigValue) -> Option<&'static str> {
+    if !reflected {
+        Some("未反映")
+    } else if truthy(record.get("nothing")) {
+        Some("得るものなし")
+    } else {
+        None
+    }
+}
+
+/// A row of `wiki_sources`: its ID, its record and whether it has been read for the pages. The
+/// state is 0 for a source not read yet, 1 for one pages are written from, and 2 for one that
+/// added nothing; the record of such a source says `nothing`.
+pub(crate) fn source_row(
+    id: String,
+    data: &str,
+    state: i64,
+) -> Result<(String, ConfigValue, bool), StageError> {
+    let mut record = parse(data)?;
+    if state == 2
+        && let ConfigValue::Object(entries) = &mut record
+    {
+        crate::index_stage::assign(entries, "nothing", Some(ConfigValue::Bool(true)));
+    }
+    Ok((id, record, state != 0))
+}
+
+/// The sources of the state: their ID, their record and whether they have been read for pages.
 pub(crate) fn sources(connection: &Connection) -> Vec<(String, ConfigValue, bool)> {
     let Ok(mut statement) =
         connection.prepare("SELECT id, data, reflected FROM wiki_sources ORDER BY id")
@@ -193,12 +227,12 @@ pub(crate) fn sources(connection: &Connection) -> Vec<(String, ConfigValue, bool
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)? != 0,
+                row.get::<_, i64>(2)?,
             ))
         })
         .map(|rows| {
             rows.filter_map(Result::ok)
-                .filter_map(|(id, data, reflected)| Some((id, parse(&data).ok()?, reflected)))
+                .filter_map(|(id, data, state)| source_row(id, &data, state).ok())
                 .collect()
         })
         .unwrap_or_default()
@@ -262,6 +296,7 @@ pub(crate) fn raw_files<'a>(
                 path,
                 source: at.map(|at| sources[at].0.clone()),
                 reflected: at.is_some_and(|at| sources[at].2),
+                nothing: at.is_some_and(|at| truthy(sources[at].1.get("nothing"))),
             }
         })
         .collect();
@@ -272,6 +307,42 @@ pub(crate) fn raw_files<'a>(
         .map(|(source, _)| source)
         .collect();
     (files, outside)
+}
+
+/// What the pages without a category are listed under.
+pub(crate) const UNCATEGORIZED: &str = "未分類";
+
+/// The entries of a Wiki by category: those of the rules in their order, then others as they
+/// come, then the pages without one, and archived pages last.
+pub(crate) fn categorized<'a>(
+    entries: &'a [Entry],
+    order: &[String],
+) -> Vec<(String, Vec<&'a Entry>)> {
+    let mut groups: Vec<(String, Vec<&Entry>)> = order
+        .iter()
+        .map(|name| (name.clone(), Vec::new()))
+        .collect();
+    for entry in entries.iter().filter(|entry| !entry.archived) {
+        let name = if entry.category.is_empty() {
+            UNCATEGORIZED
+        } else {
+            entry.category.as_str()
+        };
+        match groups.iter_mut().find(|(group, _)| group == name) {
+            Some((_, list)) => list.push(entry),
+            None => groups.push((name.to_owned(), vec![entry])),
+        }
+    }
+    if let Some(at) = groups.iter().position(|(name, _)| name == UNCATEGORIZED) {
+        let uncategorized = groups.remove(at);
+        groups.push(uncategorized);
+    }
+    let archived: Vec<&Entry> = entries.iter().filter(|entry| entry.archived).collect();
+    if !archived.is_empty() {
+        groups.push(("アーカイブ".to_owned(), archived));
+    }
+    groups.retain(|(_, list)| !list.is_empty());
+    groups
 }
 
 /// The entries by folder, in the order of their IDs: pages outside every folder first, under no
@@ -423,6 +494,8 @@ pub(crate) struct About<'a> {
     pub folder: &'a str,
     /// The files of `raw/`, when the project has it.
     pub raw_files: &'a [RawFile],
+    /// The categories of the rules, in their order; none for PARA, whose pages go by folder.
+    pub categories: Option<&'a [String]>,
     pub log: bool,
 }
 
@@ -468,7 +541,11 @@ pub(crate) fn catalog(about: &About<'_>, entries: &[Entry]) -> String {
     if entries.is_empty() {
         body += "<section><p class=\"meta\">まだページがありません。<code>nest ingest</code> に資料を渡すと、AI が読んでページを書きます。</p></section>";
     }
-    for (name, list) in groups(entries) {
+    let listed = match about.categories {
+        Some(order) => categorized(entries, order),
+        None => groups(entries),
+    };
+    for (name, list) in listed {
         body += &if name.is_empty() {
             "<section data-group><ul class=\"pages\">".to_owned()
         } else {
@@ -682,6 +759,17 @@ fn log_entry(
     }
     if let (true, Some(ConfigValue::Array(issues))) = (command != "verify", field("issues")) {
         notes.push(format!("指摘 {} 件", issues.len()));
+    }
+    let nothing = items(field("no_material"));
+    if !nothing.is_empty() {
+        notes.push(format!(
+            "得るものなし：{}",
+            nothing
+                .iter()
+                .map(|name| crate::eval_stage::js_string(Some(name)))
+                .collect::<Vec<_>>()
+                .join("、")
+        ));
     }
     let left_out: usize = items(field("statements_removed"))
         .iter()
@@ -910,6 +998,9 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
         .as_deref()
         .map(|raw| raw_files(raw, &known_sources).0)
         .unwrap_or_default();
+    let categories = crate::wiki_project::rule_categories(
+        &crate::wiki_project::read_file(&project.rules_file()).unwrap_or_default(),
+    );
     let about = &project.request.about;
     let title = str_of(about, "title");
     if !taken("log") {
@@ -943,6 +1034,7 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
                     raw: raw_link,
                     folder: &pages_folder,
                     raw_files: &raw_files,
+                    categories: (!project.para()).then_some(categories.as_slice()),
                     log: !taken("log"),
                 },
                 &entries(&all),
@@ -963,8 +1055,11 @@ mod tests {
             ("title", text(title)),
             ("markdown", text(markdown)),
             (
-                "citations",
-                ConfigValue::Array(vec![object(vec![("id", text("1"))])]),
+                "sources",
+                ConfigValue::Array(vec![object(vec![(
+                    "source",
+                    object(vec![("sourceId", text("source-1"))]),
+                )])]),
             ),
             ("archived", ConfigValue::Bool(archived)),
             ("changed", text("2026-11-22T13:03:16.309Z")),
@@ -1021,6 +1116,50 @@ mod tests {
     }
 
     #[test]
+    fn a_wiki_lists_its_pages_by_category_in_the_order_of_the_rules() {
+        let page = |id: &str, category: &str, archived: bool| {
+            let mut entries = vec![
+                ("id", text(id)),
+                ("title", text(id)),
+                ("markdown", text("x [1]")),
+                ("citations", ConfigValue::Array(Vec::new())),
+                ("archived", ConfigValue::Bool(archived)),
+            ];
+            if !category.is_empty() {
+                entries.push(("category", text(category)));
+            }
+            object(entries)
+        };
+        let pages = vec![
+            page("a", "リーン", false),
+            page("b", "", false),
+            page("c", "トヨタ", false),
+            page("d", "ほか", false),
+            page("e", "トヨタ", true),
+        ];
+        let entries = entries(&pages);
+        let order = [
+            "トヨタ".to_owned(),
+            "アジャイル".to_owned(),
+            "リーン".to_owned(),
+        ];
+        let names: Vec<(String, Vec<&str>)> = categorized(&entries, &order)
+            .into_iter()
+            .map(|(name, list)| (name, list.iter().map(|entry| entry.id.as_str()).collect()))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                ("トヨタ".to_owned(), vec!["c"]),
+                ("リーン".to_owned(), vec!["a"]),
+                ("ほか".to_owned(), vec!["d"]),
+                ("未分類".to_owned(), vec!["b"]),
+                ("アーカイブ".to_owned(), vec!["e"]),
+            ]
+        );
+    }
+
+    #[test]
     fn a_search_needs_every_word_and_puts_titles_first() {
         let pages = sample();
         let ids = |query: &str| -> Vec<&str> {
@@ -1061,16 +1200,19 @@ mod tests {
                 rules: Some("../rules.md".into()),
                 raw: Some("../raw/".into()),
                 folder: "wiki",
+                categories: None,
                 raw_files: &[
                     RawFile {
                         path: "a/x.md".into(),
                         source: Some("source-1".into()),
                         reflected: true,
+                        nothing: false,
                     },
                     RawFile {
                         path: "b.md".into(),
                         source: None,
                         reflected: false,
+                        nothing: false,
                     },
                 ],
                 log: true,

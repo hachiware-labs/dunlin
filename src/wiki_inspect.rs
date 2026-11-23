@@ -22,8 +22,8 @@ use crate::source_load::sha256_hex;
 use crate::transform_stage::StageError;
 use crate::wiki_ingress::words;
 use crate::wiki_project::{
-    In, Project, array, current_document, from_units, line_count, marker_index, model_output,
-    nonempty, paragraph_markers, positive_integer, str_of, strict, unique_index, utf16_prefix,
+    In, Project, array, current_document, from_units, line_count, model_output, nonempty,
+    page_sources, positive_integer, str_of, strict, unique_index, utf16_prefix,
 };
 use crate::wiki_work::Tracker;
 
@@ -33,9 +33,9 @@ const FINDINGS_SCHEMA: &str = r#"{"$schema":"https://json-schema.org/draft/2020-
 const INSTRUCTIONS: &str = "Assess the numbered excerpts for factual contradictions, disagreement between a source and a page, or duplicate page content. Every comparison must include item 1. Use two verbatim quotes, one from each excerpt. Return an empty list where there is no issue.";
 
 /// `z.toJSONSchema(suggested)`
-const SUGGESTED_SCHEMA: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"concepts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","minLength":1},"pages":{"type":"array","items":{"type":"integer","exclusiveMinimum":0,"maximum":9007199254740991}}},"required":["name","pages"],"additionalProperties":false}},"questions":{"type":"array","items":{"type":"string"}},"sources":{"type":"array","items":{"type":"string"}}},"required":["concepts","questions","sources"],"additionalProperties":false}"#;
+const SUGGESTED_SCHEMA: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"concepts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","minLength":1},"pages":{"type":"array","items":{"type":"integer","exclusiveMinimum":0,"maximum":9007199254740991}}},"required":["name","pages"],"additionalProperties":false}},"questions":{"type":"array","items":{"type":"string"}},"sources":{"type":"array","items":{"type":"string"}},"misplaced":{"type":"array","items":{"type":"object","properties":{"item":{"type":"integer","exclusiveMinimum":0,"maximum":9007199254740991},"category":{"type":"string","minLength":1}},"required":["item","category"],"additionalProperties":false}}},"required":["concepts","questions","sources","misplaced"],"additionalProperties":false}"#;
 
-const SUGGEST_INSTRUCTIONS: &str = "Read the list of pages of the wiki. Name the important concepts that the pages mention but that have no page of their own, with the numbers of the pages that mention them. Suggest questions worth investigating next, and sources worth looking for to fill the gaps of the wiki. Write in the language of the project.";
+const SUGGEST_INSTRUCTIONS: &str = "Read the list of pages of the wiki. Name the important concepts that the pages mention but that have no page of their own, with the numbers of the pages that mention them. Suggest questions worth investigating next, and sources worth looking for to fill the gaps of the wiki. Where a page is in a category that does not fit what it is about, give the number of the page and the category of the list that fits. Write in the language of the project.";
 
 /// `suggestWikiContent(db, pages, about, generate)`: the concepts that pages name but that have
 /// no page, as issues, and the questions and sources the model suggests next. A concept counts
@@ -63,8 +63,22 @@ pub(crate) fn suggest(
     }
     let field =
         |page: &ConfigValue, name: &str| In::Value(page.get(name).cloned().unwrap_or_default());
+    // The categories of the rules, which a Wiki's pages are in.
+    let categories = if project.para() {
+        Vec::new()
+    } else {
+        crate::wiki_project::rule_categories(
+            &crate::wiki_project::read_file(&project.rules_file()).unwrap_or_default(),
+        )
+    };
     let input = In::Map(vec![
         ("about", In::Value(project.request.about.clone())),
+        (
+            "categories",
+            In::Value(ConfigValue::Array(
+                categories.iter().map(|name| text(name)).collect(),
+            )),
+        ),
         (
             "pages",
             In::List(
@@ -76,6 +90,7 @@ pub(crate) fn suggest(
                             ("item", In::number(index + 1)),
                             ("id", field(page, "id")),
                             ("title", field(page, "title")),
+                            ("category", In::text(str_of(page, "category"))),
                             (
                                 "text",
                                 In::Units(utf16_prefix(str_of(page, "markdown"), 600)),
@@ -104,8 +119,9 @@ pub(crate) fn suggest(
         ));
     }
     let answer = project.generate(&model, SUGGESTED_SCHEMA, SUGGEST_INSTRUCTIONS, &input)?;
-    let [concepts, questions, sources] =
-        strict(&answer, &["concepts", "questions", "sources"]).ok_or_else(model_output)?[..]
+    let [concepts, questions, sources, misplaced] =
+        strict(&answer, &["concepts", "questions", "sources", "misplaced"])
+            .ok_or_else(model_output)?[..]
     else {
         return Err(model_output());
     };
@@ -172,6 +188,35 @@ pub(crate) fn suggest(
             ),
         ]));
     }
+    // A page in a category that does not fit, with one of the list that does.
+    for entry in array(misplaced).ok_or_else(model_output)? {
+        let [item, category] = strict(entry, &["item", "category"]).ok_or_else(model_output)?[..]
+        else {
+            return Err(model_output());
+        };
+        let item = positive_integer(item).ok_or_else(model_output)?;
+        let suggested = js_trim(&nonempty(category).ok_or_else(model_output)?).to_owned();
+        let Some(page) = active.get(item - 1) else {
+            continue;
+        };
+        let current = str_of(page, "category").trim();
+        if suggested == current || !categories.iter().any(|known| *known == suggested) {
+            continue;
+        }
+        let id = str_of(page, "id");
+        issues.push(object(vec![
+            ("code", text("CATEGORY_MISMATCH")),
+            ("page", text(id)),
+            ("category", text(current)),
+            ("suggested", text(&suggested)),
+            (
+                "description",
+                text(&format!(
+                    "{id}：分類は「{current}」ですが、「{suggested}」のほうが合っていそうです"
+                )),
+            ),
+        ]));
+    }
     let suggestions = object(vec![
         ("questions", lines(questions).ok_or_else(model_output)?),
         ("sources", lines(sources).ok_or_else(model_output)?),
@@ -210,13 +255,13 @@ impl Item {
     /// `itemKeys(item)`: its sources and up to 35 distinct words of its start.
     fn keys(&self) -> Vec<String> {
         let mut keys: Vec<String> = if self.page {
-            items(self.value.get("citations"))
+            page_sources(&self.value)
                 .iter()
-                .map(|citation| {
+                .map(|entry| {
                     format!(
                         "source:{}",
                         crate::eval_stage::js_string(
-                            citation
+                            entry
                                 .get("source")
                                 .and_then(|source| source.get("sourceId"))
                         )
@@ -285,22 +330,13 @@ fn excerpt(item: &Item, quote: &str) -> Option<ConfigValue> {
     let content = item.text();
     let at = unique_index(&content, quote)?;
     if item.page {
-        let (_, markers) = paragraph_markers(&content, quote)?;
-        let citations: Vec<ConfigValue> = markers
-            .iter()
-            .filter_map(|marker| {
-                marker_index(marker)
-                    .and_then(|index| items(item.value.get("citations")).get(index).cloned())
-            })
-            .filter(|citation| truthy(Some(citation)))
-            .collect();
-        if citations.is_empty() {
-            return None;
-        }
         return Some(object(vec![
             ("page", item.value.get("id").cloned().unwrap_or_default()),
             ("quote", text(quote)),
-            ("citations", ConfigValue::Array(citations)),
+            (
+                "sources",
+                ConfigValue::Array(page_sources(&item.value).to_vec()),
+            ),
         ]));
     }
     let prefix = &content[..at];
@@ -358,20 +394,14 @@ fn material(
         let title = crate::eval_stage::js_string(page.get("title"));
         let markdown = str_of(page, "markdown");
         let versions = ConfigValue::Array(
-            items(page.get("citations"))
+            page_sources(page)
                 .iter()
-                .map(|citation| {
-                    ConfigValue::Array(vec![
-                        citation
-                            .get("source")
-                            .and_then(|source| source.get("version"))
-                            .cloned()
-                            .unwrap_or(ConfigValue::Null),
-                        citation
-                            .get("byteRange")
-                            .cloned()
-                            .unwrap_or(ConfigValue::Null),
-                    ])
+                .map(|entry| {
+                    entry
+                        .get("source")
+                        .and_then(|source| source.get("version"))
+                        .cloned()
+                        .unwrap_or(ConfigValue::Null)
                 })
                 .collect(),
         );

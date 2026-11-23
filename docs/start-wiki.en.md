@@ -2,7 +2,7 @@
 
 [日本語](start-wiki.md) · [All introductions](getting-started.en.md)
 
-Have an AI read your documents and write Wiki pages organized by topic. Every sentence on a page carries a citation to the original document. People read the pages in a browser, and agents use the same pages over MCP.
+Have an AI read your documents and write Wiki pages organized by topic. Each page lists the documents it was written from as its sources. People read the pages in a browser, and agents use the same pages over MCP.
 
 ## The LLM-Wiki idea
 
@@ -12,7 +12,7 @@ This follows the LLM-Wiki idea proposed by Andrej Karpathy ([the original gist](
 - An LLM-Wiki keeps what the AI has read, written up as pages. When a new document arrives, the related pages are extended, and the knowledge grows.
 - People choose the sources, ask questions, and give instructions. Summarizing, linking pages, and keeping them current are the AI's job.
 
-Knowledge-Nest adds citation checks to this. A sentence the AI writes is saved only if its citation matches the source word for word.
+Knowledge-Nest adds source checks to this. Each page keeps the documents it was written from as its sources, and a program checks that the numbers, dates and quotations of a page appear as written in those documents.
 
 ## When to use it
 
@@ -26,9 +26,9 @@ Knowledge-Nest adds citation checks to this. A sentence the AI writes is saved o
 |---|---|
 | Choose and hand over sources, ask, instruct | People |
 | Read sources, write and rewrite pages | The AI (the model you set) |
-| Check citations, keep originals and versions, record jobs | Knowledge-Nest |
+| Record and check sources, keep originals and versions, record jobs | Knowledge-Nest |
 
-People do not edit pages directly. To change a page, you instruct the AI to change it. That is how every sentence keeps its citation.
+People do not edit pages directly. To change a page, you instruct the AI to change it. That is how every page keeps its sources.
 
 ## 1 Prepare a writing model
 
@@ -61,8 +61,8 @@ When you add documents to `raw/`, ingest the new files one at a time with `nest 
 `ingress` proceeds in this order:
 
 1. Saves each document as an original, with a version
-2. The AI reads it, revises related pages, and creates new pages where needed
-3. Checks the citations of what it wrote, and saves only what passes
+2. The AI reads it, revises or adds to related pages, and creates new pages where needed. A document that adds nothing to the Wiki gets no pages and is recorded as such ("得るものなし")
+3. Adds the documents used to the sources of each page, and warns of numbers, dates and quotations that its sources do not have
 4. Returns the list of changed pages
 
 This can take a few minutes. Give the job ID it prints to `nest progress <job-id>` to follow it. To save the originals now and read and write later, add `--source-only`, then run `nest ingress --pending` afterwards.
@@ -86,7 +86,7 @@ nest serve
 | Column | Contents |
 |---|---|
 | Left | Where things are. **資料を取り込む** (add documents, by URL or file), the home, the job history, the rules, and a file tree. **ページ** (pages) are what the AI wrote; **原本** (originals) are the documents you ingested |
-| Right | What you opened, and what you can do with it. Under a page and its citations you can ask about it, have it revised by instruction, and check it. An original shows its ingested text and the pages that cite it |
+| Right | What you opened, and what you can do with it. Under a page and its sources you can ask about it, have it revised by instruction, and check it. An original shows its ingested text and the pages written from it |
 
 The home shows the purpose and scope, a box for questions, the number of pages, originals, originals not yet reflected, and open findings, the pages changed lately, and the latest jobs. You know what to do next as soon as you open it. The screen itself is in Japanese.
 
@@ -98,7 +98,7 @@ The home shows the purpose and scope, a box for questions, the number of pages, 
 nest query "When is the pump inspected?"
 ```
 
-`query` searches the Wiki pages, not the original documents, and answers with sources. A source leads to the page and on to the version and range of the original that the page cites. A question outside the purpose is answered as out of scope. Save a good answer as a page with `nest save-answer`. The more you ask, the more the Wiki grows.
+`query` searches the Wiki pages, not the original documents, and answers with sources. A source leads to the page used for the answer and on to the documents that page was written from. A question outside the purpose is answered as out of scope. Save a good answer as a page with `nest save-answer`. The more you ask, the more the Wiki grows.
 
 ## 6 Fix: instructions and rules
 
@@ -125,7 +125,7 @@ nest verify --content
 
 | Check | What it looks at | Model |
 |---|---|---|
-| `verify` | Whether citations exist in the original, whether cited versions are stale, broken links, pages nothing links to | Not needed. Fast, and the same result every time |
+| `verify` | Whether the source documents exist and are current, whether the numbers, dates and quotations of a page are in its sources, broken links, pages nothing links to | Not needed. Fast, and the same result every time |
 | `verify --content` | Contradictions between pages, conflicts between new documents and existing pages, duplicates | Needed. Findings are candidates and may be wrong |
 
 Findings are shown, not fixed. People decide which side is right and fix it with an instruction. Mark a finding you have handled with `nest issue <id> resolved` (or `dismissed`), and it stops appearing.
@@ -140,8 +140,7 @@ Findings are shown, not fixed. People decide which side is right and fix it with
 | Symptom | What to do |
 |---|---|
 | `MODEL_REQUIRED` | Set `models.writer.model`, or pass `--llm-model` to `init` |
-| `INVALID_CITATION` | None of the citations the AI wrote matched the documents. Run `ingress` again, or use a larger model |
-| `CITATION_REJECTED` warning | Some sentences' citations did not match and were not saved. The page was made from the rest |
+| `UNSUPPORTED_LITERAL` warning | Some numbers, dates or quotations of a page were not found in its sources. The page was saved: open it, check them, and have it fixed by instruction if they are wrong |
 | `BUILD_BUSY`, `DB_BUSY` | Wait for the previous job to finish. Follow it with `progress` |
 
 Other cases are in [Troubleshooting](troubleshooting.md) (Japanese).

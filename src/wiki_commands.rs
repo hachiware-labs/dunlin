@@ -19,10 +19,10 @@ use crate::source_load::sha256_hex;
 use crate::source_stage::iso_now;
 use crate::transform_stage::StageError;
 use crate::wiki_project::{
-    Citation, Fact, In, Project, REVISION_SCHEMA, WikiOutcome, WikiRequest, atomic_write, coded,
-    current_document, ensure, fs_error, job, json_or_undefined, line_count, model_output, pages,
-    read_citation, read_file, read_text, remember, remove, restore, str_of, strict, unique_index,
-    written_pages,
+    In, Project, REVISION_SCHEMA, WikiOutcome, WikiRequest, atomic_write, coded, current_document,
+    ensure, fs_error, job, json_or_undefined, merged_sources, model_output, page_form,
+    page_sources, pages, read_file, read_text, remember, remove, restore, source_key, str_of,
+    strict, unique_index, written_pages,
 };
 use crate::wiki_work::{self, Tracker};
 use crate::{Cancellation, KnowledgeBase};
@@ -56,13 +56,6 @@ pub(crate) fn chunks_for_model(documents: Vec<(String, ConfigValue)>) -> Vec<Ref
     found
 }
 
-fn number_of(value: Option<&ConfigValue>) -> f64 {
-    match value {
-        Some(ConfigValue::Number(value)) => *value,
-        _ => f64::NAN,
-    }
-}
-
 /// The quote as its source holds it exactly once: the quote itself, or the quote without what a
 /// small model tends to put around it (blanks, or the number of the source after it, as `: 1` or
 /// ` [1]`). What is kept is still a verbatim passage of the source.
@@ -85,38 +78,6 @@ pub(crate) fn settled_quote(source: &str, quote: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The facts whose citations resolve, for `ingress` (spec 16: only verified statements are saved).
-/// A citation whose quote is not found exactly once in its source is dropped, and so is a fact left
-/// without citations. Returns the kept facts and, for each dropped citation, the fact and the quote.
-pub(crate) fn verified_facts(facts: Vec<Fact>, refs: &[Ref]) -> (Vec<Fact>, Vec<(String, String)>) {
-    let mut kept = Vec::new();
-    let mut rejected = Vec::new();
-    for fact in facts {
-        let mut valid = Vec::new();
-        for citation in fact.citations {
-            let found = citation
-                .id
-                .checked_sub(1)
-                .and_then(|index| refs.get(index))
-                .and_then(|reference| settled_quote(&reference.text, &citation.quote));
-            match found {
-                Some(quote) => valid.push(Citation {
-                    id: citation.id,
-                    quote,
-                }),
-                None => rejected.push((fact.text.clone(), citation.quote)),
-            }
-        }
-        if !valid.is_empty() {
-            kept.push(Fact {
-                text: fact.text,
-                citations: valid,
-            });
-        }
-    }
-    (kept, rejected)
-}
-
 /// A statement without the source markers such as `[1]` that a model wrote into it: the page adds
 /// its own markers, numbered by citation.
 pub(crate) fn without_markers(text: &str) -> String {
@@ -128,112 +89,42 @@ pub(crate) fn without_markers(text: &str) -> String {
     markers.replace_all(text, "").into_owned()
 }
 
-/// `verifyFacts(facts, refs)`: the page text with source markers and the citation of each marker.
-pub(crate) fn verify_facts(
-    facts: &[Fact],
-    refs: &[Ref],
-) -> Result<(String, Vec<ConfigValue>), StageError> {
-    let units = facts
-        .iter()
-        .map(|fact| cited_fact(fact, refs))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(crate::wiki_merge::compose(&units))
-}
-
-/// A fact as a statement of a page: its text without markers, and the passages its quotes are.
-pub(crate) fn cited_fact(fact: &Fact, refs: &[Ref]) -> Result<crate::wiki_merge::Unit, StageError> {
-    let mut citations: Vec<ConfigValue> = Vec::new();
-    {
-        for citation in &fact.citations {
-            let reference = refs.get(citation.id - 1);
-            let Some((reference, index)) = reference.and_then(|reference| {
-                unique_index(&reference.text, &citation.quote).map(|index| (reference, index))
-            }) else {
-                return Err(coded(
-                    2,
-                    "INVALID_CITATION",
-                    "Every citation must identify a unique verbatim quote in the supplied evidence.",
-                ));
-            };
-            let evidence = &reference.evidence;
-            let start = match evidence
-                .get("byteRange")
-                .and_then(|range| range.get("start"))
-            {
-                Some(ConfigValue::Number(start)) => *start,
-                _ => 0.0,
-            };
-            let prefix = &reference.text[..index];
-            let start_line = number_of(
-                evidence
-                    .get("range")
-                    .and_then(|range| range.get("startLine")),
-            ) + prefix.matches('\n').count() as f64;
-            let end_line = start_line + line_count(&citation.quote) as f64 - 1.0;
-            let mut entries = match evidence {
-                ConfigValue::Object(entries) => entries.clone(),
-                _ => Vec::new(),
-            };
-            assign(
-                &mut entries,
-                "range",
-                Some(object(vec![
-                    ("startLine", ConfigValue::Number(start_line)),
-                    ("endLine", ConfigValue::Number(end_line)),
-                ])),
-            );
-            assign(
-                &mut entries,
-                "byteRange",
-                Some(object(vec![
-                    ("start", ConfigValue::Number(start + prefix.len() as f64)),
-                    (
-                        "end",
-                        ConfigValue::Number(start + (prefix.len() + citation.quote.len()) as f64),
-                    ),
-                ])),
-            );
-            citations.push(ConfigValue::Object(entries));
-        }
-    }
-    Ok(crate::wiki_merge::Unit {
-        text: js_trim(&without_markers(&fact.text)).to_owned(),
-        citations,
-    })
-}
-
-/// `citedText(database, pages)`: the cited excerpts of pages, each once.
-pub(crate) fn cited_text(
+/// The sources of pages as numbered excerpts for the model: the current text of each document,
+/// each once.
+pub(crate) fn source_refs(
     database: &KnowledgeBase,
-    selected: &[ConfigValue],
+    sources: &[ConfigValue],
     cancel: &Cancellation,
 ) -> Result<Vec<Ref>, StageError> {
-    let mut order: Vec<String> = Vec::new();
-    let mut found: HashMap<String, ConfigValue> = HashMap::new();
-    for page in selected {
-        for item in items(page.get("citations")) {
-            let source = item.get("source").cloned().unwrap_or_default();
-            let part = |name: &str| source.get(name).cloned().unwrap_or(ConfigValue::Null);
-            let key = ConfigValue::Array(vec![
-                part("sourceId"),
-                part("objectId"),
-                part("version"),
-                item.get("byteRange").cloned().unwrap_or(ConfigValue::Null),
-            ])
-            .to_js_json();
-            if !found.contains_key(&key) {
-                order.push(key.clone());
-            }
-            found.insert(key, item.clone());
+    let mut documents = Vec::new();
+    let mut seen: Vec<&str> = Vec::new();
+    for entry in sources {
+        let key = source_key(entry);
+        if key.is_empty() || seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        let source = entry.get("source").cloned().unwrap_or_default();
+        if let Some(document) = current_document(database, &source, cancel)? {
+            documents.push((
+                str_of(&document, "content").to_owned(),
+                document.get("evidence").cloned().unwrap_or_default(),
+            ));
         }
     }
-    let mut documents = Vec::new();
-    for key in order {
-        let item = found.remove(&key).unwrap_or_default();
-        let content = read_citation(database, &item, None, cancel)?;
-        documents.push((content, item));
-    }
     Ok(chunks_for_model(documents))
+}
+
+/// A source excerpt as a source of a page.
+pub(crate) fn source_entry(reference: &Ref) -> ConfigValue {
+    object(vec![(
+        "source",
+        reference
+            .evidence
+            .get("source")
+            .cloned()
+            .unwrap_or_default(),
+    )])
 }
 
 /// The project execution lock, as `withExecutionLock` took it.
@@ -507,22 +398,34 @@ fn issue(project: &Project<'_>, connection: &Connection) -> Result<ConfigValue, 
 fn cite(project: &Project<'_>, connection: &Connection) -> Result<ConfigValue, StageError> {
     let id = arg(project, 0);
     let index = crate::wiki_project::marker_index(arg(project, 1));
-    let citation = pages(project.request, connection, true)?
+    let entry = pages(project.request, connection, true)?
         .into_iter()
         .find(|page| str_of(page, "id") == id)
-        .and_then(|page| index.and_then(|index| items(page.get("citations")).get(index).cloned()));
-    let Some(citation) = citation else {
+        .and_then(|page| index.and_then(|index| page_sources(&page).get(index).cloned()));
+    let Some(entry) = entry else {
         return Err(coded(
             3,
             "CITATION_REQUIRED",
-            "Provide a page ID and one-based citation number.",
+            "Provide a page ID and the one-based number of one of its sources.",
         ));
     };
     let database = project.database()?;
-    let quote = read_citation(&database, &citation, None, project.cancel)?;
+    let source = entry.get("source").cloned().unwrap_or_default();
+    let content = if source_key(&entry).is_empty() {
+        None
+    } else {
+        current_document(&database, &source, project.cancel)?
+    };
+    let Some(content) = content else {
+        return Err(coded(
+            2,
+            "SOURCE_MISSING",
+            "The source of the page is no longer in the project.",
+        ));
+    };
     Ok(object(vec![
-        ("evidence", citation),
-        ("quote", text(&quote)),
+        ("evidence", entry),
+        ("content", text(str_of(&content, "content"))),
     ]))
 }
 
@@ -551,21 +454,18 @@ fn save_answer(
         return Err(coded(4, "PAGE_EXISTS", "Choose an unused page ID."));
     }
     let database = project.database()?;
-    let mut citations = Vec::new();
+    let mut sources: Vec<ConfigValue> = Vec::new();
     let mut markdown = Vec::new();
     for fact in facts {
-        let mut marks = Vec::new();
-        for evidence in items(fact.get("evidence")) {
-            citations.push(evidence.clone());
-            marks.push(format!("[{}]", citations.len()));
-        }
-        markdown.push(format!(
-            "{} {}",
-            without_markers(&crate::eval_stage::js_string(fact.get("text"))),
-            marks.join(" ")
-        ));
+        sources = merged_sources(&sources, items(fact.get("evidence")));
+        markdown.push(
+            js_trim(&without_markers(&crate::eval_stage::js_string(
+                fact.get("text"),
+            )))
+            .to_owned(),
+        );
     }
-    let page = project.change_page(id, title, markdown.join("\n\n"), citations, &all)?;
+    let page = project.change_page(id, title, markdown.join("\n\n"), sources, &all, "")?;
     let page = project.attach_originals(&database, page)?;
     commit_pages(
         project,
@@ -628,7 +528,8 @@ fn undo(project: &Project<'_>, connection: &Connection) -> Result<ConfigValue, S
     for entry in items(found.get("previous_pages")) {
         let id = str_of(entry, "id");
         let now = current.iter().find(|page| str_of(page, "id") == id);
-        if json_or_undefined(now) != json_or_undefined(entry.get("after")) {
+        let after = entry.get("after").cloned().map(page_form);
+        if json_or_undefined(now) != json_or_undefined(after.as_ref()) {
             return Err(coded(
                 4,
                 "PAGE_CHANGED",
@@ -875,6 +776,35 @@ fn instruct(
     }
     let prior = pages(project.request, connection, true)?;
     let target = arg(project, 0);
+    // A page's category is set as given, without the model.
+    if let Some(category) = project
+        .value_str("category")
+        .map(str::trim)
+        .filter(|category| !category.is_empty())
+    {
+        let Some(ConfigValue::Object(mut entries)) = prior
+            .iter()
+            .find(|page| str_of(page, "id") == target)
+            .filter(|page| !truthy(page.get("archived")))
+            .cloned()
+        else {
+            return Err(coded(
+                3,
+                "PAGE_REQUIRED",
+                format!("Select an active page: {target}"),
+            ));
+        };
+        assign(&mut entries, "category", Some(text(category)));
+        assign(&mut entries, "changed", Some(text(&iso_now())));
+        return commit_pages(
+            project,
+            connection,
+            tracker,
+            vec![ConfigValue::Object(entries)],
+            vec![("target", text(target)), ("category", text(category))],
+            |_| Ok(()),
+        );
+    }
     let Some(page) = prior
         .iter()
         .find(|page| str_of(page, "id") == target)
@@ -889,7 +819,7 @@ fn instruct(
     let page = page.clone();
     let rules = read_file(&project.rules_file())?;
     let database = project.database()?;
-    let mut refs = cited_text(&database, std::slice::from_ref(&page), project.cancel)?;
+    let mut refs = source_refs(&database, page_sources(&page), project.cancel)?;
     let supplement = project
         .value_str("supplement")
         .filter(|text| !text.is_empty());
@@ -930,7 +860,7 @@ fn instruct(
     let proposal = project.generate(
         str_of(&writing, "model"),
         REVISION_SCHEMA,
-        "Revise the target page based on the user instruction and existing rules. Keep fact citations to exact quotes from numbered sources. If the instruction contradicts the originals, return the conflict and no pages unless an explicit supplement is supplied. When using a supplement, clearly attribute the supplement to the contributor and preserve conflicting material as distinct. Keep the target page ID. Additional page IDs may be used for an explicitly requested split.",
+        "Revise the target page in Markdown based on the user instruction and the rules, and give the numbers of the sources each page is written from. State only what the sources say, and copy numbers, dates, names and quotations exactly as they write them. If the instruction contradicts the sources, return the conflict and no pages unless an explicit supplement is supplied. When using a supplement, clearly attribute it to the contributor and keep conflicting material apart. Keep the target page ID. Additional page IDs may be used for an explicitly requested split.",
         &In::Map(vec![
             ("about", In::Value(project.request.about.clone())),
             ("rules", In::text(&rules)),
@@ -954,7 +884,7 @@ fn instruct(
         return Err(model_output());
     };
     let conflict = conflict.as_str().ok_or_else(model_output)?.to_owned();
-    let proposed = written_pages(proposed).ok_or_else(model_output)?;
+    let proposed = written_pages(proposed, false).ok_or_else(model_output)?;
     if !conflict.is_empty() && document.is_none() {
         return Ok(object(vec![
             ("conflict", text(&conflict)),
@@ -980,55 +910,14 @@ fn instruct(
             "The revision contains an invalid set of pages.",
         ));
     }
+    // A supplement that a page is written from is kept as a source of the project.
     let mut source: Option<ConfigValue> = None;
     let supplement_id = refs.len() + 1;
     if let Some(content) = &document
-        && proposed.iter().any(|item| {
-            item.facts.iter().any(|fact| {
-                fact.citations
-                    .iter()
-                    .any(|citation| citation.id == supplement_id)
-            })
-        })
+        && proposed
+            .iter()
+            .any(|item| item.sources.contains(&supplement_id))
     {
-        let all_facts: Vec<Fact> = proposed
-            .iter()
-            .flat_map(|item| item.facts.iter())
-            .map(|fact| Fact {
-                text: fact.text.clone(),
-                citations: fact
-                    .citations
-                    .iter()
-                    .map(|citation| crate::wiki_project::Citation {
-                        id: citation.id,
-                        quote: citation.quote.clone(),
-                    })
-                    .collect(),
-            })
-            .collect();
-        let mut checked: Vec<Ref> = refs
-            .iter()
-            .map(|reference| Ref {
-                id: reference.id,
-                text: reference.text.clone(),
-                evidence: reference.evidence.clone(),
-            })
-            .collect();
-        checked.push(Ref {
-            id: supplement_id,
-            text: content.clone(),
-            evidence: object(vec![
-                (
-                    "range",
-                    object(vec![("startLine", ConfigValue::Number(1.0))]),
-                ),
-                (
-                    "byteRange",
-                    object(vec![("start", ConfigValue::Number(0.0))]),
-                ),
-            ]),
-        });
-        verify_facts(&all_facts, &checked)?;
         let digest = save_shared_original(project, content.as_bytes())?;
         let input = object(vec![
             ("objectId", text(&format!("{source_id}.txt"))),
@@ -1059,8 +948,28 @@ fn instruct(
     tracker.progress("validating_citations", None);
     let mut changes = Vec::new();
     for item in &proposed {
-        let (markdown, citations) = verify_facts(&item.facts, &refs)?;
-        let changed = project.change_page(&item.id, &item.title, markdown, citations, &prior)?;
+        let used: Vec<ConfigValue> = item
+            .sources
+            .iter()
+            .filter_map(|number| number.checked_sub(1).and_then(|index| refs.get(index)))
+            .map(source_entry)
+            .collect();
+        // The target keeps the sources it had; a page split off is written from those it names,
+        // or from those of the target.
+        let sources = if item.id == page_id || used.is_empty() {
+            merged_sources(page_sources(&page), &used)
+        } else {
+            merged_sources(&[], &used)
+        };
+        // A page split off takes the category of the page it came from.
+        let changed = project.change_page(
+            &item.id,
+            &item.title,
+            js_trim(&without_markers(&item.markdown)).to_owned(),
+            sources,
+            &prior,
+            str_of(&page, "category"),
+        )?;
         changes.push(project.attach_originals(&database, changed)?);
     }
     let mut extra = vec![("target", text(&page_id))];
@@ -1155,19 +1064,6 @@ pub(crate) fn replace_documents(
 mod tests {
     use super::*;
 
-    fn fact(text: &str, quotes: &[(usize, &str)]) -> Fact {
-        Fact {
-            text: text.to_owned(),
-            citations: quotes
-                .iter()
-                .map(|(id, quote)| Citation {
-                    id: *id,
-                    quote: (*quote).to_owned(),
-                })
-                .collect(),
-        }
-    }
-
     #[test]
     fn removes_the_markers_a_model_wrote() {
         assert_eq!(without_markers("緊急停止 [1]"), "緊急停止");
@@ -1179,48 +1075,9 @@ mod tests {
     }
 
     #[test]
-    fn keeps_the_facts_that_quote_their_sources() {
-        let refs = [Ref {
-            id: 1,
-            text: "| A | 2 |\n| B | 3 |\nA\nA\n".to_owned(),
-            evidence: ConfigValue::Null,
-        }];
-        let (kept, rejected) = verified_facts(
-            vec![
-                fact("A is 2.", &[(1, "| A | 2 |")]),
-                fact("B is 3.", &[(1, "| A | 2 |\n| C | 3 |")]),
-                fact("Both.", &[(1, "| B | 3 |"), (2, "x"), (0, "y")]),
-                fact("Twice.", &[(1, "A\nA")]),
-            ],
-            &refs,
-        );
-        let kept: Vec<(&str, usize)> = kept
-            .iter()
-            .map(|fact| (fact.text.as_str(), fact.citations.len()))
-            .collect();
-        assert_eq!(kept, [("A is 2.", 1), ("Both.", 1), ("Twice.", 1)]);
-        let rejected: Vec<&str> = rejected.iter().map(|(fact, _)| fact.as_str()).collect();
-        assert_eq!(rejected, ["B is 3.", "Both.", "Both."]);
-        assert!(
-            verify_facts(
-                &verified_facts(vec![fact("B", &[(1, "| C |")])], &refs).0,
-                &refs
-            )
-            .is_ok()
-        );
-    }
-
-    #[test]
     fn a_quote_keeps_its_words_without_the_number_a_model_put_after_them() {
-        let refs = [Ref {
-            id: 1,
-            text: "スプリントは1か月以内。\n手順: 1 を見る。\n同じ。同じ。\n".to_owned(),
-            evidence: ConfigValue::Null,
-        }];
-        let quoted = |quote: &str| {
-            let (kept, _) = verified_facts(vec![fact("x", &[(1, quote)])], &refs);
-            kept.first().map(|fact| fact.citations[0].quote.clone())
-        };
+        let source = "スプリントは1か月以内。\n手順: 1 を見る。\n同じ。同じ。\n";
+        let quoted = |quote: &str| settled_quote(source, quote);
         assert_eq!(
             quoted("スプリントは1か月以内。: 1").as_deref(),
             Some("スプリントは1か月以内。")

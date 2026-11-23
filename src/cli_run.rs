@@ -590,7 +590,8 @@ fn dispatch(
                 }
             }
             "init" | "cite" | "issue" => 2,
-            "instruct" if !flag("persistent") => 2,
+            // A page and an instruction; a page alone when it only gets a category.
+            "instruct" if !flag("persistent") && value("category").is_none() => 2,
             "modules" if first == Some("describe") => 2,
             "save-answer" => 3,
             "ingress" => {

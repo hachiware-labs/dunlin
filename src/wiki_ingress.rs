@@ -16,14 +16,13 @@ use crate::source_load::{Host, LoadFile, LoadRequest, sha256_hex};
 use crate::source_stage::iso_now;
 use crate::transform_stage::StageError;
 use crate::wiki_commands::{
-    Ref, arg, chunks, chunks_for_model, cited_fact, commit_pages, replace_documents,
-    verified_facts, without_markers,
+    Ref, arg, chunks, chunks_for_model, commit_pages, replace_documents, without_markers,
 };
-use crate::wiki_merge::{Unit, compose, extended, removed, units};
 use crate::wiki_project::{
-    ANSWER_SCHEMA, CHOSEN_SCHEMA, In, Project, WRITTEN_SCHEMA, coded, current_document, facts,
-    fs_error, json_or_undefined, link_targets, linked_page, marker_index, model_output, pages,
-    paragraph_markers, read_citation, read_file, realpath, remember, str_of, strict, written_pages,
+    ANSWER_SCHEMA, CHOSEN_SCHEMA, In, Project, WRITTEN_SCHEMA, atomic_write, coded,
+    current_document, facts, fs_error, json_or_undefined, link_targets, linked_page,
+    merged_sources, model_output, page_sources, pages, read_file, realpath, remember, source_key,
+    str_of, strict, written_pages,
 };
 use crate::wiki_work::Tracker;
 
@@ -146,34 +145,23 @@ pub(crate) fn query(
                 let only = holders.next()?;
                 holders.next().is_none().then_some(only)
             });
-            let Some((index, quote)) = resolved else {
+            let Some((index, _)) = resolved else {
                 return Err(coded(
                     2,
                     "INVALID_CITATION",
                     "The answer cited an unresolved page quote.",
                 ));
             };
-            let page = ranked.get(index);
-            let markdown = page
-                .map(|page| str_of(page, "markdown"))
-                .unwrap_or_default();
             if !cited.contains(&index) {
                 cited.push(index);
             }
-            let Some((_, markers)) = paragraph_markers(markdown, &quote) else {
-                return Err(coded(
-                    2,
-                    "INVALID_CITATION",
-                    "The quoted page fact has no source markers.",
-                ));
-            };
-            let citations = items(page.and_then(|page| page.get("citations")));
-            for marker in markers {
-                evidence.push(
-                    marker_index(&marker)
-                        .and_then(|index| citations.get(index).cloned())
-                        .unwrap_or(ConfigValue::Null),
-                );
+            for entry in page_sources(&ranked[index]) {
+                if !evidence
+                    .iter()
+                    .any(|known| source_key(known) == source_key(entry))
+                {
+                    evidence.push(entry.clone());
+                }
             }
         }
         found.push(object(vec![
@@ -211,7 +199,7 @@ pub(crate) fn query(
                     object(vec![
                         ("id", get("id")),
                         ("title", get("title")),
-                        ("citations", get("citations")),
+                        ("sources", get("sources")),
                     ])
                 })
                 .collect(),
@@ -256,39 +244,67 @@ pub(crate) fn verify(
     for (completed, page) in material.iter().enumerate() {
         tracker.progress("checking_citations", Some((completed, material.len())));
         let page_id = page.get("id").cloned().unwrap_or_default();
-        for item in items(page.get("citations")) {
-            let valid = match read_citation(&database, item, None, project.cancel) {
-                Ok(_) => true,
-                Err(error) if error.code == Some("INVALID_CITATION") => false,
-                Err(error) => return Err(error),
+        let mut texts: Vec<String> = Vec::new();
+        for entry in page_sources(page) {
+            let source = entry.get("source").cloned().unwrap_or_default();
+            let current = if source_key(entry).is_empty() {
+                None
+            } else {
+                current_document(&database, &source, project.cancel)?
             };
-            let source = item.get("source").cloned().unwrap_or_default();
-            let current = current_document(&database, &source, project.cancel)?;
-            let current_version = current
-                .as_ref()
-                .and_then(|document| document.get("evidence"))
-                .and_then(|evidence| evidence.get("source"))
-                .and_then(|source| source.get("version"));
-            if !valid {
+            let Some(current) = current else {
                 issues.push(object(vec![
-                    ("code", text("CITATION_MISSING")),
+                    ("code", text("SOURCE_MISSING")),
                     ("page", page_id.clone()),
-                    ("evidence", item.clone()),
+                    ("source", entry.clone()),
                     (
                         "description",
-                        said(page, "引用した箇所が原本に見つかりません"),
+                        said(
+                            page,
+                            &format!(
+                                "出典の資料が見つかりません（{}）",
+                                str_of(&source, "objectId")
+                            ),
+                        ),
                     ),
                 ]));
-            } else if !truthy(page.get("archived"))
+                continue;
+            };
+            texts.push(str_of(&current, "content").to_owned());
+            let current_version = current
+                .get("evidence")
+                .and_then(|evidence| evidence.get("source"))
+                .and_then(|source| source.get("version"));
+            if !truthy(page.get("archived"))
                 && json_or_undefined(current_version) != json_or_undefined(source.get("version"))
             {
                 issues.push(object(vec![
                     ("code", text("STALE_VERSION")),
                     ("page", page_id.clone()),
-                    ("evidence", item.clone()),
+                    ("source", entry.clone()),
                     (
                         "description",
-                        said(page, "引用した原本が新しくなっています"),
+                        said(
+                            page,
+                            &format!(
+                                "出典の資料が新しくなっています（{}）",
+                                str_of(&source, "objectId")
+                            ),
+                        ),
+                    ),
+                ]));
+            }
+        }
+        // Numbers, dates and quotations are written as the sources write them.
+        if !truthy(page.get("archived")) {
+            for literal in unsupported_literals(str_of(page, "markdown"), &texts) {
+                issues.push(object(vec![
+                    ("code", text("UNSUPPORTED_LITERAL")),
+                    ("page", page_id.clone()),
+                    ("literal", text(&literal)),
+                    (
+                        "description",
+                        said(page, &format!("「{literal}」が出典の資料に見つかりません")),
                     ),
                 ]));
             }
@@ -332,6 +348,35 @@ pub(crate) fn verify(
         }
     }
     drop(database);
+    // A page of a Wiki is in one of the categories of the rules.
+    if !project.para() {
+        let listed = crate::wiki_project::rule_categories(
+            &read_file(&project.rules_file()).unwrap_or_default(),
+        );
+        for page in material.iter().filter(|page| !truthy(page.get("archived"))) {
+            let id = str_of(page, "id");
+            let category = str_of(page, "category").trim();
+            if category.is_empty() {
+                issues.push(object(vec![
+                    ("code", text("NO_CATEGORY")),
+                    ("page", text(id)),
+                    ("description", text(&format!("{id}：分類がありません"))),
+                ]));
+            } else if !listed.is_empty() && !listed.iter().any(|known| known == category) {
+                issues.push(object(vec![
+                    ("code", text("UNKNOWN_CATEGORY")),
+                    ("page", text(id)),
+                    ("category", text(category)),
+                    (
+                        "description",
+                        text(&format!(
+                            "{id}：分類「{category}」は決まり（rules.md）の分類にありません"
+                        )),
+                    ),
+                ]));
+            }
+        }
+    }
     // A page that names another page without linking to it.
     let active: Vec<&ConfigValue> = material
         .iter()
@@ -881,7 +926,7 @@ pub(crate) fn ingress(
     if source_only {
         return finished(connection, documents.len(), &skipped);
     }
-    let mut refs = chunks_for_model(
+    let refs = chunks_for_model(
         documents
             .iter()
             .map(|document| {
@@ -898,9 +943,9 @@ pub(crate) fn ingress(
     let rules = read_file(&project.rules_file())?;
     let existing = pages(request, connection, false)?;
     let previous = pages(request, connection, true)?;
-    // A citation of a source that this run read in another version.
-    let stale = |citation: &ConfigValue| {
-        let source = citation.get("source").cloned().unwrap_or_default();
+    // A source of a page that this run read in another version.
+    let stale = |entry: &ConfigValue| {
+        let source = entry.get("source").cloned().unwrap_or_default();
         documents.iter().any(|document| {
             let current = evidence_source(document);
             source.get("sourceId") == current.get("sourceId")
@@ -910,38 +955,22 @@ pub(crate) fn ingress(
     };
     let affected: Vec<String> = existing
         .iter()
-        .filter(|page| items(page.get("citations")).iter().any(&stale))
+        .filter(|page| page_sources(page).iter().any(&stale))
         .map(|page| str_of(page, "id").to_owned())
         .collect();
-    // What each page says now, without the statements of a source that changed. These stay on
-    // the page whatever the model returns: an ingest only adds to a page.
-    let kept = |page: &ConfigValue| -> Vec<Unit> {
-        units(str_of(page, "markdown"), items(page.get("citations")))
-            .into_iter()
-            .filter(|unit| !unit.citations.iter().any(&stale))
-            .collect()
-    };
     let field =
         |page: &ConfigValue, name: &str| In::Value(page.get(name).cloned().unwrap_or_default());
-    // The text of what a page says now, as a reader sees it: without source markers, whose
-    // numbers a model takes for the numbers of the sources.
-    let said = |page: &ConfigValue| -> String {
-        kept(page)
-            .iter()
-            .map(|unit| unit.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
-    // Whether the pages a source adds to are written again, or only gain statements. A model
-    // that writes well rewrites them; a small local one copies a page it is shown, so it adds.
+    // Whether the pages a source adds to are written again, or only gain text. A model that
+    // writes well rewrites them; a small local one copies a page it is shown, so it adds.
     let rewrite = match str_of(&writing, "update") {
         "rewrite" => true,
         "append" => false,
         _ => project.writer(str_of(&writing, "model"))?.provider != "ollama",
     };
+    // The pages the model is given in full and returns whole: those written from a source that
+    // changed, and, when it rewrites, those it names as the ones the sources add to.
     let mut revision = affected.clone();
     if rewrite {
-        // The model reads the list of pages first and names the ones the sources add to.
         let others: Vec<&ConfigValue> = existing
             .iter()
             .filter(|page| !affected.iter().any(|id| id == str_of(page, "id")))
@@ -964,7 +993,7 @@ pub(crate) fn ingress(
                                     In::Map(vec![
                                         ("id", field(page, "id")),
                                         ("title", field(page, "title")),
-                                        ("summary", In::Units(crate::wiki_project::utf16_prefix(&said(page), 200))),
+                                        ("summary", In::Units(crate::wiki_project::utf16_prefix(str_of(page, "markdown"), 200))),
                                     ])
                                 })
                                 .collect(),
@@ -988,53 +1017,23 @@ pub(crate) fn ingress(
                 }
             }
         }
-        // The passages the pages to rewrite cite, so that what they say can keep its quotes.
-        let present: HashSet<String> = documents
-            .iter()
-            .map(|document| str_of(&evidence_source(document), "sourceId").to_owned())
-            .collect();
-        let cited: Vec<ConfigValue> = existing
-            .iter()
-            .filter(|page| revision.iter().any(|id| id == str_of(page, "id")))
-            .map(|page| {
-                let ConfigValue::Object(mut entries) = page.clone() else {
-                    return page.clone();
-                };
-                let kept: Vec<ConfigValue> = items(page.get("citations"))
-                    .iter()
-                    .filter(|citation| {
-                        let source = citation.get("source").cloned().unwrap_or_default();
-                        !present.contains(str_of(&source, "sourceId"))
-                    })
-                    .cloned()
-                    .collect();
-                assign(&mut entries, "citations", Some(ConfigValue::Array(kept)));
-                ConfigValue::Object(entries)
-            })
-            .collect();
-        for item in crate::wiki_commands::cited_text(&database, &cited, project.cancel)? {
-            refs.push(Ref {
-                id: refs.len() + 1,
-                text: item.text,
-                evidence: item.evidence,
-            });
-        }
     }
     tracker.progress("writing_pages", None);
     let instruction = format!(
-        "Write in the language of the project. Create or update relevant pages only, using exact supporting quotes. {}Return zero pages for out-of-scope sources. Use safe relative page IDs. {}Each fact must have a citation.",
-        if rewrite && !revision.is_empty() {
-            "Follow the rules. A page listed in pages_needing_revision is given in full, and the passages it cites are among the sources: return the whole page, revised with what the new sources add, keeping the statements that still hold with their quotes. Where a source contradicts a statement, keep both and say that they disagree. For any other existing page, return only new facts. "
+        "Write in the language of the project and follow the rules. Write each page in Markdown from the numbered sources, and give the numbers of the sources it is written from. State only what the sources say, and copy numbers, dates, names and quotations exactly as the sources write them. Link related pages as [title](/page-id). Where a source contradicts a page, keep both and say that they disagree. {}Return no pages when the sources add nothing new to the wiki or are outside its purpose. {}",
+        if !revision.is_empty() {
+            "A page listed in pages_needing_revision is given in full: return the whole page, revised with what the sources add or change, keeping what still holds. For any other existing page, return only the new text to add to it. "
+        } else if !existing.is_empty() {
+            "For an existing page, return only the new text to add to it. "
         } else {
             ""
         },
         if project.para() {
-            "An ID must start with Projects/, Areas/, Resources/ or Archives/. "
+            "An ID must start with Projects/, Areas/, Resources/ or Archives/. Leave the category empty."
         } else {
-            ""
+            "Give each page the category it belongs to: one of the categories in the rules, or, if none fits, a short name of a broad subject that other pages can share (not the kind of page). Page IDs are names without folders."
         }
     );
-    // In the append way the model is given the list of pages, not what they say.
     let result = project.generate(
         str_of(&writing, "model"),
         WRITTEN_SCHEMA,
@@ -1051,8 +1050,8 @@ pub(crate) fn ingress(
                         .map(|page| {
                             let mut entries =
                                 vec![("id", field(page, "id")), ("title", field(page, "title"))];
-                            if rewrite && revision.iter().any(|id| id == str_of(page, "id")) {
-                                entries.push(("markdown", In::text(&said(page))));
+                            if revision.iter().any(|id| id == str_of(page, "id")) {
+                                entries.push(("markdown", field(page, "markdown")));
                             }
                             In::Map(entries)
                         })
@@ -1070,7 +1069,7 @@ pub(crate) fn ingress(
     let [list] = strict(&result, &["pages"]).ok_or_else(model_output)?[..] else {
         return Err(model_output());
     };
-    let written = written_pages(list).ok_or_else(model_output)?;
+    let written = written_pages(list, true).ok_or_else(model_output)?;
     if written.len() as f64 > crate::eval_stage::number(writing.get("max_pages_per_job")) {
         return Err(coded(
             2,
@@ -1078,13 +1077,21 @@ pub(crate) fn ingress(
             "The model exceeded max_pages_per_job.",
         ));
     }
+    // A source of this run as a source of a page.
+    let entry_of = |reference: &Ref| {
+        object(vec![(
+            "source",
+            reference
+                .evidence
+                .get("source")
+                .cloned()
+                .unwrap_or_default(),
+        )])
+    };
     let mut ids: HashSet<String> = HashSet::new();
     let mut changes = Vec::new();
-    let mut rejected = Vec::new();
-    // The statements that pages written again no longer make, by page.
-    let mut left_out: Vec<ConfigValue> = Vec::new();
-    // The statements that quoted no source and were not on their page already.
-    let mut proposed = 0;
+    // The sources the pages written are written from.
+    let mut used_sources: HashSet<String> = HashSet::new();
     for item in written {
         let lower = item.id.to_lowercase();
         if ids.contains(&lower) {
@@ -1105,90 +1112,70 @@ pub(crate) fn ingress(
             ));
         }
         ids.insert(lower);
-        let earlier: Vec<Unit> = existing
-            .iter()
-            .find(|page| str_of(page, "id") == item.id)
-            .map(&kept)
-            .unwrap_or_default();
-        let revised = rewrite && revision.iter().any(|id| *id == item.id);
-        let mut stated: Vec<Unit> = Vec::new();
-        for fact in item.facts {
-            let wording = js_trim(&without_markers(&fact.text)).to_owned();
-            let (quoted, dropped) = verified_facts(vec![fact], &refs);
-            if let Some(fact) = quoted.first() {
-                stated.push(cited_fact(fact, &refs)?);
-            } else if let Some(unit) = earlier.iter().find(|unit| unit.text == wording) {
-                // The page says this already, and keeps what it cited for it.
-                if revised {
-                    stated.push(unit.clone());
-                }
-                continue;
-            } else {
-                proposed += 1;
+        // The sources it names; a page that names none is written from all of them.
+        let mut used: Vec<ConfigValue> = Vec::new();
+        for number in &item.sources {
+            if let Some(reference) = number.checked_sub(1).and_then(|index| refs.get(index)) {
+                used = merged_sources(&used, &[entry_of(reference)]);
             }
-            rejected.extend(
-                dropped
-                    .into_iter()
-                    .map(|(fact, quote)| (item.id.clone(), fact, quote)),
-            );
         }
-        if stated.is_empty() {
+        if used.is_empty() {
+            used = refs.iter().map(entry_of).collect();
+        }
+        let earlier = existing.iter().find(|page| str_of(page, "id") == item.id);
+        let added = js_trim(&without_markers(&item.markdown)).to_owned();
+        // A page given in full comes back whole; any other only gains what is new to it.
+        let markdown = match earlier {
+            Some(page) if !revision.iter().any(|id| *id == item.id) => {
+                appended(str_of(page, "markdown"), &added)
+            }
+            _ => added,
+        };
+        if js_trim(&markdown).is_empty()
+            || earlier.is_some_and(|page| str_of(page, "markdown") == markdown)
+        {
             continue;
         }
-        // A page written again is what the model returned; any other only gains statements.
-        let all = if revised {
-            extended(Vec::new(), stated)
-        } else {
-            extended(earlier.clone(), stated)
-        };
-        let gone = removed(&earlier, &all);
-        if !gone.is_empty() {
-            let statements = ConfigValue::Array(gone.iter().map(|unit| text(&unit.text)).collect());
-            left_out.push(object(vec![
-                ("page", text(&item.id)),
-                ("statements", statements.clone()),
-            ]));
+        let sources = merged_sources(
+            earlier.map(|page| page_sources(page)).unwrap_or_default(),
+            &used,
+        );
+        used_sources.extend(used.iter().map(|entry| source_key(entry).to_owned()));
+        // Numbers, dates and quotations that none of its sources has are pointed out.
+        let mut texts = Vec::new();
+        for entry in &sources {
+            let source = entry.get("source").cloned().unwrap_or_default();
+            if let Some(document) = current_document(&database, &source, project.cancel)? {
+                texts.push(str_of(&document, "content").to_owned());
+            }
+        }
+        let unsupported = unsupported_literals(&markdown, &texts);
+        if !unsupported.is_empty() {
             warnings.push(object(vec![
-                ("code", text("STATEMENTS_REMOVED")),
+                ("code", text("UNSUPPORTED_LITERAL")),
                 (
                     "message",
                     text(&format!(
-                        "{}: {} statement(s) of the earlier page are not on the new one. Use undo to bring the earlier page back.",
+                        "{}: not found in its sources: {}",
                         item.id,
-                        gone.len()
+                        unsupported.join(", ")
                     )),
                 ),
                 ("page", text(&item.id)),
-                ("statements", statements),
+                (
+                    "literals",
+                    ConfigValue::Array(unsupported.iter().map(|literal| text(literal)).collect()),
+                ),
             ]));
         }
-        let (markdown, citations) = compose(&all);
-        changes.push(project.change_page(&item.id, &item.title, markdown, citations, &previous)?);
-    }
-    if changes.is_empty() && proposed > 0 {
-        return Err(coded(
-            2,
-            "INVALID_CITATION",
-            format!(
-                "None of the {proposed} statements the model wrote quoted the sources exactly, so no page was saved. Run ingress again or use a stronger model."
-            ),
-        ));
-    }
-    for (page, fact, quote) in &rejected {
-        warnings.push(object(vec![
-            ("code", text("CITATION_REJECTED")),
-            (
-                "message",
-                text(&format!(
-                    "Not saved on {page}: the quote was not found exactly once in the sources. {} (quote: {})",
-                    js_trim(fact),
-                    quote.replace('\n', "\\n")
-                )),
-            ),
-            ("page", text(page)),
-            ("fact", text(fact)),
-            ("quote", text(quote)),
-        ]));
+        changes.push(project.change_page(
+            &item.id,
+            &item.title,
+            markdown,
+            sources,
+            &previous,
+            &item.category,
+        )?);
     }
     tracker.progress("validating_citations", Some((0, changes.len())));
     let mut verified = Vec::new();
@@ -1204,13 +1191,10 @@ pub(crate) fn ingress(
         .filter(|id| !ids.contains(&id.to_lowercase()))
         .map(|id| text(id))
         .collect();
-    let reflected: HashSet<String> = verified
+    // A source no page is written from adds nothing to the wiki: it is recorded as such.
+    let no_material: Vec<&String> = source_ids
         .iter()
-        .flat_map(|page| items(page.get("citations")).to_vec())
-        .map(|citation| {
-            let source = citation.get("source").cloned().unwrap_or_default();
-            str_of(&source, "sourceId").to_owned()
-        })
+        .filter(|id| !used_sources.contains(id.as_str()))
         .collect();
     let mut extra = vec![
         ("sources", ConfigValue::Number(documents.len() as f64)),
@@ -1221,10 +1205,32 @@ pub(crate) fn ingress(
         ),
         ("pages_needing_revision", ConfigValue::Array(needs_revision)),
     ];
-    if !left_out.is_empty() {
-        extra.push(("statements_removed", ConfigValue::Array(left_out)));
+    if !no_material.is_empty() {
+        extra.push((
+            "no_material",
+            ConfigValue::Array(
+                documents
+                    .iter()
+                    .map(evidence_source)
+                    .filter(|source| {
+                        no_material
+                            .iter()
+                            .any(|id| *id == str_of(source, "sourceId"))
+                    })
+                    .map(|source| text(str_of(&source, "objectId")))
+                    .collect(),
+            ),
+        ));
     }
-    commit_pages(
+    // The categories of the pages written, to add those the rules do not list yet.
+    let mut named: Vec<String> = Vec::new();
+    for page in &verified {
+        let category = str_of(page, "category").trim();
+        if !category.is_empty() && !named.iter().any(|known| known == category) {
+            named.push(category.to_owned());
+        }
+    }
+    let done = commit_pages(
         project,
         connection,
         tracker,
@@ -1232,19 +1238,130 @@ pub(crate) fn ingress(
         extra,
         |connection| {
             for id in &source_ids {
-                if reflected.contains(id) {
-                    connection
-                        .execute("UPDATE wiki_sources SET reflected = 1 WHERE id = ?1", [id])
-                        .map_err(sql)?;
-                }
+                // 1: pages are written from it; 2: it adds nothing to them.
+                let state = if used_sources.contains(id) { 1 } else { 2 };
+                connection
+                    .execute(
+                        "UPDATE wiki_sources SET reflected = ?2 WHERE id = ?1",
+                        rusqlite::params![id, state],
+                    )
+                    .map_err(sql)?;
             }
             Ok(())
         },
-    )
+    )?;
+    // A category the model gives that the rules do not list is added to them, for people to
+    // see and change.
+    let listed = crate::wiki_project::rule_categories(&rules);
+    named.retain(|name| !listed.contains(name));
+    if !project.para()
+        && !named.is_empty()
+        && let Ok(file) = project.rules_path()
+    {
+        atomic_write(
+            &file,
+            crate::wiki_project::with_categories(&rules, &named).as_bytes(),
+        )?;
+    }
+    Ok(done)
+}
+
+/// A page with text added: the paragraphs of the text that the page does not have yet, after it.
+fn appended(markdown: &str, added: &str) -> String {
+    let have: HashSet<&str> = markdown.split("\n\n").map(js_trim).collect();
+    let new: Vec<&str> = added
+        .split("\n\n")
+        .map(js_trim)
+        .filter(|paragraph| !paragraph.is_empty() && !have.contains(paragraph))
+        .collect();
+    if new.is_empty() {
+        return markdown.to_owned();
+    }
+    format!("{}\n\n{}", markdown.trim_end(), new.join("\n\n"))
+}
+
+/// The numbers and quotations of a page that none of its sources has, each once: numbers of two
+/// or more digits (`2024`, `1,000`, `3.5`) and what is in 「」, 『』 or “”. Link targets and
+/// the numbers of a numbered list are not read; spaces and the commas in numbers do not count.
+pub(crate) fn unsupported_literals(markdown: &str, sources: &[String]) -> Vec<String> {
+    use std::sync::OnceLock;
+    static NUMBER: OnceLock<regex::Regex> = OnceLock::new();
+    static QUOTE: OnceLock<regex::Regex> = OnceLock::new();
+    static LIST: OnceLock<regex::Regex> = OnceLock::new();
+    let number = NUMBER.get_or_init(|| regex::Regex::new(r"[0-9][0-9,.]*[0-9]").expect("valid"));
+    let quote = QUOTE.get_or_init(|| {
+        regex::Regex::new(r"「([^「」]+)」|『([^『』]+)』|“([^“”]+)”").expect("valid")
+    });
+    let list =
+        LIST.get_or_init(|| regex::Regex::new(r"(?m)^[ \t]*[0-9]+[.)][ \t]").expect("valid"));
+    let mut readable = String::with_capacity(markdown.len());
+    let mut last = 0;
+    for (start, end) in link_targets(markdown) {
+        readable += &markdown[last..start];
+        last = end;
+    }
+    readable += &markdown[last..];
+    let readable = nfkc(&list.replace_all(&readable, ""));
+    let joined = nfkc(&sources.join("\n"));
+    let compact = |text: &str| -> String {
+        text.chars()
+            .filter(|c| !c.is_whitespace() && *c != ',')
+            .collect()
+    };
+    let haystack = compact(&joined);
+    // A number is in the sources as a whole number of theirs, not as a part of a longer one.
+    let as_number = |text: &str| compact(text.trim_end_matches(['.', ',']));
+    let numbers: HashSet<String> = number
+        .find_iter(&joined)
+        .map(|found| as_number(found.as_str()))
+        .collect();
+    let mut found: Vec<String> = Vec::new();
+    for captures in quote.captures_iter(&readable) {
+        if let Some(inner) = (1..=3).find_map(|group| captures.get(group)) {
+            let wanted = compact(inner.as_str());
+            if !wanted.is_empty() && !haystack.contains(&wanted) {
+                found.push(inner.as_str().to_owned());
+            }
+        }
+    }
+    for literal in number.find_iter(&readable) {
+        if !numbers.contains(&as_number(literal.as_str())) {
+            found.push(literal.as_str().trim_end_matches(['.', ',']).to_owned());
+        }
+    }
+    let mut seen = HashSet::new();
+    found.retain(|literal| seen.insert(literal.clone()));
+    found
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn numbers_and_quotations_are_written_as_the_sources_write_them() {
+        let sources = [
+            "スプリントは最長1か月。開発者は3人から9人。\n1,000件のうち「完成の定義」を満たすもの"
+                .to_owned(),
+        ];
+        let found = |markdown: &str| super::unsupported_literals(markdown, &sources);
+        assert!(found("開発者は３人から９人。1000件。「完成 の定義」。").is_empty());
+        assert_eq!(
+            found("開発者は10人まで。「完了の定義」は2020年に変わった。"),
+            ["完了の定義", "10", "2020"]
+        );
+        // Link targets and the numbers of a list are not part of what the page says.
+        assert!(found("[年表](/年表-2020)\n\n10. 一つ目").is_empty());
+        assert!(found("1.5倍").len() == 1);
+    }
+
+    #[test]
+    fn a_page_gains_only_the_paragraphs_it_does_not_have() {
+        assert_eq!(
+            super::appended("一。\n\n二。\n", "二。\n\n三。"),
+            "一。\n\n二。\n\n三。"
+        );
+        assert_eq!(super::appended("一。", "一。"), "一。");
+    }
+
     #[test]
     fn finds_words_as_intl_segmenter() {
         // The words Node.js 22 finds with Intl.Segmenter('ja', { granularity: 'word' }).

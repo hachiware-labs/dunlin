@@ -60,7 +60,7 @@ export const projectCommands = {
   rules: 'nest rules [--project <directory>] [--json]',
   progress: 'nest progress <work-id> [--project <directory>] [--json]',
   cite: 'nest cite <page> <number> [--project <directory>] [--json]',
-  instruct: 'nest instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | nest instruct --persistent <rule> [--project <directory>] [--json]',
+  instruct: 'nest instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | nest instruct <page> --category <name> | nest instruct --persistent <rule> [--project <directory>] [--json]',
   'save-answer': 'nest save-answer <query-run> <page> <title> [--project <directory>] [--json]',
   archive: 'nest archive <page> [--project <directory>] [--restore] [--json]',
   undo: 'nest undo <work-id> [--project <directory>] [--json]',
@@ -1020,7 +1020,7 @@ export async function runProjectCommand(command, args, explicitProject) {
       options.content = { type: 'boolean' };
       options['all-issues'] = { type: 'boolean' };
     }
-    if (command === 'instruct') for (const option of ['target', 'supplement', 'by']) options[option] = { type: 'string' };
+    if (command === 'instruct') for (const option of ['target', 'supplement', 'by', 'category']) options[option] = { type: 'string' };
     if (command === 'instruct') options.persistent = { type: 'boolean' };
     if (command === 'archive') options.restore = { type: 'boolean' };
     if (command === 'tag') options.move = { type: 'boolean' };
@@ -1043,7 +1043,7 @@ export async function runProjectCommand(command, args, explicitProject) {
       : command === 'evidence-map' ? { create: 1, list: 1, show: 2, export: 2, import: 2, confirm: 2 } : null;
     const count = actions ? (Object.hasOwn(actions, positionals[0]) ? actions[positionals[0]] : -1)
       : command === 'tag' ? (positionals.length === 1 ? 1 : 2)
-      : ['init', 'cite', 'issue'].includes(command) || command === 'instruct' && !values.persistent
+      : ['init', 'cite', 'issue'].includes(command) || command === 'instruct' && !values.persistent && values.category === undefined
         || (command === 'modules' && positionals[0] === 'describe') ? 2
       : command === 'save-answer' ? 3
       : command === 'ingress' ? (values.pending ? 0 : positionals.length || -1)

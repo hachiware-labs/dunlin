@@ -245,18 +245,19 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
     if (pauseModel) await pauseModel.promise;
     const fact = { text: '交換手順を確認する。', citations: [{ id: 1, quote: '交換手順を確認する。' }] };
     const id = input.messages[0].content.includes('Projects/') ? 'Projects/maintenance' : 'maintenance';
-    let result = input.format.properties.pages ? { pages: [{ id, title: '交換手順', facts: [fact] }],
+    // A page an ingest writes has a category; a revision's does not.
+    const category = input.format.properties.conflict ? {} : { category: id.startsWith('Projects/') ? '' : '保全' };
+    let result = input.format.properties.pages ? { pages: [{ id, title: '交換手順', ...category, markdown: '交換手順を確認する。', sources: [1] }],
       ...(input.format.properties.conflict && { conflict: '' }) } : { facts: [fact] };
     if (input.format.properties.conflict) {
       const { supplement, sources, instruction } = JSON.parse(input.messages[1].content);
       if (instruction === '交換周期を変更') {
-        result = supplement ? { conflict: '', pages: [{ id, title: '交換手順', facts: [
-          fact, { text: '担当者の補足では交換周期は3か月。<script>window.knowledgeNestInjected=true</script>',
-            citations: [{ id: sources.at(-1).id, quote: '交換周期は3か月。' }] },
-        ] }] } : { conflict: '原本と食い違います', pages: [] };
+        result = supplement ? { conflict: '', pages: [{ id, title: '交換手順', sources: [sources.at(-1).id],
+          markdown: '交換手順を確認する。\n\n担当者の補足では交換周期は3か月。<script>window.knowledgeNestInjected=true</script>' }] }
+          : { conflict: '原本と食い違います', pages: [] };
       }
     }
-    if (input.format.properties.concepts) result = { concepts: [], questions: [], sources: [] };
+    if (input.format.properties.concepts) result = { concepts: [], questions: [], sources: [], misplaced: [] };
     if (input.format.properties.issues) {
       const { items: [first, ...related] } = JSON.parse(input.messages[1].content);
       result = { issues: related.flatMap((next) => {
@@ -291,7 +292,7 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   assert.match(await readFile(join(root, 'wiki', 'wiki', 'maintenance.html'), 'utf8'), /交換手順/u);
   const answer = await json('query', '交換手順');
   assert.equal(answer.data.pages[0].id, 'maintenance');
-  assert.equal((await json('cite', 'maintenance', '1')).data.quote, '交換手順を確認する。');
+  assert.equal((await json('cite', 'maintenance', '1')).data.content, '交換手順を確認する。\n');
   const saved = await json('save-answer', answer.run_id, 'faq', '交換の FAQ');
   assert.equal(saved.data.pages[0].id, 'faq');
   await json('undo', saved.run_id);
@@ -302,7 +303,8 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   assert.match(conflict.data.conflict, /食い違い/u);
   const supplemental = await json('instruct', 'maintenance', '交換周期を変更', '--supplement', '交換周期は3か月。', '--by', '点検担当');
   const citation = (await json('cite', 'maintenance', '2')).data;
-  assert.equal(citation.quote, '交換周期は3か月。');
+  // The page is written from the manual and the supplement, which is kept as a source.
+  assert.match(citation.content, /^Contributor: 点検担当\n[\s\S]*\n交換周期は3か月。$/u);
   assert.ok(citation.evidence.original.sha256);
   const published = await readFile(join(root, 'wiki', 'wiki', 'maintenance.html'), 'utf8');
   assert.match(published, /&lt;script&gt;/u);
@@ -331,7 +333,7 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   for (const kind of ['contradiction', 'duplicate', 'source_disagreement']) assert.ok(types.has(kind), 'missing ' + kind);
   assert.ok(inspected.issues.every(({ description }) => description !== '不正な引用'));
   assert.ok(inspected.issues.filter(({ kind }) => kind).every(({ evidence }) =>
-    evidence.length === 2 && evidence.every(({ quote, citations }) => quote && citations.length > 0)));
+    evidence.length === 2 && evidence.every(({ quote, citations, sources }) => quote && (citations ?? sources).length > 0)));
   const dismissed = inspected.issues.find(({ kind }) => kind === 'duplicate');
   await json('issue', dismissed.id, 'dismissed');
   const checked = (await json('verify', '--content')).data;

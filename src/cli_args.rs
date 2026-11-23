@@ -116,7 +116,7 @@ pub const COMMANDS: [(&str, &str); 37] = [
     ),
     (
         "instruct",
-        "nest instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | nest instruct --persistent <rule> [--project <directory>] [--json]",
+        "nest instruct <page> <instruction> [--target <text>] [--supplement <text> --by <name>] | nest instruct <page> --category <name> | nest instruct --persistent <rule> [--project <directory>] [--json]",
     ),
     (
         "save-answer",
@@ -231,7 +231,7 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
             ),
             ("rules", "Print the writing rules of the wiki"),
             ("progress", "Show the progress of a running job"),
-            ("cite", "Show the source of a citation on a page"),
+            ("cite", "Show a source a page is written from, with its text"),
             ("instruct", "Ask for a change to a page, or add a rule"),
             ("save-answer", "Save a query answer as a page"),
             ("archive", "Archive or restore a page"),
@@ -569,7 +569,7 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
         options.push(("all-issues", Boolean));
     }
     if command == "instruct" {
-        for option in ["target", "supplement", "by"] {
+        for option in ["target", "supplement", "by", "category"] {
             options.push((option, String));
         }
         options.push(("persistent", Boolean));

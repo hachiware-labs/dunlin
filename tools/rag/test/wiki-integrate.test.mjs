@@ -24,34 +24,37 @@ function answer(request) {
   if (properties.issues) return { issues: [] };
   if (properties.concepts) {
     return { concepts: [{ name: 'スプリント', pages: input.pages.map(({ item }) => item) }, { name: 'スクラム', pages: [1] }],
-      questions: ['スプリントの長さは誰が決めるか'], sources: ['スクラムガイドの最新版'] };
+      questions: ['スプリントの長さは誰が決めるか'], sources: ['スクラムガイドの最新版'],
+      // The summary of the guide fits another category of the rules.
+      misplaced: [{ item: input.pages.findIndex(({ id }) => id === 'sources/guide') + 1, category: '資料' }] };
   }
   if (properties.facts) {
     // The number of a source marker for the number of the page, and the marker in the quote, as a small model writes them.
     return { facts: [{ text: '答え。', citations: [{ id: 7, quote: input.pages.at(-1).markdown.split('\n\n')[0] }] }] };
   }
   const about = (word) => input.sources.find(({ text }) => text.includes(word));
+  // A source with nothing for the wiki: no pages.
+  if (about('天気')) return { pages: [] };
   if (about('改訂')) {
-    return { pages: [{ id: 'concepts/scrum', title: 'スクラム', facts: [
-      // A statement of the page copied with a quote that is nowhere, as a small model does.
-      { text: 'スクラムは枠組みである。', citations: [{ id: 1, quote: 'どこにもない引用' }] },
-      // The number of the source after the quote, as a small model writes it.
-      { text: 'スプリントは2週間が多い。', citations: [{ id: about('改訂').id, quote: 'スプリントは2週間が多い。: 1' }] },
-    ] }] };
+    // A paragraph the page has already, copied as a small model does, then the new one, with
+    // the source marker it put after it.
+    return { pages: [{ id: 'concepts/scrum', title: 'スクラム', category: '別の分類',
+      markdown: 'スクラムは枠組みである。\n\nスプリントは2週間が多い。 [1]', sources: [about('改訂').id] }] };
   }
   if (about('追記')) {
-    return { pages: [{ id: 'concepts/scrum', title: 'スクラム', facts: [
-      { text: 'デイリースクラムは15分。', citations: [{ id: about('追記').id, quote: 'デイリースクラムは15分。' }] }] }] };
+    return { pages: [{ id: 'concepts/scrum', title: 'スクラム', category: '別の分類',
+      markdown: 'デイリースクラムは15分。', sources: [about('追記').id] }] };
   }
-  // The guide: a page of the concept from its two lines, and a page about the guide itself.
+  // The guide: a page of the concept from its two lines, and a page about the guide itself. A
+  // page given in full, as the guide changed, comes back whole with the new wording.
   const { id, text } = input.sources[0];
   const [first, second] = text.split('\n');
+  const given = (page) => input.pages.find((item) => item.id === page)?.markdown;
   return { pages: [
-    { id: 'concepts/scrum', title: 'スクラム', facts: [
-      { text: first, citations: [{ id, quote: first }] },
-      { text: second, citations: [{ id, quote: second }] }] },
-    { id: 'sources/guide', title: 'スクラムガイド', facts: [
-      { text: 'スクラムガイドは、' + first, citations: [{ id, quote: first }] }] },
+    { id: 'concepts/scrum', title: 'スクラム', category: 'スクラム', sources: [id],
+      markdown: given('concepts/scrum')?.replace('スクラムは枠組みである。', first) ?? `${first}\n\n${second}` },
+    { id: 'sources/guide', title: 'スクラムガイド', category: 'スクラム', sources: [],
+      markdown: given('sources/guide')?.replace('スクラムは枠組みである。', first) ?? 'スクラムガイドは、' + first },
   ] };
 }
 
@@ -89,7 +92,8 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   assert.deepEqual((await readdir(base)).filter((name) => !name.startsWith('.')).sort(), ['KnowledgeNestfile.yaml', 'raw', 'rules.md', 'wiki']);
   const rules = await readFile(join(base, 'rules.md'), 'utf8');
   assert.match(rules, /^# 運用の決まり\n/u);
-  for (const part of ['`sources/…`', '`entities/…`', '`concepts/…`', '`overview`', '## 資料を取り込むとき']) assert.ok(rules.includes(part), part);
+  for (const part of ['## 分類', '`要約-`', '## 資料を取り込むとき', 'フォルダを付けない名前', '全体は目録']) assert.ok(rules.includes(part), part);
+  assert.ok(!rules.includes('overview'), 'no page about everything');
 
   // The first source. The model is asked once for every ingest.
   await writeFile(join(root, 'guide.md'), 'スクラムは枠組みである。\nスプリントは1か月以内。\n');
@@ -99,7 +103,14 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   // A source from outside raw/ is copied into raw/ and read from there.
   assert.equal(await readFile(join(base, 'raw', 'guide.md'), 'utf8'), 'スクラムは枠組みである。\nスプリントは1か月以内。\n');
   const cited = JSON.parse(/id="knowledge-nest-page">(.*?)<\/script>/su.exec(await readFile(join(base, 'wiki', 'concepts', 'scrum.html'), 'utf8'))[1]);
-  assert.match(cited.citations[0].source.url, /\/kb\/raw\/guide\.md$/u);
+  // A page is its Markdown and the sources it is written from.
+  assert.equal(cited.markdown, 'スクラムは枠組みである。\n\nスプリントは1か月以内。');
+  assert.equal(cited.citations, undefined);
+  assert.equal(cited.sources.length, 1);
+  assert.match(cited.sources[0].source.url, /\/kb\/raw\/guide\.md$/u);
+  // A page that names no source is written from those the model read.
+  const guidePage = JSON.parse(/id="knowledge-nest-page">(.*?)<\/script>/su.exec(await readFile(join(base, 'wiki', 'sources', 'guide.html'), 'utf8'))[1]);
+  assert.deepEqual(guidePage.sources.map(({ source }) => source.objectId), ['guide.md']);
   assert.deepEqual(first.data.pages.map(({ id }) => id), ['concepts/scrum', 'sources/guide']);
   assert.equal(requests.length, 1);
   assert.deepEqual(sent(0).pages, []);
@@ -117,22 +128,25 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   assert.equal(requests.length, 2);
   assert.deepEqual(sent(1).pages, [{ id: 'concepts/scrum', title: 'スクラム' }, { id: 'sources/guide', title: 'スクラムガイド' }]);
   assert.equal(sent(1).sources.length, 1);
-  assert.equal(requests[1].messages[0].content, requests[0].messages[0].content);
-  assert.equal(scrum(added), 'スクラムは枠組みである。 [1]\n\nスプリントは1か月以内。 [2]\n\nデイリースクラムは15分。 [3]');
+  assert.match(requests[1].messages[0].content, /For an existing page, return only the new text to add to it\./u);
+  assert.doesNotMatch(requests[0].messages[0].content, /existing page/u);
+  assert.equal(scrum(added), 'スクラムは枠組みである。\n\nスプリントは1か月以内。\n\nデイリースクラムは15分。');
   assert.deepEqual(added.warnings, []);
 
-  // What the page says stays, also when the model returns a statement of the page without a
-  // quote of the sources; the new statement is added, and its quote is taken without the
-  // number the model put after it.
+  // What the page says stays; of what the model returns, only what the page does not say yet is
+  // added, without the source markers it wrote.
   await writeFile(join(root, 'length.md'), '改訂\nスプリントは2週間が多い。\n');
   const longer = await run('ingest', join(root, 'length.md'));
   assert.equal(longer.status, 'succeeded', JSON.stringify(longer.errors));
-  assert.equal(scrum(longer), 'スクラムは枠組みである。 [1]\n\nスプリントは1か月以内。 [2]\n\nデイリースクラムは15分。 [3]\n\nスプリントは2週間が多い。 [4]');
+  assert.equal(scrum(longer), 'スクラムは枠組みである。\n\nスプリントは1か月以内。\n\nデイリースクラムは15分。\n\nスプリントは2週間が多い。');
   assert.deepEqual(longer.warnings, []);
-  assert.equal((await run('cite', 'concepts/scrum', '4')).status, 'succeeded');
+  // The sources of the page, in the order they were added; cite gives one of them.
+  const cite = await run('cite', 'concepts/scrum', '3');
+  assert.equal(cite.status, 'succeeded', JSON.stringify(cite.errors));
+  assert.equal(cite.data.evidence.source.objectId, 'length.md');
+  assert.equal(cite.data.content, '改訂\nスプリントは2週間が多い。\n');
 
-  // A source that changed: the statements that cite its earlier version go, those of the other
-  // sources stay, and what the model writes from the new version is added.
+  // A source that changed: the pages written from it are given in full and come back whole.
   await writeFile(join(root, 'guide.md'), 'スクラムは軽量な枠組みである。\nスプリントは1か月以内。\n');
   const changed = await run('ingest', join(root, 'guide.md'));
   assert.equal(changed.status, 'succeeded', JSON.stringify(changed.errors));
@@ -146,7 +160,21 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   assert.equal(requests.length, 4);
   assert.deepEqual(sent(3).pages_needing_revision, ['concepts/scrum', 'sources/guide']);
   assert.equal(sent(3).sources.length, 1);
-  assert.equal(scrum(changed), 'デイリースクラムは15分。 [1]\n\nスプリントは2週間が多い。 [2]\n\nスクラムは軽量な枠組みである。 [3]\n\nスプリントは1か月以内。 [4]');
+  assert.equal(sent(3).pages[0].markdown, scrum(longer));
+  assert.match(requests[3].messages[0].content, /return the whole page, revised with what the sources add or change/u);
+  assert.equal(scrum(changed), 'スクラムは軽量な枠組みである。\n\nスプリントは1か月以内。\n\nデイリースクラムは15分。\n\nスプリントは2週間が多い。');
+  // The page is written from the new version of the source, in its place, and the others.
+  const sourcesOf = async (file) => JSON.parse(/id="knowledge-nest-page">(.*?)<\/script>/su.exec(await readFile(file, 'utf8'))[1]).sources;
+  const now = await sourcesOf(join(base, 'wiki', 'concepts', 'scrum.html'));
+  assert.deepEqual(now.map(({ source }) => source.objectId), ['guide.md', 'daily.md', 'length.md']);
+  assert.notEqual(now[0].source.version, cited.sources[0].source.version);
+
+  // A source that adds nothing to the wiki is recorded as such, and no page changes.
+  await writeFile(join(root, 'other.md'), '天気の話。\n');
+  const nothing = await run('ingest', join(root, 'other.md'));
+  assert.equal(nothing.status, 'succeeded', JSON.stringify(nothing.errors));
+  assert.deepEqual(nothing.data.pages, []);
+  assert.deepEqual(nothing.data.no_material, ['other.md']);
 
   // The check: a page that names another without a link, and with the model a concept without a
   // page and what to ask and to read next.
@@ -171,15 +199,17 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   // The log: every work at the start of a line, oldest first, under the names of the pattern.
   const log = await readFile(join(base, 'wiki', 'log.html'), 'utf8');
   const lines = log.split('\n').filter((line) => line.startsWith('<h2>[')).map((line) => line.replace(/^<h2>\[\d{4}-\d\d-\d\d\] |<\/h2>$/gu, ''));
-  assert.deepEqual(lines, ['ingest | guide.md', 'ingest | daily.md', 'ingest | length.md', 'ingest | guide.md',
+  assert.deepEqual(lines, ['ingest | guide.md', 'ingest | daily.md', 'ingest | length.md', 'ingest | guide.md', 'ingest | other.md',
     'lint | 指摘 3 件', 'lint | 指摘 4 件', 'lint | 指摘 4 件']);
+  assert.match(log, /ingest \| other\.md<\/h2>\n<p>原本 1 件 · 得るものなし：other\.md<\/p>/u);
   assert.match(log, /ingest \| length\.md<\/h2>\n<p>原本 1 件 · ページ 1 件<\/p>\n<ul><li><a href="concepts\/scrum\.html">スクラム<\/a><\/li><\/ul>/u);
   // A question is a work of the log too, under what was asked.
   const answered = await run('query', 'スプリントの長さ');
   assert.equal(answered.status, 'succeeded', JSON.stringify(answered.errors));
   // The page that holds the quote is the one cited, whatever number the model gave it.
   assert.equal(answered.data.pages.length, 1);
-  assert.equal(answered.data.facts[0].evidence.length, 1);
+  // Its evidence is the sources of that page.
+  assert.deepEqual(answered.data.facts[0].evidence, answered.data.pages[0].sources);
   const later = await readFile(join(base, 'wiki', 'log.html'), 'utf8');
   assert.ok(later.startsWith(log.slice(0, log.indexOf('<!-- knowledge-nest:log-through'))), 'the log only grows at its end');
   assert.match(later, /\n<h2>\[\d{4}-\d\d-\d\d\] query \| スプリントの長さ<\/h2>\n/u);
@@ -211,23 +241,57 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   moved.close();
   // A file of the earlier form, with the page as Base64 at its end, is written in this one when
   // the page moves, also by a work that then fails.
-  const legacy = { ...record(html), id: 'concepts/legacy', title: '古い形のファイル' };
+  // A page of the form that cited a passage for each statement becomes its text without the
+  // markers, written from the documents it cited.
+  const { sources: kept, ...rest } = record(html);
+  const passage = (line) => ({ source: kept[0].source, range: { startLine: line, endLine: line }, byteRange: { start: 0, end: 3 } });
+  const legacy = { ...rest, id: 'concepts/legacy', title: '古い形のファイル', markdown: '古い形。 [1]\n\n同じ資料から。 [2] [3]',
+    citations: [passage(1), passage(2), { source: kept[1].source }] };
   await writeFile(join(base, 'wiki', 'concepts', 'legacy.html'),
     '<!doctype html>\n<main><h1>古い形のファイル</h1></main>\n</html>\n<!-- knowledge-nest:publication ' + Buffer.from(JSON.stringify(legacy)).toString('base64url') + ' -->\n');
   const older = state();
   older.prepare('INSERT INTO wiki_pages VALUES (?, ?)').run(legacy.id, JSON.stringify(legacy));
   older.close();
   await assert.rejects(nest('--project', 'kb', 'ingest', join(root, 'missing.md'), '--json'));
-  assert.equal(record(await readFile(join(base, 'wiki', 'concepts', 'legacy.html'), 'utf8')).title, '古い形のファイル');
+  const converted = record(await readFile(join(base, 'wiki', 'concepts', 'legacy.html'), 'utf8'));
+  assert.equal(converted.title, '古い形のファイル');
+  assert.equal(converted.markdown, '古い形。\n\n同じ資料から。');
+  assert.equal(converted.citations, undefined);
+  assert.deepEqual(converted.sources.map(({ source }) => source.objectId), ['guide.md', 'daily.md']);
   const emptied = state();
   assert.equal(emptied.prepare('SELECT count(*) AS n FROM wiki_pages').get().n, 0);
   emptied.close();
 
+  // Categories. The first ingest wrote the category the model gave into the rules, and a page
+  // keeps its category when the model gives another.
+  const rulesNow = await readFile(join(base, 'rules.md'), 'utf8');
+  assert.match(rulesNow, /## 分類\n[\s\S]*\n- スクラム\n\n## ページ/u);
+  assert.equal(record(await readFile(scrumFile, 'utf8')).category, 'スクラム');
+  // A person adds a category; the check finds a page that fits it better, and the page moves.
+  await writeFile(join(base, 'rules.md'), rulesNow.replace('\n- スクラム\n', '\n- スクラム\n- 資料\n'));
+  const misplaced = (await run('lint', '--content')).data.issues.filter(({ code }) => code === 'CATEGORY_MISMATCH');
+  assert.deepEqual(misplaced.map(({ page, category, suggested, description }) => [page, category, suggested, description]),
+    [['sources/guide', 'スクラム', '資料', 'sources/guide：分類は「スクラム」ですが、「資料」のほうが合っていそうです']]);
+  const recategorized = await run('instruct', 'sources/guide', '--category', '資料');
+  assert.equal(recategorized.status, 'succeeded', JSON.stringify(recategorized.errors));
+  assert.equal(record(await readFile(join(base, 'wiki', 'sources', 'guide.html'), 'utf8')).category, '資料');
+  // A category that is not in the rules, and a page without one, are found without the model.
+  await run('instruct', 'concepts/legacy', '--category', '未知');
+  const checked = await run('lint');
+  assert.deepEqual(checked.data.issues.filter(({ code }) => code.endsWith('CATEGORY')).map(({ code, page, description }) => [code, page, description]),
+    [['UNKNOWN_CATEGORY', 'concepts/legacy', 'concepts/legacy：分類「未知」は決まり（rules.md）の分類にありません']]);
+  // Moving a page back is undone like any work.
+  await run('undo', recategorized.run_id);
+  assert.equal(record(await readFile(join(base, 'wiki', 'sources', 'guide.html'), 'utf8')).category, 'スクラム');
+  await run('instruct', 'sources/guide', '--category', '資料');
+
   // The contents name the kinds of pages and the three operations.
   const contents = await readFile(join(base, 'wiki', 'index.html'), 'utf8');
-  // The pages by the folders of wiki/, and the files of raw/ with what became of each.
-  assert.match(contents, /<h2 class="root">wiki\/<small>AI が書くページ · 3 件<\/small><\/h2>.*<h3>concepts\/<small>2<\/small><\/h3>.*<h3>sources\/<small>1<\/small><\/h3>/su);
-  assert.match(contents, /<h2 class="root"><a href="\.\.\/raw\/">raw\/<\/a><small>集めた資料（原本）· 4 件<\/small><\/h2>/u);
+  // The pages by category, in the order of the rules, then the others; the files of raw/ with
+  // what became of each.
+  assert.match(contents, /<h2 class="root">wiki\/<small>AI が書くページ · 4 件<\/small><\/h2><section data-group><h3>スクラム<small>2<\/small><\/h3>.*<h3>資料<small>1<\/small><\/h3>.*<h3>未知<small>1<\/small><\/h3>/su);
+  assert.match(contents, /<h2 class="root"><a href="\.\.\/raw\/">raw\/<\/a><small>集めた資料（原本）· 5 件<\/small><\/h2>/u);
+  assert.match(contents, /<strong>other\.md<\/strong><small class="done">得るものなし<\/small>/u);
   for (const name of ['取り込む（ingest）', '質問する（query）', '点検する（lint）', '決まり（schema）', '記録（log）']) assert.ok(contents.includes(name), name);
 });
 
@@ -245,17 +309,13 @@ test('rewrites the pages a source adds to, with a model that writes well', { tim
     let result;
     if (body.format.properties.update) result = { update: ['concepts/scrum', 'no/such-page'] };
     else if (source('改訂')) {
-      // The whole page: one statement as it was, one written anew with the new source, and
-      // one left out.
-      result = { pages: [{ id: 'concepts/scrum', title: 'スクラム', facts: [
-        { text: 'スクラムは枠組みである。', citations: [{ id: 1, quote: 'どこにもない引用' }] },
-        { text: 'スプリントは1か月以内とされるが、2週間が多い。', citations: [
-          { id: source('スプリントは1か月以内。').id, quote: 'スプリントは1か月以内。' },
-          { id: source('改訂').id, quote: 'スプリントは2週間が多い。' }] },
-      ] }] };
+      // The whole page, revised: a paragraph as it was, one written anew with the new source, one
+      // left out, and one with a name and a year that no source has.
+      result = { pages: [{ id: 'concepts/scrum', title: 'スクラム', category: 'スクラム', sources: [source('改訂').id],
+        markdown: 'スクラムは枠組みである。\n\nスプリントは1か月以内とされるが、2週間が多い。\n\n「スクラム憲章」は2001年に書かれた。' }] };
     } else {
       const { id, text } = input.sources[0];
-      result = { pages: [{ id: 'concepts/scrum', title: 'スクラム', facts: text.trim().split('\n').map((line) => ({ text: line, citations: [{ id, quote: line }] })) }] };
+      result = { pages: [{ id: 'concepts/scrum', title: 'スクラム', category: 'スクラム', sources: [id], markdown: text.trim().split('\n').join('\n\n') }] };
     }
     response.setHeader('content-type', 'application/json');
     response.end(JSON.stringify({ done: true, message: { content: JSON.stringify(result) } }));
@@ -281,19 +341,26 @@ test('rewrites the pages a source adds to, with a model that writes well', { tim
   await writeFile(join(root, 'kb', 'raw', 'length.md'), '改訂\nスプリントは2週間が多い。\n');
   const revised = await run('ingest', join(root, 'kb', 'raw', 'length.md'));
   assert.equal(revised.status, 'succeeded', JSON.stringify(revised.errors));
-  // The model named the page from the list, then read it in full with the passages it cites.
+  // The model named the page from the list, then read it in full with the new source.
   assert.deepEqual(Object.keys(requests[1].format.properties), ['update']);
   assert.deepEqual(JSON.parse(requests[1].messages[1].content).pages, [{ id: 'concepts/scrum', title: 'スクラム', summary: 'スクラムは枠組みである。\n\nスプリントは1か月以内。\n\nデイリースクラムは15分。' }]);
   const writing = JSON.parse(requests[2].messages[1].content);
   assert.deepEqual(writing.pages_needing_revision, ['concepts/scrum']);
   assert.equal(writing.pages[0].markdown, 'スクラムは枠組みである。\n\nスプリントは1か月以内。\n\nデイリースクラムは15分。');
-  assert.deepEqual(writing.sources.map(({ text }) => text), ['改訂\nスプリントは2週間が多い。\n', 'スクラムは枠組みである。', 'スプリントは1か月以内。', 'デイリースクラムは15分。']);
-  assert.match(requests[2].messages[0].content, /return the whole page, revised with what the new sources add/u);
-  // The page is what the model returned; the statement it left out is reported.
-  assert.equal(revised.data.pages[0].current, 'スクラムは枠組みである。 [1]\n\nスプリントは1か月以内とされるが、2週間が多い。 [2] [3]');
-  assert.deepEqual(revised.warnings.map(({ code, statements }) => [code, statements]), [['STATEMENTS_REMOVED', ['デイリースクラムは15分。']]]);
-  assert.deepEqual(revised.data.statements_removed, [{ page: 'concepts/scrum', statements: ['デイリースクラムは15分。'] }]);
-  assert.match(await readFile(join(root, 'kb', 'wiki', 'log.html'), 'utf8'), /書き直しで外れた記述 1 件/u);
+  assert.deepEqual(writing.sources.map(({ text }) => text), ['改訂\nスプリントは2週間が多い。\n']);
+  assert.match(requests[2].messages[0].content, /return the whole page, revised with what the sources add or change/u);
+  assert.match(requests[2].messages[0].content, /copy numbers, dates, names and quotations exactly/u);
+  // The page is what the model returned, written from both sources. What it says that neither
+  // source has is pointed out.
+  assert.equal(revised.data.pages[0].current, 'スクラムは枠組みである。\n\nスプリントは1か月以内とされるが、2週間が多い。\n\n「スクラム憲章」は2001年に書かれた。');
+  assert.deepEqual(revised.warnings.map(({ code, page, literals }) => [code, page, literals]), [['UNSUPPORTED_LITERAL', 'concepts/scrum', ['スクラム憲章', '2001']]]);
+  const page = JSON.parse(/id="knowledge-nest-page">(.*?)<\/script>/su.exec(await readFile(join(root, 'kb', 'wiki', 'concepts', 'scrum.html'), 'utf8'))[1]);
+  assert.deepEqual(page.sources.map(({ source }) => source.objectId), ['guide.md', 'length.md']);
+  const lint = await run('lint');
+  assert.deepEqual(lint.data.issues.filter(({ code }) => code === 'UNSUPPORTED_LITERAL').map(({ literal, description }) => [literal, description]), [
+    ['スクラム憲章', 'concepts/scrum：「スクラム憲章」が出典の資料に見つかりません'],
+    ['2001', 'concepts/scrum：「2001」が出典の資料に見つかりません'],
+  ]);
   // Undo brings the earlier page back.
   await run('undo', revised.run_id);
   assert.match(await readFile(join(root, 'kb', 'wiki', 'concepts', 'scrum.html'), 'utf8'), /デイリースクラムは15分。/u);

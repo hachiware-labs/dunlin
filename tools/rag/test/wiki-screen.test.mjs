@@ -34,11 +34,11 @@ function model(stops) {
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     const input = JSON.parse(body.messages[1].content);
     let result = { issues: [] };
-    if (body.format.properties.concepts) result = { concepts: [], questions: ['点検の周期は誰が決めるか'], sources: [] };
+    if (body.format.properties.concepts) result = { concepts: [], questions: ['点検の周期は誰が決めるか'], sources: [], misplaced: [] };
     if (body.format.properties.pages) {
       result = { pages: input.sources.map(({ id, text }) => {
         const quote = text.split('\n').map((line) => line.trim()).find(Boolean);
-        return { id: 'guides/note-' + id, title: quote.slice(0, 8), facts: [{ text: '## 概要\n\n## 手順\n\n## 根拠\n\n' + quote, citations: [{ id, quote }] }] };
+        return { id: 'guides/note-' + id, title: quote.slice(0, 8), category: 'ポンプ', sources: [id], markdown: '## 概要\n\n## 手順\n\n## 根拠\n\n' + quote };
       }) };
     }
     response.setHeader('content-type', 'application/json');
@@ -177,10 +177,10 @@ test('shows pages and sources as a tree and adds sources by web address', { time
 
   // The new page sits in its folder; the page cites the web page, decoded from Shift_JIS.
   const after = await send(port, {});
-  assert.match(after.body, /<h2 class="root">wiki\/<small>AI が書くページ<\/small><\/h2><ul class="tree"><li><details open><summary>guides<\/summary>/u);
+  assert.match(after.body, /<h2 class="root">wiki\/<small>AI が書くページ<\/small><\/h2><ul class="tree"><li><details open><summary>ポンプ<\/summary>/u);
   assert.match(after.body, /title="127\.0\.0\.1\/manuals\/pump\.html"><span class="name">pump\.html<\/span><\/a><\/li>/u);
   // The top is the contents of the Wiki: every page under its folder, with a line about it.
-  assert.match(after.body, /<section class="panel" id="pages"><h2>guides\/<small>1<\/small><\/h2><ul class="cards"><li><a href="\/\?page=guides%2Fnote-\d+"><strong>[^<]+<\/strong><span>概要<\/span><time>出典 1 · \d{4}-\d\d-\d\d<\/time><\/a><\/li><\/ul><\/section>/u);
+  assert.match(after.body, /<section class="panel" id="pages"><h2>ポンプ<small>1<\/small><\/h2><ul class="cards"><li><a href="\/\?page=guides%2Fnote-\d+"><strong>[^<]+<\/strong><span>概要<\/span><time>出典 1 · \d{4}-\d\d-\d\d<\/time><\/a><\/li><\/ul><\/section>/u);
   assert.match(after.body, /<form class="ask" method="get" action="\/"><input type="search" name="q" required placeholder="ページを検索する"/u);
   assert.match(after.body, /<h2>AI に質問する<\/h2>.*<button class="primary" name="action" value="query">質問する<\/button>.*<h2>保守<\/h2>/su);
   // A search finds the pages that hold every word, and marks the words in the passage.
@@ -192,7 +192,7 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   // The folder of pages has its contents and its log as files of their own.
   const contents = await readFile(join(base, 'wiki', 'index.html'), 'utf8');
   assert.match(contents, /<!-- knowledge-nest:catalog -->/u);
-  assert.match(contents, /<h2 class="root">wiki\/<small>AI が書くページ · 1 件<\/small><\/h2><section data-group><h3>guides\/<small>1<\/small><\/h3><ul class="pages"><li data-text="[^"]*"><a href="guides\/note-\d+\.html"><strong>/u);
+  assert.match(contents, /<h2 class="root">wiki\/<small>AI が書くページ · 1 件<\/small><\/h2><section data-group><h3>ポンプ<small>1<\/small><\/h3><ul class="pages"><li data-text="[^"]*"><a href="guides\/note-\d+\.html"><strong>/u);
   // raw/ as it is, each file with what became of it.
   assert.match(contents, /<h2 class="root"><a href="\.\.\/raw\/">raw\/<\/a><small>集めた資料（原本）· 2 件<\/small><\/h2><section data-group><h3>127\.0\.0\.1\/<small>1<\/small><\/h3>.*<h3>127\.0\.0\.1\/manuals\/<small>1<\/small><\/h3>/su);
   assert.match(contents, /<a href="\.\.\/raw\/127\.0\.0\.1\/notes\.md"><strong>notes\.md<\/strong><small class="todo">未反映<\/small><\/a>/u);
@@ -206,26 +206,18 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   const pageFile = await readFile(join(base, 'wiki', ...decodeURIComponent(pageId).split('/')) + '.html', 'utf8');
   assert.match(pageFile, /<main><nav class="up"><a href="\.\.\/index\.html">目録<\/a><span>guides<\/span><\/nav><h1>/u);
   assert.match(pageFile, /<nav class="toc" aria-label="目次">.*<article class="body"><h2 id="section-1">概要<\/h2>/su);
-  assert.match(pageFile, /<a class="ref" href="#source-1">1<\/a>.*<section class="notes"><h2>出典<\/h2><ol><li id="source-1">/su);
+  assert.match(pageFile, /<\/article><section class="notes"><h2>出典<\/h2><ol><li id="source-1"><a href="http:\/\/127\.0\.0\.1:\d+\/manuals\/pump">/su);
+  assert.doesNotMatch(pageFile, /class="ref"/u);
   const page = await send(port, { path: '/?page=' + pageId });
   // A page of three sections or more has its contents, and each entry jumps to its section.
   assert.match(page.body, /<nav class="toc" aria-label="目次"><h2>目次<\/h2><ol><li><a href="#section-1">概要<\/a><\/li><li><a href="#section-2">手順<\/a><\/li><li><a href="#section-3">根拠<\/a><\/li><\/ol><\/nav><div class="body"><h2 id="section-1">概要<\/h2>/u);
   assert.match(page.body, /<h2 id="section-3">根拠<\/h2>.*<\/div><section class="notes"><h2>出典<\/h2><ol><li id="source-1">/su);
-  assert.match(page.body, /<h2>出典<\/h2><ol><li id="source-1"><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a> <span class="lines"><form class="inline"[^>]*>.*?<button name="action" value="cite" title="引用箇所を見る">L\d+–\d+<\/button><\/form><\/span><\/li>/u);
-  // Citation numbers in the text jump to their citation.
-  assert.match(page.body, /<a class="ref" href="#source-1">1<\/a>/u);
-  assert.match(page.body, /<div class="crumbs"><span>ページ<\/span><span>guides<\/span><span>[^<]*<\/span><em>更新 [^<]* · 出典 1 件<\/em><\/div>/u);
+  // The sources the page is written from, each opening the source; no numbers in the text.
+  assert.match(page.body, /<h2>出典<\/h2><ol><li id="source-1"><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a><\/li><\/ol>/u);
+  assert.doesNotMatch(page.body, /class="ref"|value="cite"/u);
+  assert.match(page.body, /<div class="crumbs"><span>ページ<\/span><span>ポンプ<\/span><span>[^<]*<\/span><em>更新 [^<]* · 出典 1 件<\/em><\/div>/u);
   // The actions of a page sit under it: ask about it, have it revised, and manage it.
   assert.match(page.body, /<h2>このページでできること<\/h2><details name="act" open><summary>質問する<\/summary>.*<summary>AI に指示して直す<\/summary>.*<summary>検査・アーカイブ<\/summary>/su);
-  const cited = await post({ action: 'cite', page: decodeURIComponent(pageId), value: '1' });
-  assert.equal(cited.status, 303);
-  let quoted;
-  for (let attempt = 0; attempt < 200 && !quoted; attempt++) {
-    const shown = await send(port, { path: cited.headers.location });
-    if (/data-work-status="(?:succeeded|failed)"/u.test(shown.body)) quoted = shown;
-    else await delay(50);
-  }
-  assert.match(quoted.body, /<strong>引用の確認<\/strong><span>完了<\/span><\/header><blockquote>[^<]*ポンプの点検[^<]*<\/blockquote>/u);
   const pumpLink = /<a href="\/\?(source=source-[0-9a-f]{24})">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a>/u.exec(page.body)[1];
   const pump = await send(port, { path: '/?' + pumpLink });
   assert.match(pump.body, /毎月第一営業日に点検する。/u);

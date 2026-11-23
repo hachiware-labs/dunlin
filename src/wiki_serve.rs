@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 
 use crate::Cancellation;
 use crate::config_value::{ConfigValue, js_number};
-use crate::eval_stage::{open_state, parse};
+use crate::eval_stage::open_state;
 use crate::index_stage::{items, object, sql, string_field, text, truthy};
 use crate::markdown::{escape_html, render};
 use crate::node_path;
@@ -29,7 +29,7 @@ use crate::serve::{
 };
 use crate::transform_stage::StageError;
 use crate::wiki_folder::{self, snippet};
-use crate::wiki_html::{CONTENT_SECURITY_POLICY, cited_documents, document_markers, sectioned};
+use crate::wiki_html::{CONTENT_SECURITY_POLICY, sectioned};
 use crate::wiki_project::{
     CATEGORIES, WikiRequest, encode_uri_component, link_targets, linked_page, pages, realpath,
     str_of,
@@ -178,7 +178,6 @@ const STYLE: &str = concat!(
     ".ref{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:6px;background:var(--hover);color:var(--muted);font:600 11px/18px ui-sans-serif,system-ui,sans-serif;font-feature-settings:'tnum';text-align:center;vertical-align:2px;text-decoration:none}.ref:hover{background:var(--text);color:var(--bg);text-decoration:none}",
     ".notes{margin-top:72px}article .notes h2{font-size:14px;font-weight:600;margin:0 0 12px}",
     // The lines a document is quoted at, each a button that opens the passage.
-    ".notes .lines{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:2px 10px}.notes .lines form{margin:0}.notes .lines form.inline button{font-feature-settings:'tnum'}",
     ".notes ol{list-style:none;padding:0;margin:0;counter-reset:cite;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;font-size:12.5px;line-height:1.5}",
     ".notes li{counter-increment:cite;display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--muted);scroll-margin-top:24px;transition:border-color .15s,box-shadow .15s}",
     ".notes li::before{content:counter(cite);flex:none;min-width:18px;padding:0 5px;border-radius:6px;background:var(--hover);font:600 11px/18px ui-sans-serif,system-ui,sans-serif;font-feature-settings:'tnum';text-align:center}",
@@ -449,6 +448,7 @@ fn render_work(work: Option<&ConfigValue>, token: &str, page: Option<&str>) -> S
                             escape_html(&js_text(item.get("quote"))),
                             items(item.get("citations"))
                                 .iter()
+                                .chain(items(item.get("sources")))
                                 .map(|citation| format!(
                                     "<li>{} {}</li>",
                                     escape_html(&js_text(
@@ -480,7 +480,22 @@ fn render_work(work: Option<&ConfigValue>, token: &str, page: Option<&str>) -> S
                     &id,
                     &[("second", "resolved")],
                     "対応済みにする",
-                )
+                ) + &match (
+                    string_field(issue, "code"),
+                    string_field(issue, "page"),
+                    string_field(issue, "suggested"),
+                ) {
+                    // A page in a category that does not fit moves to the one suggested.
+                    (Some("CATEGORY_MISMATCH"), Some(target), Some(suggested)) => action_form(
+                        token,
+                        page,
+                        "category",
+                        target,
+                        &[("second", suggested)],
+                        &format!("分類を「{suggested}」にする"),
+                    ),
+                    _ => String::new(),
+                }
             } else {
                 String::new()
             };
@@ -570,14 +585,8 @@ fn work_summary(work: &ConfigValue) -> String {
             .get("evidence")
             .and_then(|evidence| evidence.get("source"));
         out += &format!(
-            "<blockquote>{}</blockquote><p class=\"hint\">{} {}</p>",
-            escape_html(&js_text(result.get("quote"))),
+            "<p class=\"hint\">{}</p>",
             escape_html(&js_text(source.and_then(|source| source.get("objectId")))),
-            line_range(
-                result
-                    .get("evidence")
-                    .and_then(|evidence| evidence.get("range"))
-            )
         );
     }
     if let Some(ConfigValue::Number(sources)) = result.get("sources") {
@@ -1235,13 +1244,15 @@ impl WikiServer {
         let citing: String = content
             .iter()
             .filter(|page| {
-                items(page.get("citations")).iter().any(|citation| {
-                    citation
-                        .get("source")
-                        .and_then(|source| source.get("sourceId"))
-                        .and_then(ConfigValue::as_str)
-                        == Some(id)
-                })
+                crate::wiki_project::page_sources(page)
+                    .iter()
+                    .any(|citation| {
+                        citation
+                            .get("source")
+                            .and_then(|source| source.get("sourceId"))
+                            .and_then(ConfigValue::as_str)
+                            == Some(id)
+                    })
             })
             .map(|page| {
                 let target = page
@@ -1275,10 +1286,12 @@ impl WikiServer {
             } else {
                 format!(" · {}", escape_html(&object_id))
             },
-            if reflected {
-                ""
-            } else {
+            if !reflected {
                 " · 未反映（ページにはまだ書かれていません）"
+            } else if truthy(source.get("nothing")) {
+                " · 得るものなし（この原本からページに書くことはありませんでした）"
+            } else {
+                ""
             },
             if citing.is_empty() {
                 "<p>まだありません。</p>".to_owned()
@@ -1340,6 +1353,7 @@ impl WikiServer {
             "rule",
             "save-answer",
             "issue",
+            "category",
         ];
         let upload = match get("upload") {
             Some(Field::File { name, bytes }) if action == "ingress" && !bytes.is_empty() => {
@@ -1399,6 +1413,11 @@ impl WikiServer {
         match action.as_str() {
             "cite" => input = vec![some(&page), some(&value)],
             "issue" => input = vec![some(&value), some(&second)],
+            "category" => {
+                command = "instruct".into();
+                input = vec![some(&value)];
+                options.push(("category", text(&second)));
+            }
             "save-answer" => input = vec![some(&value), some(&second), some(&third)],
             "instruct" => {
                 input = vec![some(&page), some(&value)];
@@ -1543,8 +1562,28 @@ impl WikiServer {
             .filter(|page| !truthy(page.get("archived")))
             .collect();
         let current_page = current.map(|page| js_text(page.get("id")));
-        // Pages as a tree of folders: the parts of their IDs (the PARA categories come first).
+        // The categories of the rules, which the pages of a Wiki are listed by.
+        let rule_order = crate::wiki_project::rule_categories(
+            &crate::wiki_project::read_file(&node_path::resolve(
+                &base.config_root,
+                str_of(
+                    &items(base.plan.get("ingress"))
+                        .get(2)
+                        .cloned()
+                        .unwrap_or_default(),
+                    "rules",
+                ),
+            ))
+            .unwrap_or_default(),
+        );
+        // Pages as a tree: a Wiki's by category, in the order of the rules; PARA's by the folders
+        // of their IDs, its categories first.
         let mut page_tree = Tree::default();
+        if base.kind != "para" {
+            for category in &rule_order {
+                page_tree.folder(&[category.clone()]);
+            }
+        }
         if base.kind == "para" {
             for category in CATEGORIES {
                 page_tree.folder(&[category.to_string()]);
@@ -1552,8 +1591,18 @@ impl WikiServer {
         }
         for page in &active {
             let id = js_text(page.get("id"));
-            let mut parts: Vec<String> = id.split('/').map(str::to_owned).collect();
-            parts.pop();
+            let parts: Vec<String> = if base.kind == "para" {
+                let mut parts: Vec<String> = id.split('/').map(str::to_owned).collect();
+                parts.pop();
+                parts
+            } else {
+                let category = str_of(page, "category").trim();
+                vec![if category.is_empty() {
+                    wiki_folder::UNCATEGORIZED.to_owned()
+                } else {
+                    category.to_owned()
+                }]
+            };
             page_tree.leaf(
                 &parts,
                 leaf_link(
@@ -1627,13 +1676,13 @@ impl WikiServer {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)? != 0,
+                    row.get::<_, i64>(2)?,
                 ))
             })
             .map_err(sql)?
             .map(|row| {
                 row.map_err(sql)
-                    .and_then(|(id, data, reflected)| Ok((id, parse(&data)?, reflected)))
+                    .and_then(|(id, data, state)| wiki_folder::source_row(id, &data, state))
             })
             .collect::<Result<_, _>>()?;
         drop(statement);
@@ -1667,7 +1716,11 @@ impl WikiServer {
                             &name,
                             &file.path,
                             requested_source == Some(id.as_str()),
-                            (!file.reflected).then_some("未反映"),
+                            match (file.reflected, file.nothing) {
+                                (false, _) => Some("未反映"),
+                                (true, true) => Some("得るものなし"),
+                                (true, false) => None,
+                            },
                         ),
                         None => format!(
                             "<span class=\"file\" title=\"{}\"><span class=\"name\">{}</span><span class=\"badge\">未取り込み</span></span>",
@@ -1699,7 +1752,7 @@ impl WikiServer {
                     &label,
                     &object_id,
                     requested_source == Some(id.as_str()),
-                    (!reflected).then_some("未反映"),
+                    wiki_folder::source_badge(*reflected, source),
                 ),
             );
         }
@@ -1797,14 +1850,13 @@ impl WikiServer {
                     } else {
                         ""
                     },
-                    document_markers(&text, items(page.get("citations"))),
-                    // One entry for each document; each line it quotes opens the passage.
-                    cited_documents(items(page.get("citations")))
+                    text,
+                    // One entry for each source, which opens it.
+                    crate::wiki_project::page_sources(page)
                         .iter()
                         .enumerate()
-                        .map(|(index, list)| {
-                            let citations = items(page.get("citations"));
-                            let source = citations[list[0]].get("source");
+                        .map(|(index, entry)| {
+                            let source = entry.get("source");
                             let name = escape_html(&js_text(
                                 source.and_then(|source| source.get("objectId")),
                             ));
@@ -1818,29 +1870,7 @@ impl WikiServer {
                                 ),
                                 None => name,
                             };
-                            // Lines that several statements quote are listed once.
-                            let mut seen: Vec<String> = Vec::new();
-                            let lines = list
-                                .iter()
-                                .filter(|&&at| {
-                                    let range = line_range(citations[at].get("range"));
-                                    let new = !seen.contains(&range);
-                                    seen.push(range);
-                                    new
-                                })
-                                .map(|&at| {
-                                    format!(
-                                        "{}<input type=\"hidden\" name=\"value\" value=\"{}\"><button name=\"action\" value=\"cite\" title=\"引用箇所を見る\">{}</button></form>",
-                                        form("inline"),
-                                        at + 1,
-                                        line_range(citations[at].get("range"))
-                                    )
-                                })
-                                .collect::<String>();
-                            format!(
-                                "<li id=\"source-{}\">{label} <span class=\"lines\">{lines}</span></li>",
-                                index + 1
-                            )
+                            format!("<li id=\"source-{}\">{label}</li>", index + 1)
                         })
                         .collect::<String>()
                 );
@@ -2052,8 +2082,12 @@ impl WikiServer {
                 let pages_panel = if listed.is_empty() {
                     "<section class=\"panel\" id=\"pages\"><h2>目録</h2><p class=\"empty\">まだページがありません。左上の「資料を取り込む」に URL かファイルを渡すと、AI が読んでページを書きます。</p></section>".to_owned()
                 } else {
-                    wiki_folder::groups(&listed)
-                        .iter()
+                    (if base.kind == "para" {
+                        wiki_folder::groups(&listed)
+                    } else {
+                        wiki_folder::categorized(&listed, &rule_order)
+                    })
+                    .iter()
                         .enumerate()
                         .map(|(index, (name, list))| {
                             format!(
@@ -2112,10 +2146,20 @@ impl WikiServer {
                     }
                     .into(),
                 );
-                let id = js_text(page.get("id"));
-                let mut parts: Vec<String> = id.split('/').map(str::to_owned).collect();
-                parts.pop();
-                crumbs.extend(parts);
+                // A Wiki's page is under its category; PARA's under the folders of its ID.
+                if base.kind == "para" {
+                    let id = js_text(page.get("id"));
+                    let mut parts: Vec<String> = id.split('/').map(str::to_owned).collect();
+                    parts.pop();
+                    crumbs.extend(parts);
+                } else {
+                    let category = str_of(page, "category").trim();
+                    crumbs.push(if category.is_empty() {
+                        wiki_folder::UNCATEGORIZED.to_owned()
+                    } else {
+                        category.to_owned()
+                    });
+                }
                 crumbs.push(js_text(page.get("title")));
             }
             Shown::Source((_, source, _)) => {
@@ -2142,7 +2186,7 @@ impl WikiServer {
                     Shown::Page(page) => format!(
                         "<em>更新 {} · 出典 {} 件</em>",
                         escape_html(&ago(&js_text(page.get("changed")), now)),
-                        cited_documents(items(page.get("citations"))).len()
+                        crate::wiki_project::page_sources(page).len()
                     ),
                     _ => String::new(),
                 }

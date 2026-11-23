@@ -118,8 +118,6 @@ mod wiki_ingress;
 #[cfg(any(feature = "node", test))]
 mod wiki_inspect;
 #[cfg(any(feature = "node", test))]
-mod wiki_merge;
-#[cfg(any(feature = "node", test))]
 mod wiki_project;
 #[cfg(all(feature = "node", not(test)))]
 mod wiki_serve;

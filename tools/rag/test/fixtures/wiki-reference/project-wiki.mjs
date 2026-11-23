@@ -17,7 +17,7 @@ import { categories, idParts, readText, revision } from './files.mjs';
 import { escapeHtml, renderMarkdown, renderPublication, contentSecurityPolicy } from './html.mjs';
 import { checkTools, projectOcr } from '../cli-reference/project-tools.mjs';
 import { sharedOriginalForDigest, prepareDocument } from './uploads.mjs';
-import { ensureWikiInspection, inspectWikiContent } from './project-wiki-inspection.mjs';
+import { ensureWikiInspection, inspectWikiContent, suggestWikiContent } from './project-wiki-inspection.mjs';
 import { ensureWikiWork, latestWork, queueWork, trackWork, workStatus } from './project-wiki-work.mjs';
 import { HttpError, listenHttp, validateServe } from '../reference-config/project-serving.mjs';
 
@@ -44,7 +44,7 @@ function writer(config, name) {
   try {
     return createGenerator(model.provider, resolveConfigValue(model.model, 'models.' + name + '.model'),
       resolveConfigValue(model.base_url, 'models.' + name + '.base_url'), resolveApiKey(model.api_key_env, 'models.' + name),
-      { maxInputBytes: model.max_input_bytes });
+      { maxInputBytes: model.max_input_bytes, maxOutputTokens: 8192 });
   } catch {
     throw new WikiError(2, 'INVALID_MODEL', 'Check the provider, model, URL and environment references for models.' + name + '.');
   }
@@ -276,6 +276,42 @@ async function savePages(project, entries, atomicWrite, commit) {
     }
     throw error;
   }
+}
+
+/** The statements of a page, each with what it cites. Blocks without markers belong to the next statement. */
+function units(markdown, citations) {
+  const found = [];
+  let open = [];
+  for (const block of markdown.split('\n\n')) {
+    const marks = /(?: \[\d+\])+$/u.exec(block);
+    if (!marks) {
+      open.push(block);
+      continue;
+    }
+    open.push(block.slice(0, marks.index));
+    found.push({ text: open.join('\n\n'), citations: [...marks[0].matchAll(/\d+/gu)].map(([number]) => citations[Number(number) - 1]).filter(Boolean) });
+    open = [];
+  }
+  if (open.some(Boolean)) found.push({ text: open.join('\n\n'), citations: [] });
+  return found;
+}
+
+/** The Markdown of statements with markers numbered in order, and the citations they number. */
+function compose(list) {
+  const citations = [];
+  const markdown = list.map(({ text, citations: cited }) => text + cited.map((item) => ' [' + citations.push(item) + ']').join('')).join('\n\n');
+  return { markdown, citations };
+}
+
+/** A page with more statements: those it had, then the new ones. A statement that comes again in the same words cites what the new one cites. */
+function extended(earlier, added) {
+  const all = earlier.map((unit) => ({ ...unit }));
+  for (const unit of added) {
+    const known = all.find(({ text }) => text === unit.text);
+    if (known) known.citations = unit.citations;
+    else all.push(unit);
+  }
+  return all;
 }
 
 function remember(db, result) {
@@ -556,12 +592,13 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
   }
   if (command === 'query') {
     const [settings, model] = project.wikiPlan.query;
+    const question = args[0];
     const terms = [...new Intl.Segmenter('ja', { granularity: 'word' }).segment(args[0].normalize('NFKC'))]
       .filter(({ isWordLike }) => isWordLike).map(({ segment }) => segment.toLowerCase());
     const ranked = pages(db, settings.include_archived).filter(({ id }) => !values.page || id === values.page).map((page) => [page,
       terms.filter((term) => (page.title + '\n' + page.markdown).normalize('NFKC').toLowerCase().includes(term)).length])
       .filter(([, rank]) => rank > 0 || values.page).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([page]) => page);
-    if (!ranked.length) return { answer: '', pages: [], status: 'insufficient_evidence' };
+    if (!ranked.length) return { question, answer: '', pages: [], status: 'insufficient_evidence' };
     progress('answering');
     const result = await generate(project, model.model, answer, 'Answer with facts and exact quotes copied from the numbered pages. Return no facts if the question is outside scope.', {
       about: project.config.about, question: args[0], target: values.target ?? 'page',
@@ -580,15 +617,17 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
       if (!markers) throw new WikiError(2, 'INVALID_CITATION', 'The quoted page fact has no source markers.');
       return [...markers.matchAll(/\[(\d+)\]/gu)].map(([, index]) => page.citations[Number(index) - 1]);
     }) }));
-    return remember(db, { id: runId, action: command, answer: result.facts.map(({ text }) => text).join('\n'),
+    return remember(db, { id: runId, action: command, question, answer: result.facts.map(({ text }) => text).join('\n'),
       ...(facts.length ? { facts } : { status: 'insufficient_evidence' }), pages: [...citations].map(({ id, title, citations }) => ({ id, title, citations })) });
   }
   if (command === 'verify') {
     const material = all();
     const issues = [];
     let review = null;
+    let suggestions = null;
     const byId = new Map(material.map((page) => [page.id, page]));
     const incoming = new Set();
+    const links = new Map();
     const database = await helpers.open(databasePath, { tokenizer: 'trigram', short_query: 'bigram' });
     try {
       for (const [completed, page] of material.entries()) {
@@ -598,14 +637,18 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
           try { await readCitation(database, item); }
           catch (error) { if (error.code !== 'INVALID_CITATION') throw error; valid = false; }
           const current = await database.getDocument(item.source);
-          if (!valid) issues.push({ code: 'CITATION_MISSING', page: page.id, evidence: item });
-          else if (!page.archived && current?.evidence.source.version !== item.source.version) issues.push({ code: 'STALE_VERSION', page: page.id, evidence: item });
+          if (!valid) issues.push({ code: 'CITATION_MISSING', page: page.id, evidence: item, description: page.id + '：引用した箇所が原本に見つかりません' });
+          else if (!page.archived && current?.evidence.source.version !== item.source.version) {
+            issues.push({ code: 'STALE_VERSION', page: page.id, evidence: item, description: page.id + '：引用した原本が新しくなっています' });
+          }
         }
         for (const { 1: target } of page.markdown.matchAll(/\]\(([^)\s]+)\)/gu)) {
           const id = linkedPage(page.id, target);
           if (id === null) continue;
-          if (byId.has(id)) incoming.add(id);
-          else issues.push({ code: 'BROKEN_LINK', page: page.id, target });
+          if (byId.has(id)) {
+            incoming.add(id);
+            links.set(page.id, (links.get(page.id) ?? new Set()).add(id));
+          } else issues.push({ code: 'BROKEN_LINK', page: page.id, target, description: page.id + '：リンク先のページがありません（' + target + '）' });
         }
       }
       if (values.content) {
@@ -614,11 +657,31 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
           generate: (schema, instructions, input) => generate(project, model, schema, instructions, input) });
         issues.push(...checked.issues);
         review = checked.review;
+        if (!values.page) {
+          progress('suggesting_next');
+          const found = await suggestWikiContent(db, material, project.config.about, (schema, instructions, input) => generate(project, model, schema, instructions, input));
+          issues.push(...found.issues);
+          suggestions = found.suggestions;
+        }
       }
     } finally {
       await database.close();
     }
-    for (const page of material) if (!page.archived && !incoming.has(page.id)) issues.push({ code: 'ORPHAN_PAGE', page: page.id });
+    // A page that names another page without linking to it.
+    const live = material.filter((page) => !page.archived);
+    const folded = (text) => text.normalize('NFKC').toLowerCase();
+    for (const page of live) {
+      const body = folded(page.markdown);
+      for (const other of live) {
+        const title = folded(other.title.trim());
+        if (other.id === page.id || [...title].length < 2 || !body.includes(title) || links.get(page.id)?.has(other.id)) continue;
+        issues.push({ code: 'MISSING_LINK', page: page.id, target: other.id,
+          description: page.id + '：「' + other.title.trim() + '」に触れていますが、そのページ（' + other.id + '）へのリンクがありません' });
+      }
+    }
+    for (const page of material) {
+      if (!page.archived && !incoming.has(page.id)) issues.push({ code: 'ORPHAN_PAGE', page: page.id, description: page.id + '：どのページからもリンクされていません' });
+    }
     const issueTable = db.prepare("SELECT name FROM sqlite_master WHERE name = 'wiki_issues'").get();
     const state = issueTable && db.prepare('SELECT state FROM wiki_issues WHERE id = ?');
     const active = [...new Map(issues.map((issue) => {
@@ -627,7 +690,7 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
       return [id, { ...issue, id, state: state?.get(id)?.state ?? 'open' }];
     })).values()].filter((issue) => values['all-issues'] || issue.state === 'open');
     const result = { issues: values.page ? active.filter(({ page, pages }) => page === values.page || pages?.includes(values.page)) : active,
-      ...(review && { review }) };
+      ...(review && { review }), ...(suggestions && { suggestions }) };
     return values.content ? remember(db, { id: runId, action: command, checked_at: new Date().toISOString(), ...result }) : result;
   }
   const [loader, keyword, writing] = project.wikiPlan.ingress;
@@ -681,31 +744,43 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
     const rules = await readFile(resolve(project.configRoot, writing.rules), 'utf8');
     const existing = pages(db, false);
     const previous = all();
-    const affected = existing.filter((page) => page.citations.some((citation) => documents.some(({ evidence }) =>
-      citation.source.sourceId === evidence.source.sourceId && citation.source.version !== evidence.source.version))).map(({ id }) => id);
-    const present = new Set(documents.map(({ evidence }) => evidence.source.sourceId));
-    if (affected.length) {
-      const untouched = existing.filter(({ id }) => affected.includes(id)).map((page) => ({ ...page,
-        citations: page.citations.filter(({ source }) => !present.has(source.sourceId)) }));
-      for (const item of await citedText(database, untouched)) refs.push({ ...item, id: refs.length + 1 });
-    }
+    const stale = (citation) => documents.some(({ evidence }) =>
+      citation.source.sourceId === evidence.source.sourceId && citation.source.version !== evidence.source.version);
+    const affected = existing.filter((page) => page.citations.some(stale)).map(({ id }) => id);
+    // What each page says now, without the statements of a source that changed. These stay on the page.
+    const kept = (page) => units(page.markdown, page.citations).filter((unit) => !unit.citations.some(stale));
     progress('writing_pages');
+    // The model is given the list of pages, not what they say.
     const result = await generate(project, writing.model, written,
       'Write in the language of the project. Create or update relevant pages only, using exact supporting quotes. Return zero pages for out-of-scope sources. Use safe relative page IDs. ' +
       (project.config.init.type === 'para' ? 'An ID must start with Projects/, Areas/, Resources/ or Archives/. ' : '') +
       'Each fact must have a citation.', {
       about: project.config.about, rules, sources: refs.map(({ id, text }) => ({ id, text })),
-      pages: existing.map(({ id, title, markdown }) => ({ id, title, markdown: markdown.slice(0, 1200) })),
+      pages: existing.map(({ id, title }) => ({ id, title })),
       pages_needing_revision: affected,
     });
     if (result.pages.length > writing.max_pages_per_job) throw new WikiError(2, 'PAGE_LIMIT', 'The model exceeded max_pages_per_job.');
     const ids = new Set();
-    const changes = result.pages.map(({ id, title, facts }) => {
+    const changes = [];
+    for (const { id, title, facts } of result.pages) {
       if (ids.has(id.toLowerCase())) throw new WikiError(2, 'INVALID_PAGE', 'Duplicate page ID: ' + id);
       if (previous.some((page) => page.id === id && page.archived)) throw new WikiError(4, 'PAGE_ARCHIVED', 'Restore the archived page before changing it.');
       ids.add(id.toLowerCase());
-      return changePage(project, id, title, verifyFacts(facts, refs), previous);
-    });
+      const prior = existing.find((page) => page.id === id);
+      const earlier = prior ? kept(prior) : [];
+      const stated = [];
+      for (const fact of facts) {
+        const valid = fact.citations.some(({ id: ref, quote }) => {
+          const index = refs[ref - 1]?.text.indexOf(quote) ?? -1;
+          return index >= 0 && refs[ref - 1].text.indexOf(quote, index + 1) < 0;
+        });
+        // The page says this already, and keeps what it cited for it.
+        if (!valid && earlier.some((unit) => unit.text === fact.text.trim())) continue;
+        stated.push({ text: fact.text.trim(), citations: verifyFacts([fact], refs).citations });
+      }
+      if (!stated.length) continue;
+      changes.push(changePage(project, id, title, compose(extended(earlier, stated)), previous));
+    }
     progress('validating_citations', { completed: 0, total: changes.length });
     const verified = await Promise.all(changes.map((page) => attachOriginals(database, page, paths)));
     const sourceIds = documents.map(({ evidence }) => evidence.source.sourceId);
@@ -724,7 +799,7 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
 const workStages = {
   queued: '順番待ち', starting: '処理を開始', finding_sources: '資料を確認中', extracting_sources: 'テキストを抽出中',
   indexing_sources: '資料を索引に追加中', writing_pages: 'ページを作成中', validating_citations: '出典を確認中',
-  saving_pages: 'ページを保存中', answering: '回答を作成中', checking_citations: '引用とリンクを検査中',
+  saving_pages: 'ページを保存中', answering: '回答を作成中', checking_citations: '引用とリンクを検査中', suggesting_next: '次に調べることを検討中',
   reviewing_content: '関連する資料とページを検査中', succeeded: '完了', failed: '失敗',
 };
 

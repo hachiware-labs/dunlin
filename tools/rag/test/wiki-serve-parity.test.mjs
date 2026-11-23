@@ -36,6 +36,7 @@ async function model(t) {
     const properties = body.format.properties;
     let result;
     if (properties.issues) result = { issues: [] };
+    else if (properties.concepts) result = { concepts: [], questions: [], sources: [] };
     else if (properties.pages) {
       result = { pages: input.sources.map(({ id, text }) => {
         const quote = text.split('\n').map((line) => line.trim()).find(Boolean);

@@ -63,6 +63,28 @@ fn number_of(value: Option<&ConfigValue>) -> f64 {
     }
 }
 
+/// The quote as its source holds it exactly once: the quote itself, or the quote without what a
+/// small model tends to put around it (blanks, or the number of the source after it, as `: 1` or
+/// ` [1]`). What is kept is still a verbatim passage of the source.
+pub(crate) fn settled_quote(source: &str, quote: &str) -> Option<String> {
+    if unique_index(source, quote).is_some() {
+        return Some(quote.to_owned());
+    }
+    static NUMBERED: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let numbered = NUMBERED.get_or_init(|| {
+        regex::Regex::new(
+            r"[ \t\u{3000}]*(?:[:：][ \t\u{3000}]*\[?[0-9０-９]{1,3}\]?|\[[0-9]{1,3}\]|［[0-9０-９]{1,3}］)$",
+        )
+        .expect("valid pattern")
+    });
+    let trimmed = js_trim(quote);
+    let bare = numbered.replace(trimmed, "");
+    [trimmed, js_trim(&bare)]
+        .into_iter()
+        .find(|candidate| !candidate.is_empty() && unique_index(source, candidate).is_some())
+        .map(str::to_owned)
+}
+
 /// The facts whose citations resolve, for `ingress` (spec 16: only verified statements are saved).
 /// A citation whose quote is not found exactly once in its source is dropped, and so is a fact left
 /// without citations. Returns the kept facts and, for each dropped citation, the fact and the quote.
@@ -70,21 +92,21 @@ pub(crate) fn verified_facts(facts: Vec<Fact>, refs: &[Ref]) -> (Vec<Fact>, Vec<
     let mut kept = Vec::new();
     let mut rejected = Vec::new();
     for fact in facts {
-        let (valid, invalid): (Vec<Citation>, Vec<Citation>) =
-            fact.citations.into_iter().partition(|citation| {
-                citation
-                    .id
-                    .checked_sub(1)
-                    .and_then(|index| refs.get(index))
-                    .is_some_and(|reference| {
-                        unique_index(&reference.text, &citation.quote).is_some()
-                    })
-            });
-        rejected.extend(
-            invalid
-                .into_iter()
-                .map(|citation| (fact.text.clone(), citation.quote)),
-        );
+        let mut valid = Vec::new();
+        for citation in fact.citations {
+            let found = citation
+                .id
+                .checked_sub(1)
+                .and_then(|index| refs.get(index))
+                .and_then(|reference| settled_quote(&reference.text, &citation.quote));
+            match found {
+                Some(quote) => valid.push(Citation {
+                    id: citation.id,
+                    quote,
+                }),
+                None => rejected.push((fact.text.clone(), citation.quote)),
+            }
+        }
         if !valid.is_empty() {
             kept.push(Fact {
                 text: fact.text,
@@ -111,10 +133,17 @@ pub(crate) fn verify_facts(
     facts: &[Fact],
     refs: &[Ref],
 ) -> Result<(String, Vec<ConfigValue>), StageError> {
+    let units = facts
+        .iter()
+        .map(|fact| cited_fact(fact, refs))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(crate::wiki_merge::compose(&units))
+}
+
+/// A fact as a statement of a page: its text without markers, and the passages its quotes are.
+pub(crate) fn cited_fact(fact: &Fact, refs: &[Ref]) -> Result<crate::wiki_merge::Unit, StageError> {
     let mut citations: Vec<ConfigValue> = Vec::new();
-    let mut paragraphs = Vec::new();
-    for fact in facts {
-        let mut marks = Vec::new();
+    {
         for citation in &fact.citations {
             let reference = refs.get(citation.id - 1);
             let Some((reference, index)) = reference.and_then(|reference| {
@@ -165,15 +194,12 @@ pub(crate) fn verify_facts(
                 ])),
             );
             citations.push(ConfigValue::Object(entries));
-            marks.push(format!("[{}]", citations.len()));
         }
-        paragraphs.push(format!(
-            "{} {}",
-            js_trim(&without_markers(&fact.text)),
-            marks.join(" ")
-        ));
     }
-    Ok((paragraphs.join("\n\n"), citations))
+    Ok(crate::wiki_merge::Unit {
+        text: js_trim(&without_markers(&fact.text)).to_owned(),
+        citations,
+    })
 }
 
 /// `citedText(database, pages)`: the cited excerpts of pages, each once.
@@ -1206,5 +1232,35 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn a_quote_keeps_its_words_without_the_number_a_model_put_after_them() {
+        let refs = [Ref {
+            id: 1,
+            text: "スプリントは1か月以内。\n手順: 1 を見る。\n同じ。同じ。\n".to_owned(),
+            evidence: ConfigValue::Null,
+        }];
+        let quoted = |quote: &str| {
+            let (kept, _) = verified_facts(vec![fact("x", &[(1, quote)])], &refs);
+            kept.first().map(|fact| fact.citations[0].quote.clone())
+        };
+        assert_eq!(
+            quoted("スプリントは1か月以内。: 1").as_deref(),
+            Some("スプリントは1か月以内。")
+        );
+        assert_eq!(
+            quoted("スプリントは1か月 [1]").as_deref(),
+            Some("スプリントは1か月")
+        );
+        assert_eq!(
+            quoted(" スプリントは1か月以内。\n").as_deref(),
+            Some("スプリントは1か月以内。")
+        );
+        // A quote that is in the source as written stays as written.
+        assert_eq!(quoted("手順: 1").as_deref(), Some("手順: 1"));
+        // Words that are not in the source, or more than once, are still no quote.
+        assert_eq!(quoted("スプリントは2週間。: 1"), None);
+        assert_eq!(quoted("同じ。: 1"), None);
     }
 }

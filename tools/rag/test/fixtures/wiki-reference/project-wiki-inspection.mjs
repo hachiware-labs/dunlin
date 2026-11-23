@@ -6,11 +6,43 @@ const findings = z.object({ issues: z.array(z.object({
   kind: z.enum(['contradiction', 'source_disagreement', 'duplicate']),
   first: side, second: side, description: z.string().min(1),
 }).strict()) }).strict();
+const suggested = z.object({ concepts: z.array(z.object({ name: z.string().min(1), pages: z.array(z.number().int().positive()) }).strict()),
+  questions: z.array(z.string()), sources: z.array(z.string()) }).strict();
 const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
 
 export function ensureWikiInspection(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS wiki_reviewed_material (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS wiki_content_pairs (id TEXT PRIMARY KEY, data TEXT NOT NULL)`);
+    CREATE TABLE IF NOT EXISTS wiki_content_pairs (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS wiki_suggestions (id TEXT PRIMARY KEY, data TEXT NOT NULL)`);
+}
+
+/** The concepts that pages name but that have no page, and what the model suggests to ask and to read next. */
+export async function suggestWikiContent(db, pages, about, generate) {
+  const active = pages.filter((page) => !page.archived);
+  if (!active.length) return { issues: [], suggestions: { questions: [], sources: [] } };
+  const input = { about, pages: active.map(({ id, title, markdown }, index) => ({ item: index + 1, id, title, text: markdown.slice(0, 600) })) };
+  const fingerprint = revision(JSON.stringify(input));
+  const saved = db.prepare("SELECT data FROM wiki_suggestions WHERE id = 'latest'").get();
+  const record = saved && JSON.parse(saved.data);
+  if (record?.fingerprint === fingerprint) return { issues: record.issues, suggestions: record.suggestions };
+  const { concepts, questions, sources } = await generate(suggested,
+    'Read the list of pages of the wiki. Name the important concepts that the pages mention but that have no page of their own, with the numbers of the pages that mention them. Suggest questions worth investigating next, and sources worth looking for to fill the gaps of the wiki. Write in the language of the project.', input);
+  const folded = (text) => text.normalize('NFKC').toLowerCase();
+  const lines = (list) => list.map((line) => line.trim()).filter(Boolean).slice(0, 10);
+  const issues = [];
+  const seen = new Set();
+  for (const { name, pages: numbers } of concepts) {
+    const key = folded(name.trim());
+    if ([...key].length < 2 || seen.has(key) || active.some(({ id, title }) => folded(title.trim()) === key || folded(id.split('/').at(-1)) === key)) continue;
+    const mentioned = [...new Set(numbers.map((number) => active[number - 1]).filter((page) => page && folded(page.markdown).includes(key)).map(({ id }) => id))];
+    if (!mentioned.length) continue;
+    seen.add(key);
+    issues.push({ code: 'MISSING_PAGE', concept: name.trim(), pages: mentioned,
+      description: '「' + name.trim() + '」は ' + mentioned.join('、') + ' に出てきますが、ページがありません' });
+  }
+  const suggestions = { questions: lines(questions), sources: lines(sources) };
+  db.prepare("INSERT OR REPLACE INTO wiki_suggestions VALUES ('latest', ?)").run(JSON.stringify({ fingerprint, issues, suggestions }));
+  return { issues, suggestions };
 }
 
 function tokens(text) {

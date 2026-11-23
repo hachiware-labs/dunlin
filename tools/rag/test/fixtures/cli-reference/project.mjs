@@ -171,7 +171,10 @@ async function initialize(type, directory, values) {
   if (isSearchProject(type) && source === undefined) await mkdir(join(root, 'docs'), { recursive: true });
   if (!isSearchProject(type)) {
     await mkdir(join(root, type === 'wiki' ? 'wiki' : 'site'), { recursive: true });
-    await writeFile(join(root, 'rules.md'), '# 運用の決まり\n', { flag: 'wx' }).catch((error) => {
+    // The rules of a Wiki are the CLI's own text.
+    const rules = type === 'wiki' ? (await readFile(new URL('../../../../../src/wiki_rules.md', import.meta.url), 'utf8')).replaceAll('\r\n', '\n')
+      : '# 運用の決まり\n';
+    await writeFile(join(root, 'rules.md'), rules, { flag: 'wx' }).catch((error) => {
       if (error.code !== 'EEXIST') throw error;
     });
   }
@@ -1128,9 +1131,11 @@ export async function runProjectCommand(command, args, explicitProject) {
             await serveWiki(project, serving);
             return;
           }
-          if (!readOnly) runId = `run-${randomUUID()}`;
+          // A check changes nothing, but it is a work of the log like the others.
+          const tracked = !readOnly || command === 'verify';
+          if (tracked) runId = `run-${randomUUID()}`;
           const input = values.persistent ? [null, ...positionals] : positionals;
-          data = await wikiCommand(project, command, input, values, runId, { track: !readOnly, print: true }, warnings);
+          data = await wikiCommand(project, command, input, values, runId, { track: tracked, print: !readOnly }, warnings);
         }
       } else if (command === 'build' || stages.includes(command)) {
         if (!values['dry-run']) runId = `run-${randomUUID()}`;

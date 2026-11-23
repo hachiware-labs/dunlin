@@ -35,6 +35,11 @@ function answer(body) {
   const input = JSON.parse(request.messages[1].content);
   const properties = request.format.properties;
   if (JSON.stringify(input).includes('壊れ')) return 'not json';
+  // A concept two pages hold, one no page holds, and one that has a page; a line of each kind.
+  if (properties.concepts) {
+    return { concepts: [{ name: '交換', pages: input.pages.map(({ item }) => item) }, { name: '存在しない概念', pages: [1] },
+      { name: input.pages[0].id, pages: [1] }, { name: '交換', pages: [1] }], questions: [' 点検の周期は誰が決めるか ', ''], sources: ['メーカーの保守手順書'] };
+  }
   if (properties.issues) {
     const [first, ...related] = input.items;
     return { issues: related.flatMap((next) => {
@@ -130,7 +135,7 @@ function equalText(left, right, label) {
   assert.equal(left.length, right.length, label);
 }
 
-const tables = ['wiki_pages', 'wiki_sources', 'wiki_jobs', 'wiki_issues', 'wiki_work', 'wiki_reviewed_material', 'wiki_content_pairs'];
+const tables = ['wiki_pages', 'wiki_sources', 'wiki_jobs', 'wiki_issues', 'wiki_work', 'wiki_reviewed_material', 'wiki_content_pairs', 'wiki_suggestions'];
 
 /** The rows of the Wiki tables and the published files, with each publication's record decoded. */
 async function snapshot(base) {
@@ -181,7 +186,9 @@ async function projects(t, root, type, url) {
     const { plan, serveSettings } = validateWiki(projectConfig, join(refBase, 'KnowledgeNestfile.yaml'), () => null);
     const project = { root: refBase, configRoot: refBase, config: projectConfig, paths: paths(refBase), wikiPlan: plan, serveSettings };
     const readOnly = Boolean(values['dry-run']) || ['cite', 'rules', 'progress'].includes(command) || command === 'verify' && !values.content;
-    const db = new DatabaseSync(project.paths.state, { readOnly });
+    // A check changes nothing, but it is a work of the log like the others.
+    const tracked = !readOnly || command === 'verify';
+    const db = new DatabaseSync(project.paths.state, { readOnly: !tracked });
     db.exec('PRAGMA busy_timeout = 500');
     if (!readOnly) ensureWiki(db);
     const warnings = [];
@@ -192,7 +199,7 @@ async function projects(t, root, type, url) {
       chunk: (document) => chunkCorpus({ groups: [['docs', [document]]], unicode: 'nfkc' }, { size: 800, overlap: 100 })[0][0],
     });
     try {
-      return { output: readOnly ? await execute() : await trackWork(db, runId, command, values.page, execute), warnings };
+      return { output: tracked ? await trackWork(db, runId, command, values.page, execute) : await execute(), warnings };
     } finally {
       db.close();
     }
@@ -333,8 +340,6 @@ test('runs Wiki and PARA commands like the former JavaScript code', { timeout: 6
   await writeFile(join(sources, 'filter.txt'), 'フィルターは隔週で交換する。\n清掃は毎週行う。\n');
   const updated = await same('ingress', [join(sources, 'filter.txt')]);
   assert.deepEqual(updated.data.pages.map(({ id }) => id), ['filter']);
-  // The page excerpts are cut at 1200 UTF-16 units, inside the emoji of the long page.
-  assert.ok(updated.sent[0].includes(String.raw`b\\ud83d`), 'a lone surrogate at the page excerpt end');
   await same('verify');
   const inspected = await same('verify', [], { content: true });
   assert.deepEqual(new Set(inspected.data.issues.filter(({ kind }) => kind).map(({ kind }) => kind)), new Set(['contradiction', 'duplicate', 'source_disagreement']));

@@ -16,14 +16,14 @@ use crate::source_load::{Host, LoadFile, LoadRequest, sha256_hex};
 use crate::source_stage::iso_now;
 use crate::transform_stage::StageError;
 use crate::wiki_commands::{
-    Ref, arg, chunks, chunks_for_model, cited_text, commit_pages, ref_inputs, replace_documents,
-    verified_facts, verify_facts,
+    arg, chunks, chunks_for_model, cited_fact, commit_pages, ref_inputs, replace_documents,
+    verified_facts, without_markers,
 };
+use crate::wiki_merge::{Unit, compose, extended, units};
 use crate::wiki_project::{
     ANSWER_SCHEMA, In, Project, WRITTEN_SCHEMA, coded, current_document, facts, fs_error,
     json_or_undefined, link_targets, linked_page, marker_index, model_output, pages,
-    paragraph_markers, read_citation, read_file, realpath, remember, str_of, strict, unique_index,
-    utf16_prefix, written_pages,
+    paragraph_markers, read_citation, read_file, realpath, remember, str_of, strict, written_pages,
 };
 use crate::wiki_work::Tracker;
 
@@ -87,6 +87,7 @@ pub(crate) fn query(
     let ranked: Vec<ConfigValue> = ranked.into_iter().map(|(page, _)| page).collect();
     if ranked.is_empty() {
         return Ok(object(vec![
+            ("question", text(question)),
             ("answer", text("")),
             ("pages", ConfigValue::Array(Vec::new())),
             ("status", text("insufficient_evidence")),
@@ -130,21 +131,33 @@ pub(crate) fn query(
     for fact in &answered {
         let mut evidence = Vec::new();
         for citation in &fact.citations {
-            let page = ranked.get(citation.id - 1);
-            let markdown = page
-                .map(|page| str_of(page, "markdown"))
-                .unwrap_or_default();
-            if page.is_none() || unique_index(markdown, &citation.quote).is_none() {
+            // The page that holds the quote. A small model gives the number of a source marker
+            // of the page for the number of the page: then the one page with the quote is meant.
+            let holds = |index: usize| {
+                let page = ranked.get(index)?;
+                crate::wiki_commands::settled_quote(str_of(page, "markdown"), &citation.quote)
+                    .map(|quote| (index, quote))
+            };
+            let resolved = holds(citation.id - 1).or_else(|| {
+                let mut holders = (0..ranked.len()).filter_map(holds);
+                let only = holders.next()?;
+                holders.next().is_none().then_some(only)
+            });
+            let Some((index, quote)) = resolved else {
                 return Err(coded(
                     2,
                     "INVALID_CITATION",
                     "The answer cited an unresolved page quote.",
                 ));
+            };
+            let page = ranked.get(index);
+            let markdown = page
+                .map(|page| str_of(page, "markdown"))
+                .unwrap_or_default();
+            if !cited.contains(&index) {
+                cited.push(index);
             }
-            if !cited.contains(&(citation.id - 1)) {
-                cited.push(citation.id - 1);
-            }
-            let Some((_, markers)) = paragraph_markers(markdown, &citation.quote) else {
+            let Some((_, markers)) = paragraph_markers(markdown, &quote) else {
                 return Err(coded(
                     2,
                     "INVALID_CITATION",
@@ -176,6 +189,7 @@ pub(crate) fn query(
             text(project.request.run_id.as_deref().unwrap_or_default()),
         ),
         ("action", text(&project.request.command)),
+        ("question", text(question)),
         ("answer", text(&answer)),
     ];
     if found.is_empty() {
@@ -230,6 +244,11 @@ pub(crate) fn verify(
     let mut review: Option<ConfigValue> = None;
     let known: HashSet<&str> = material.iter().map(|page| str_of(page, "id")).collect();
     let mut incoming: HashSet<String> = HashSet::new();
+    // The pages each page links to.
+    let mut linked: HashMap<&str, HashSet<String>> = HashMap::new();
+    let only = project.value_str("page").filter(|page| !page.is_empty());
+    let mut suggestions: Option<ConfigValue> = None;
+    let said = |page: &ConfigValue, what: &str| text(&format!("{}：{what}", str_of(page, "id")));
     let database = project.trigram_database()?;
     for (completed, page) in material.iter().enumerate() {
         tracker.progress("checking_citations", Some((completed, material.len())));
@@ -252,6 +271,10 @@ pub(crate) fn verify(
                     ("code", text("CITATION_MISSING")),
                     ("page", page_id.clone()),
                     ("evidence", item.clone()),
+                    (
+                        "description",
+                        said(page, "引用した箇所が原本に見つかりません"),
+                    ),
                 ]));
             } else if !truthy(page.get("archived"))
                 && json_or_undefined(current_version) != json_or_undefined(source.get("version"))
@@ -260,6 +283,10 @@ pub(crate) fn verify(
                     ("code", text("STALE_VERSION")),
                     ("page", page_id.clone()),
                     ("evidence", item.clone()),
+                    (
+                        "description",
+                        said(page, "引用した原本が新しくなっています"),
+                    ),
                 ]));
             }
         }
@@ -270,12 +297,20 @@ pub(crate) fn verify(
                 continue;
             };
             if known.contains(id.as_str()) {
+                linked
+                    .entry(str_of(page, "id"))
+                    .or_default()
+                    .insert(id.clone());
                 incoming.insert(id);
             } else {
                 issues.push(object(vec![
                     ("code", text("BROKEN_LINK")),
                     ("page", page_id.clone()),
                     ("target", text(target)),
+                    (
+                        "description",
+                        said(page, &format!("リンク先のページがありません（{target}）")),
+                    ),
                 ]));
             }
         }
@@ -286,13 +321,62 @@ pub(crate) fn verify(
             crate::wiki_inspect::inspect(project, connection, &database, &material, tracker)?;
         issues.extend(found);
         review = Some(checked);
+        if only.is_none() {
+            tracker.progress("suggesting_next", None);
+            let (found, suggested) = crate::wiki_inspect::suggest(project, connection, &material)?;
+            issues.extend(found);
+            suggestions = Some(suggested);
+        }
     }
     drop(database);
+    // A page that names another page without linking to it.
+    let active: Vec<&ConfigValue> = material
+        .iter()
+        .filter(|page| !truthy(page.get("archived")))
+        .collect();
+    let folded = |text: &str| nfkc(text).to_lowercase();
+    let titles: Vec<String> = active
+        .iter()
+        .map(|page| folded(js_trim(str_of(page, "title"))))
+        .collect();
+    for page in &active {
+        let id = str_of(page, "id");
+        let body = folded(str_of(page, "markdown"));
+        for (other, title) in active.iter().zip(&titles) {
+            let target = str_of(other, "id");
+            if target == id
+                || title.chars().count() < 2
+                || !body.contains(title.as_str())
+                || linked.get(id).is_some_and(|pages| pages.contains(target))
+            {
+                continue;
+            }
+            issues.push(object(vec![
+                ("code", text("MISSING_LINK")),
+                ("page", text(id)),
+                ("target", text(target)),
+                (
+                    "description",
+                    said(
+                        page,
+                        &format!(
+                            "「{}」に触れていますが、そのページ（{target}）へのリンクがありません",
+                            js_trim(str_of(other, "title"))
+                        ),
+                    ),
+                ),
+            ]));
+        }
+    }
     for page in &material {
         if !truthy(page.get("archived")) && !incoming.contains(str_of(page, "id")) {
             issues.push(object(vec![
                 ("code", text("ORPHAN_PAGE")),
                 ("page", page.get("id").cloned().unwrap_or_default()),
+                (
+                    "description",
+                    said(page, "どのページからもリンクされていません"),
+                ),
             ]));
         }
     }
@@ -344,7 +428,6 @@ pub(crate) fn verify(
         active.insert(id, ConfigValue::Object(entries));
     }
     let all = truthy(project.value("all-issues"));
-    let only = project.value_str("page").filter(|page| !page.is_empty());
     let listed: Vec<ConfigValue> = order
         .into_iter()
         .filter_map(|id| active.remove(&id))
@@ -361,6 +444,9 @@ pub(crate) fn verify(
     let mut result = vec![("issues", ConfigValue::Array(listed))];
     if let Some(review) = review {
         result.push(("review", review));
+    }
+    if let Some(suggestions) = suggestions {
+        result.push(("suggestions", suggestions));
     }
     if !content {
         return Ok(object(result));
@@ -718,7 +804,7 @@ pub(crate) fn ingress(
     if source_only {
         return finished(connection, documents.len(), &skipped);
     }
-    let mut refs = chunks_for_model(
+    let refs = chunks_for_model(
         documents
             .iter()
             .map(|document| {
@@ -735,53 +821,29 @@ pub(crate) fn ingress(
     let rules = read_file(&project.rules_file())?;
     let existing = pages(connection, false)?;
     let previous = pages(connection, true)?;
+    // A citation of a source that this run read in another version.
+    let stale = |citation: &ConfigValue| {
+        let source = citation.get("source").cloned().unwrap_or_default();
+        documents.iter().any(|document| {
+            let current = evidence_source(document);
+            source.get("sourceId") == current.get("sourceId")
+                && json_or_undefined(source.get("version"))
+                    != json_or_undefined(current.get("version"))
+        })
+    };
     let affected: Vec<String> = existing
         .iter()
-        .filter(|page| {
-            items(page.get("citations")).iter().any(|citation| {
-                let source = citation.get("source").cloned().unwrap_or_default();
-                documents.iter().any(|document| {
-                    let current = evidence_source(document);
-                    source.get("sourceId") == current.get("sourceId")
-                        && json_or_undefined(source.get("version"))
-                            != json_or_undefined(current.get("version"))
-                })
-            })
-        })
+        .filter(|page| items(page.get("citations")).iter().any(&stale))
         .map(|page| str_of(page, "id").to_owned())
         .collect();
-    let present: HashSet<String> = documents
-        .iter()
-        .map(|document| str_of(&evidence_source(document), "sourceId").to_owned())
-        .collect();
-    if !affected.is_empty() {
-        let untouched: Vec<ConfigValue> = existing
-            .iter()
-            .filter(|page| affected.iter().any(|id| id == str_of(page, "id")))
-            .map(|page| {
-                let ConfigValue::Object(mut entries) = page.clone() else {
-                    return page.clone();
-                };
-                let kept: Vec<ConfigValue> = items(page.get("citations"))
-                    .iter()
-                    .filter(|citation| {
-                        let source = citation.get("source").cloned().unwrap_or_default();
-                        !present.contains(str_of(&source, "sourceId"))
-                    })
-                    .cloned()
-                    .collect();
-                assign(&mut entries, "citations", Some(ConfigValue::Array(kept)));
-                ConfigValue::Object(entries)
-            })
-            .collect();
-        for item in cited_text(&database, &untouched, project.cancel)? {
-            refs.push(Ref {
-                id: refs.len() + 1,
-                text: item.text,
-                evidence: item.evidence,
-            });
-        }
-    }
+    // What each page says now, without the statements of a source that changed. These stay on
+    // the page whatever the model returns: an ingest only adds to a page.
+    let kept = |page: &ConfigValue| -> Vec<Unit> {
+        units(str_of(page, "markdown"), items(page.get("citations")))
+            .into_iter()
+            .filter(|unit| !unit.citations.iter().any(&stale))
+            .collect()
+    };
     tracker.progress("writing_pages", None);
     let instruction = format!(
         "Write in the language of the project. Create or update relevant pages only, using exact supporting quotes. Return zero pages for out-of-scope sources. Use safe relative page IDs. {}Each fact must have a citation.",
@@ -793,6 +855,8 @@ pub(crate) fn ingress(
     );
     let field =
         |page: &ConfigValue, name: &str| In::Value(page.get(name).cloned().unwrap_or_default());
+    // The model is given the list of pages, not what they say: a small model that reads a page
+    // copies it and writes nothing from the new source.
     let result = project.generate(
         str_of(&writing, "model"),
         WRITTEN_SCHEMA,
@@ -810,10 +874,6 @@ pub(crate) fn ingress(
                             In::Map(vec![
                                 ("id", field(page, "id")),
                                 ("title", field(page, "title")),
-                                (
-                                    "markdown",
-                                    In::Units(utf16_prefix(str_of(page, "markdown"), 1200)),
-                                ),
                             ])
                         })
                         .collect(),
@@ -841,7 +901,8 @@ pub(crate) fn ingress(
     let mut ids: HashSet<String> = HashSet::new();
     let mut changes = Vec::new();
     let mut rejected = Vec::new();
-    let proposed = written.iter().map(|item| item.facts.len()).sum::<usize>();
+    // The statements that quoted no source and were not on their page already.
+    let mut proposed = 0;
     for item in written {
         let lower = item.id.to_lowercase();
         if ids.contains(&lower) {
@@ -862,16 +923,33 @@ pub(crate) fn ingress(
             ));
         }
         ids.insert(lower);
-        let (facts, dropped) = verified_facts(item.facts, &refs);
-        rejected.extend(
-            dropped
-                .into_iter()
-                .map(|(fact, quote)| (item.id.clone(), fact, quote)),
-        );
-        if facts.is_empty() {
+        let earlier: Vec<Unit> = existing
+            .iter()
+            .find(|page| str_of(page, "id") == item.id)
+            .map(&kept)
+            .unwrap_or_default();
+        let mut stated: Vec<Unit> = Vec::new();
+        for fact in item.facts {
+            let wording = js_trim(&without_markers(&fact.text)).to_owned();
+            let (quoted, dropped) = verified_facts(vec![fact], &refs);
+            if let Some(fact) = quoted.first() {
+                stated.push(cited_fact(fact, &refs)?);
+            } else if earlier.iter().any(|unit| unit.text == wording) {
+                // The page says this already, and keeps what it cited for it.
+                continue;
+            } else {
+                proposed += 1;
+            }
+            rejected.extend(
+                dropped
+                    .into_iter()
+                    .map(|(fact, quote)| (item.id.clone(), fact, quote)),
+            );
+        }
+        if stated.is_empty() {
             continue;
         }
-        let (markdown, citations) = verify_facts(&facts, &refs)?;
+        let (markdown, citations) = compose(&extended(earlier, stated));
         changes.push(project.change_page(&item.id, &item.title, markdown, citations, &previous)?);
     }
     if changes.is_empty() && proposed > 0 {

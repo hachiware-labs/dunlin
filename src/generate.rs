@@ -25,6 +25,9 @@ pub struct GeneratorSettings {
     pub api_key: Option<String>,
     #[serde(default)]
     pub max_input_bytes: Option<f64>,
+    /// The most tokens the model may write, when not the provider's default of this module.
+    #[serde(default)]
+    pub max_output_tokens: Option<f64>,
 }
 
 /// The output text, when the provider returned a string, and the provider's token counts.
@@ -146,7 +149,10 @@ pub fn generate(
             ("instructions", text(instructions)),
             ("input", text(input)),
             ("store", ConfigValue::Bool(false)),
-            ("max_output_tokens", number(2048.0)),
+            (
+                "max_output_tokens",
+                number(settings.max_output_tokens.unwrap_or(2048.0)),
+            ),
             (
                 "text",
                 object(vec![(
@@ -170,7 +176,10 @@ pub fn generate(
                 "options",
                 object(vec![
                     ("temperature", number(0.0)),
-                    ("num_predict", number(1024.0)),
+                    (
+                        "num_predict",
+                        number(settings.max_output_tokens.unwrap_or(1024.0)),
+                    ),
                 ]),
             ),
         ]),
@@ -178,7 +187,10 @@ pub fn generate(
             ("model", model),
             ("messages", chat_messages(instructions, input)),
             ("stream", ConfigValue::Bool(false)),
-            ("max_tokens", number(1024.0)),
+            (
+                "max_tokens",
+                number(settings.max_output_tokens.unwrap_or(1024.0)),
+            ),
             ("temperature", number(0.0)),
             ("reasoning_effort", text("none")),
             (
@@ -208,13 +220,14 @@ pub fn generate(
         max_input_bytes: settings.max_input_bytes,
         label: settings.provider.clone(),
     };
-    let result = post_json(
-        &model_agent(),
-        &endpoint,
-        &body.to_js_json(),
-        charge,
-        cancel,
-    )?;
+    // A model that may write several pages is given the time to write them.
+    let agent = match settings.max_output_tokens {
+        Some(tokens) if tokens > 2048.0 => {
+            crate::embed::model_agent_for(std::time::Duration::from_secs(600))
+        }
+        _ => model_agent(),
+    };
+    let result = post_json(&agent, &endpoint, &body.to_js_json(), charge, cancel)?;
     let string = |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_owned);
     match settings.provider.as_str() {
         "openai" => {
@@ -705,6 +718,7 @@ mod tests {
                 url: format!("{base}/api/chat"),
                 api_key: None,
                 max_input_bytes: None,
+                max_output_tokens: None,
             },
         };
         let response = answer(&request, &Free, &Cancellation::default()).unwrap();

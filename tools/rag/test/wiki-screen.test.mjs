@@ -34,6 +34,7 @@ function model(stops) {
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     const input = JSON.parse(body.messages[1].content);
     let result = { issues: [] };
+    if (body.format.properties.concepts) result = { concepts: [], questions: ['点検の周期は誰が決めるか'], sources: [] };
     if (body.format.properties.pages) {
       result = { pages: input.sources.map(({ id, text }) => {
         const quote = text.split('\n').map((line) => line.trim()).find(Boolean);
@@ -190,7 +191,10 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   assert.match(contents, /<!-- knowledge-nest:catalog -->/u);
   assert.match(contents, /<section data-group><h2>guides<small>1<\/small><\/h2><ul class="pages"><li data-text="[^"]*"><a href="guides\/note-\d+\.html"><strong>/u);
   assert.match(contents, /<p class="meta">ページ 1 件 · 原本 2 件（未反映 1 件） · 最終更新 \d{4}-\d\d-\d\d<\/p>/u);
-  assert.match(await readFile(join(base, 'wiki', 'log.html'), 'utf8'), /<li><h2><time>\[\d{4}-\d\d-\d\d\] ingress<\/time> \| 取り込み<\/h2><p>原本 1 件 · ページ 1 件<\/p><ul><li><a href="guides\/note-\d+\.html">/u);
+  // The log names each work at the start of a line, oldest first: the day, what was done, and the source.
+  const record = await readFile(join(base, 'wiki', 'log.html'), 'utf8');
+  assert.match(record, /\n<h2>\[\d{4}-\d\d-\d\d\] ingest \| http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/h2>\n<p>原本 1 件 · ページ 1 件<\/p>\n<ul><li><a href="guides\/note-\d+\.html">[^<]+<\/a>（新規）<\/li><\/ul>\n<!-- knowledge-nest:log-through \d+ -->\n/u);
+  assert.ok(record.indexOf('ingest | 原本 1 件') < record.indexOf('/manuals/pump</h2>'), 'the earlier work comes first');
   const pageId = /href="\/\?page=([^"]+)"/u.exec(after.body)[1];
   // The file of the page links up to the contents, and to its source by a path of its own.
   const pageFile = await readFile(join(base, 'wiki', ...decodeURIComponent(pageId).split('/')) + '.html', 'utf8');

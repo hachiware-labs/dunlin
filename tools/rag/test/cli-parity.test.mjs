@@ -293,7 +293,8 @@ test('runs the CLI like the former JavaScript CLI', { timeout: 600_000 }, async 
     assert.match(text(['--project', 'kb', 'search', 'q', '--bogus']).stderr, /^Unknown option --bogus for nest search\./u);
     assert.match(text(['--project', 'kb', 'eval-data', 'bogus']).stderr, /^Unknown action for nest eval-data: bogus\. Use add, /u);
     assert.match(text(['--project', 'kb', 'tag', 'v1']).stdout, /^Tagged bld-\S+ as v1\.\n$/u);
-    assert.equal(text(['--project', 'w', 'rules']).stdout, '# 運用の決まり\n');
+    // The rules of a new Wiki name the kinds of pages and what an ingest does.
+    assert.match(text(['--project', 'w', 'rules']).stdout, /^# 運用の決まり\n\n[\s\S]*`sources\/…`[\s\S]*## 資料を取り込むとき\n/u);
     for (const file of files) assert.equal(rust.saved[file], reference.saved[file], file);
     console.log(`compared ${steps.length} commands and ${files.length} files`);
   } finally {

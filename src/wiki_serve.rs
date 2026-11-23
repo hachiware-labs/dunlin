@@ -51,7 +51,7 @@ pub trait WikiServeHost: Send + Sync {
     fn listening(&self, port: u16);
 }
 
-const WORK_STAGES: [(&str, &str); 13] = [
+const WORK_STAGES: [(&str, &str); 14] = [
     ("queued", "順番待ち"),
     ("starting", "処理を開始"),
     ("finding_sources", "資料を確認中"),
@@ -62,6 +62,7 @@ const WORK_STAGES: [(&str, &str); 13] = [
     ("saving_pages", "ページを保存中"),
     ("answering", "回答を作成中"),
     ("checking_citations", "引用とリンクを検査中"),
+    ("suggesting_next", "次に調べることを検討中"),
     ("reviewing_content", "関連する資料とページを検査中"),
     ("succeeded", "完了"),
     ("failed", "失敗"),
@@ -467,7 +468,21 @@ fn render_work(work: Option<&ConfigValue>, token: &str, page: Option<&str>) -> S
             )
         })
         .collect();
-    out + &answer + &changes + &undo + &issues + &details + "</section>"
+    // What the check suggests to ask and to read next.
+    let suggested = |name: &str, heading: &str| {
+        let lines: String = items(result.get("suggestions").and_then(|found| found.get(name)))
+            .iter()
+            .map(|line| format!("<li>{}</li>", escape_html(&js_text(Some(line)))))
+            .collect();
+        if lines.is_empty() {
+            String::new()
+        } else {
+            format!("<article><h4>{heading}</h4><ul>{lines}</ul></article>")
+        }
+    };
+    let suggestions =
+        suggested("questions", "次に調べるとよい問い") + &suggested("sources", "探すとよい資料");
+    out + &answer + &changes + &undo + &issues + &suggestions + &details + "</section>"
 }
 
 /// The folders and files of the left column, in the order they were added.

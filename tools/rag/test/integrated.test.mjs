@@ -256,6 +256,7 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
         ] }] } : { conflict: '原本と食い違います', pages: [] };
       }
     }
+    if (input.format.properties.concepts) result = { concepts: [], questions: [], sources: [] };
     if (input.format.properties.issues) {
       const { items: [first, ...related] } = JSON.parse(input.messages[1].content);
       result = { issues: related.flatMap((next) => {

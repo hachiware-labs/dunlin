@@ -53,7 +53,7 @@ fn running(_pid: u32) -> bool {
 }
 
 /// `visibleWork`: queued or running work of a process that stopped is shown as interrupted.
-fn visible(work: ConfigValue) -> ConfigValue {
+pub(crate) fn visible(work: ConfigValue) -> ConfigValue {
     let status = string_field(&work, "status").unwrap_or_default();
     let pid = match work.get("pid") {
         Some(ConfigValue::Number(pid)) => *pid,

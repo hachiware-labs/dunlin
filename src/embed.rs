@@ -116,8 +116,13 @@ pub struct Embedder {
 
 /// The HTTP client of model calls: fetch's defaults in the JavaScript implementation.
 pub(crate) fn model_agent() -> ureq::Agent {
+    model_agent_for(Duration::from_secs(120))
+}
+
+/// The HTTP client of a model call that may take up to the given time.
+pub(crate) fn model_agent_for(wait: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(120)))
+        .timeout_global(Some(wait))
         // fetch(..., { redirect: 'error' })
         .max_redirects(0)
         // Node.js fetch ignores HTTP_PROXY, so a local Ollama stays direct.

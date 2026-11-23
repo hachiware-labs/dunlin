@@ -1991,6 +1991,16 @@ pub fn pages_folder(project_type: &str) -> &'static str {
     }
 }
 
+/// The rules `init` writes: for a Wiki the kinds of pages, how they are written and what an
+/// ingest does; for PARA only the heading.
+pub fn rules_template(project_type: &str) -> String {
+    if project_type == "wiki" {
+        include_str!("wiki_rules.md").replace("\r\n", "\n")
+    } else {
+        "# 運用の決まり\n".to_owned()
+    }
+}
+
 /// The serve section `init` writes for a project type.
 pub fn serve_template(project_type: &str) -> ConfigValue {
     if project_type == "mcp" {

@@ -4,7 +4,7 @@
 //!
 //! This is the `index` and the `log` of an LLM-Wiki, kept as HTML beside the pages.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use base64::Engine;
 use rusqlite::Connection;
@@ -24,8 +24,8 @@ use crate::wiki_project::{
 const CATALOG_MARK: &str = "<!-- knowledge-nest:catalog -->";
 const LOG_MARK: &str = "<!-- knowledge-nest:log -->";
 
-/// How many works the log shows, newest first.
-const LOG_LENGTH: usize = 300;
+/// The start of the line that ends the entries of the log; the number of the last work follows.
+const LOG_END: &str = "<!-- knowledge-nest:log-through ";
 
 const STYLE: &str = concat!(
     ":root{--bg:#fff;--card:#fff;--text:#111113;--muted:#71717a;--line:#ebebee;--hover:#f4f4f6;--accent:#5b5bd6;--accent-soft:#eeeefb;color-scheme:light dark}",
@@ -50,8 +50,8 @@ const STYLE: &str = concat!(
     ".pages span{grid-column:1/-1;font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
     ".guide{margin-top:56px;padding-top:28px;border-top:1px solid var(--line)}.guide ul{margin:0;padding-left:1.3em;font-size:14px;color:var(--muted)}.guide li{margin:4px 0}",
     "code{background:var(--hover);color:var(--text);padding:1px 6px;border-radius:6px;font:13px ui-monospace,SFMono-Regular,Consolas,monospace}",
-    ".log{list-style:none;margin:0;padding:0}.log>li{padding:16px 0;border-top:1px solid var(--line)}.log h2{margin:0 0 4px;font-weight:600}.log time{font:13px ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted)}",
-    ".log p{margin:0;font-size:14px;color:var(--muted)}.log ul{margin:6px 0 0;padding-left:1.3em;font-size:14px}",
+    ".log h2{display:block;margin:0;padding:16px 0 4px;border-top:1px solid var(--line);font:600 13.5px/1.6 ui-monospace,SFMono-Regular,Consolas,'Yu Gothic UI',monospace}",
+    ".log p{margin:0 0 4px;font-size:14px;color:var(--muted)}.log ul{margin:0 0 14px;padding-left:1.3em;font-size:14px}.log p:last-child{margin-bottom:14px}",
     "@media(max-width:640px){main{padding:40px 18px 64px}h1{font-size:32px}}",
 );
 
@@ -159,6 +159,16 @@ pub(crate) fn folder(id: &str) -> &str {
     id.rfind('/').map_or("", |at| &id[..at])
 }
 
+/// What a folder is called in the contents. The kinds of pages of an LLM Wiki say what they hold.
+fn folder_label(folder: &str) -> String {
+    match folder {
+        "sources" => "資料の要約（sources）".to_owned(),
+        "entities" => "人・組織・もの（entities）".to_owned(),
+        "concepts" => "考え方・用語（concepts）".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 /// The entries by folder, in the order of their IDs. Pages outside every folder come first, and
 /// archived pages last, each under a name of their own.
 pub(crate) fn groups(entries: &[Entry]) -> Vec<(String, Vec<&Entry>)> {
@@ -174,7 +184,7 @@ pub(crate) fn groups(entries: &[Entry]) -> Vec<(String, Vec<&Entry>)> {
     }
     for entry in entries.iter().filter(|entry| !entry.archived) {
         if !folder(&entry.id).is_empty() {
-            put(folder(&entry.id), entry);
+            put(&folder_label(folder(&entry.id)), entry);
         }
     }
     for entry in entries.iter().filter(|entry| entry.archived) {
@@ -341,7 +351,7 @@ pub(crate) fn catalog(about: &About<'_>, entries: &[Entry]) -> String {
     );
     body += "<input id=\"q\" type=\"search\" placeholder=\"ページを絞り込む（題名と要約）\" aria-label=\"ページを絞り込む\"></header>";
     if entries.is_empty() {
-        body += "<section><p class=\"meta\">まだページがありません。<code>nest ingress</code> に資料を渡すと、AI が読んでページを書きます。</p></section>";
+        body += "<section><p class=\"meta\">まだページがありません。<code>nest ingest</code> に資料を渡すと、AI が読んでページを書きます。</p></section>";
     }
     for (name, list) in groups(entries) {
         body += &format!(
@@ -365,105 +375,232 @@ pub(crate) fn catalog(about: &About<'_>, entries: &[Entry]) -> String {
     }
     body += "<p id=\"none\" class=\"meta\" hidden>該当するページがありません。</p>";
     body += concat!(
-        "<section class=\"guide\"><h2>この Wiki の保守</h2><ul>",
-        "<li>ページは AI が資料を読んで書き、Knowledge-Nest が引用を確かめて保存します。このフォルダの HTML を直接書き換えても、次の更新で上書きされます。</li>",
-        "<li>資料を足す：<code>nest ingress &lt;ファイルか URL&gt;</code></li>",
-        "<li>質問する：<code>nest query \"質問\"</code>（本文の検索は <code>nest serve</code> の画面でもできます）</li>",
+        "<section class=\"guide\"><h2>この Wiki の保ち方</h2><ul>",
+        "<li>原本は人が集め、ページは AI が書いて保ちます。資料が増えるたびに、関係するページに書き足します。保存の前に、Knowledge-Nest が引用を原本と照らして確かめます。このフォルダの HTML を直接書き換えても、次の更新で上書きされます。</li>",
+        "<li><b>取り込む（ingest）</b>：<code>nest ingest &lt;ファイルか URL&gt;</code>　資料を読み、目録から関係するページを選んで書き足し、足りないページを作ります。</li>",
+        "<li><b>質問する（query）</b>：<code>nest query \"質問\"</code>　ページを読んで、引用つきで答えます。残したい答えは <code>nest save-answer</code> でページにします。</li>",
+        "<li><b>点検する（lint）</b>：<code>nest lint</code>　原本にない引用、古くなった引用、リンク切れ、どこからもリンクされないページ、相互リンクの抜けを調べます。<code>--content</code> を付けると、ページ同士の食い違い、ページのない概念、次に調べるとよい問いと資料を AI が挙げます。</li>",
         "<li>ページを直す：<code>nest instruct &lt;ページ ID&gt; \"指示\"</code></li>",
-        "<li>点検する：<code>nest verify</code>（<code>--content</code> を付けると、ページ同士の食い違いも AI が調べます）</li>",
     );
     if let Some(rules) = &about.rules {
         body += &format!(
-            "<li>書き方の決まり：<a href=\"{}\">rules.md</a>（<code>nest instruct --persistent \"決まり\"</code> で足します）</li>",
+            "<li><b>決まり（schema）</b>：<a href=\"{}\">rules.md</a>　ページの種類、書き方、取り込みの手順。<code>nest instruct --persistent \"決まり\"</code> で足します。</li>",
             escape_html(rules)
         );
     }
     if about.log {
-        body += "<li>これまでの作業：<a href=\"log.html\">作業の記録</a></li>";
+        body += "<li><b>記録（log）</b>：<a href=\"log.html\">作業の記録</a>　取り込み、質問、点検を、行った順に残します。</li>";
     }
     body += "</ul></section>";
     document(about.title, CATALOG_MARK, &body, Some(FILTER_SCRIPT))
 }
 
-fn command_label(command: &str) -> &'static str {
+/// What a work is called in the log: the names of an LLM Wiki for its three operations.
+fn operation(command: &str) -> &str {
     match command {
-        "ingress" => "取り込み",
-        "query" => "質問",
-        "instruct" => "指示",
-        "verify" => "検査",
-        "archive" => "アーカイブ",
-        "undo" => "取り消し",
-        "save-answer" => "回答の保存",
-        _ => "作業",
+        "ingress" => "ingest",
+        "verify" => "lint",
+        other => other,
     }
 }
 
-/// `log.html`: the works that finished, newest first. Each starts with its day and its command,
-/// as `[2026-01-02] ingress | …`.
-pub(crate) fn log(title: &str, works: &[ConfigValue], known: &HashSet<String>) -> String {
-    let mut body = format!(
-        "<header><p class=\"kind\">作業の記録</p><h1>{}</h1><p class=\"meta\"><a href=\"index.html\">目録へ戻る</a> · 新しい順、最大 {LOG_LENGTH} 件</p></header><ul class=\"log\">",
+/// What a work was about, for the line that starts its entry.
+fn subject(work: &ConfigValue, names: &HashMap<String, String>) -> String {
+    let result = work.get("result");
+    let field = |name: &str| result.and_then(|result| result.get(name));
+    let titles = || -> Vec<&str> {
+        items(field("pages"))
+            .iter()
+            .map(|page| match page {
+                ConfigValue::String(id) => id.as_str(),
+                page => string_field(page, "title").unwrap_or_else(|| str_of(page, "id")),
+            })
+            .collect()
+    };
+    let several = |list: Vec<&str>| {
+        if list.len() > 3 {
+            format!("{} ほか {} 件", list[..3].join("、"), list.len() - 3)
+        } else {
+            list.join("、")
+        }
+    };
+    match str_of(work, "command") {
+        "ingress" => {
+            let sources: Vec<&str> = items(field("source_ids"))
+                .iter()
+                .filter_map(ConfigValue::as_str)
+                .filter_map(|id| names.get(id).map(String::as_str))
+                .collect();
+            match field("sources") {
+                _ if !sources.is_empty() => several(sources),
+                Some(ConfigValue::Number(count)) => {
+                    format!("原本 {} 件", crate::config_value::js_number(*count))
+                }
+                _ => "原本".to_owned(),
+            }
+        }
+        "query" => match field("question").and_then(ConfigValue::as_str) {
+            Some(question) if !question.trim().is_empty() => shortened(&plain(question), 80),
+            _ => "質問".to_owned(),
+        },
+        "verify" => format!("指摘 {} 件", items(field("issues")).len()),
+        "instruct" if field("rules").is_some() => {
+            let rule = field("rules")
+                .and_then(|rules| string_field(rules, "after"))
+                .and_then(|after| after.trim_end().lines().last())
+                .unwrap_or_default();
+            format!(
+                "決まりを追加：{}",
+                shortened(rule.trim_start_matches("- "), 80)
+            )
+        }
+        "undo" => format!(
+            "{} を取り消し",
+            field("job").and_then(ConfigValue::as_str).unwrap_or("作業")
+        ),
+        "archive" => format!(
+            "{}{}",
+            field("page")
+                .and_then(ConfigValue::as_str)
+                .or_else(|| string_field(work, "page"))
+                .unwrap_or_default(),
+            if matches!(field("archived"), Some(ConfigValue::Bool(false))) {
+                " を戻す"
+            } else {
+                ""
+            }
+        ),
+        _ => match titles() {
+            list if !list.is_empty() => several(list),
+            _ => string_field(work, "page").unwrap_or_default().to_owned(),
+        },
+    }
+}
+
+/// The entry of a work in the log. Its first line is `<h2>[2026-01-02] ingest | …</h2>`, so
+/// that `grep "^<h2>\[" log.html | tail -5` lists the last five works.
+fn log_entry(
+    work: &ConfigValue,
+    known: &HashSet<String>,
+    names: &HashMap<String, String>,
+) -> String {
+    let command = str_of(work, "command");
+    let result = work.get("result");
+    let field = |name: &str| result.and_then(|result| result.get(name));
+    let mut notes: Vec<String> = Vec::new();
+    if let Some(ConfigValue::Number(sources)) = field("sources") {
+        notes.push(format!(
+            "原本 {} 件",
+            crate::config_value::js_number(*sources)
+        ));
+    }
+    let written = items(field("pages"));
+    if command != "query" && !written.is_empty() {
+        notes.push(format!("ページ {} 件", written.len()));
+    }
+    if command == "query" {
+        notes.push(match field("status").and_then(ConfigValue::as_str) {
+            Some("insufficient_evidence") => "ページに答えがない".to_owned(),
+            _ => format!("読んだページ {} 件", written.len()),
+        });
+    }
+    if let (true, Some(ConfigValue::Array(issues))) = (command != "verify", field("issues")) {
+        notes.push(format!("指摘 {} 件", issues.len()));
+    }
+    let day: String = str_of(work, "finished_at").chars().take(10).collect();
+    let subject = subject(work, names);
+    // What the first line says already is not said again below it.
+    notes.retain(|note| *note != subject);
+    let mut entry = format!(
+        "<h2>[{}] {} | {}</h2>\n",
+        escape_html(&day),
+        escape_html(operation(command)),
+        escape_html(&subject)
+    );
+    if !notes.is_empty() {
+        entry += &format!("<p>{}</p>\n", escape_html(&notes.join(" · ")));
+    }
+    if command != "query" && !written.is_empty() {
+        entry += "<ul>";
+        for page in written {
+            let (id, title, new) = match page {
+                ConfigValue::String(id) => (id.as_str(), id.as_str(), false),
+                page => (
+                    str_of(page, "id"),
+                    string_field(page, "title").unwrap_or_else(|| str_of(page, "id")),
+                    matches!(page.get("previous"), Some(ConfigValue::Null)),
+                ),
+            };
+            let name = if known.contains(id) {
+                format!(
+                    "<a href=\"{}\">{}</a>",
+                    escape_html(&page_href(id)),
+                    escape_html(title)
+                )
+            } else {
+                escape_html(title)
+            };
+            entry += &format!("<li>{name}{}</li>", if new { "（新規）" } else { "" });
+        }
+        entry += "</ul>\n";
+    }
+    entry
+}
+
+/// The line that ends the entries of the log and says which work they go up to.
+fn log_end(through: i64) -> String {
+    format!("{LOG_END}{through} -->\n")
+}
+
+/// The log without entries: everything before them and everything after.
+fn log_frame(title: &str) -> (String, String) {
+    let body = format!(
+        "<header><p class=\"kind\">作業の記録</p><h1>{}</h1><p class=\"meta\"><a href=\"index.html\">目録へ戻る</a> · 古い順。新しい作業は末尾に足されます</p><p class=\"meta\">最後の 5 件：<code>grep \"^&lt;h2&gt;\\[\" log.html | tail -5</code></p></header>\n<section class=\"log\">\n{LOG_END}</section>",
         escape_html(title)
     );
-    for work in works {
-        let command = str_of(work, "command");
-        let result = work.get("result");
-        let field = |name: &str| result.and_then(|result| result.get(name));
-        let mut notes: Vec<String> = Vec::new();
-        if let Some(ConfigValue::Number(sources)) = field("sources") {
-            notes.push(format!(
-                "原本 {} 件",
-                crate::config_value::js_number(*sources)
-            ));
+    let page = document(&format!("作業の記録 | {title}"), LOG_MARK, &body, None);
+    let at = page.find(LOG_END).unwrap_or(page.len());
+    (page[..at].to_owned(), page[at + LOG_END.len()..].to_owned())
+}
+
+/// The work a log of this form goes up to, or none when the file has to be written anew.
+pub(crate) fn log_through(existing: &str, title: &str) -> Option<i64> {
+    let (head, _) = log_frame(title);
+    let at = existing.rfind(LOG_END)?;
+    let rest = &existing[at + LOG_END.len()..];
+    existing
+        .starts_with(&head)
+        .then(|| rest[..rest.find(' ')?].parse().ok())
+        .flatten()
+}
+
+/// `log.html`: every work that succeeded, oldest first, each starting with its day and what it
+/// did as `[2026-01-02] ingest | …`. The works after those of `existing` are added at its end;
+/// without it the log is written from its start. A work that still runs ends the list, so that
+/// it is added once it is done.
+pub(crate) fn log(
+    existing: Option<&str>,
+    title: &str,
+    works: &[(i64, ConfigValue)],
+    known: &HashSet<String>,
+    names: &HashMap<String, String>,
+) -> String {
+    let (head, tail) = log_frame(title);
+    let (mut text, mut through) = match existing
+        .and_then(|text| Some((&text[..text.rfind(LOG_END)?], log_through(text, title)?)))
+    {
+        Some((kept, through)) => (kept.to_owned(), through),
+        None => (head, 0),
+    };
+    for (row, work) in works {
+        match string_field(work, "status") {
+            Some("succeeded") => text += &log_entry(work, known, names),
+            Some("failed") => {}
+            _ => break,
         }
-        let written = items(field("pages"));
-        if command != "query" && !written.is_empty() {
-            notes.push(format!("ページ {} 件", written.len()));
-        }
-        if let Some(ConfigValue::Array(issues)) = field("issues") {
-            notes.push(format!("指摘 {} 件", issues.len()));
-        }
-        if let Some(page) = string_field(work, "page").filter(|page| !page.is_empty()) {
-            notes.push(page.to_owned());
-        }
-        let day: String = str_of(work, "finished_at").chars().take(10).collect();
-        body += &format!(
-            "<li><h2><time>[{}] {}</time> | {}</h2>",
-            escape_html(&day),
-            escape_html(command),
-            command_label(command)
-        );
-        if !notes.is_empty() {
-            body += &format!("<p>{}</p>", escape_html(&notes.join(" · ")));
-        }
-        if command != "query" && !written.is_empty() {
-            body += "<ul>";
-            for page in written {
-                let (id, title, new) = match page {
-                    ConfigValue::String(id) => (id.as_str(), id.as_str(), false),
-                    page => (
-                        str_of(page, "id"),
-                        string_field(page, "title").unwrap_or_else(|| str_of(page, "id")),
-                        matches!(page.get("previous"), Some(ConfigValue::Null)),
-                    ),
-                };
-                let name = if known.contains(id) {
-                    format!(
-                        "<a href=\"{}\">{}</a>",
-                        escape_html(&page_href(id)),
-                        escape_html(title)
-                    )
-                } else {
-                    escape_html(title)
-                };
-                body += &format!("<li>{name}{}</li>", if new { "（新規）" } else { "" });
-            }
-            body += "</ul>";
-        }
-        body += "</li>";
+        through = *row;
     }
-    body += "</ul>";
-    document(&format!("作業の記録 | {title}"), LOG_MARK, &body, None)
+    text + &log_end(through) + &tail
 }
 
 /// Writes a file of this module, unless a file without its mark has the name.
@@ -499,18 +636,43 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
         )
         .unwrap_or((0, 0));
-    let works: Vec<ConfigValue> = match connection.prepare(&format!(
-        "SELECT data FROM wiki_work ORDER BY rowid DESC LIMIT {LOG_LENGTH}"
-    )) {
-        Ok(mut statement) => statement
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(sql)?
+    // The works after a row, with those whose process stopped shown as failed.
+    let works = |after: i64| -> Result<Vec<(i64, ConfigValue)>, StageError> {
+        let Ok(mut statement) =
+            connection.prepare("SELECT rowid, data FROM wiki_work WHERE rowid > ?1 ORDER BY rowid")
+        else {
+            return Ok(Vec::new());
+        };
+        let rows = statement
+            .query_map([after], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(sql)?;
+        Ok(rows
             .filter_map(Result::ok)
-            .filter_map(|data| parse(&data).ok())
-            .filter(|work| string_field(work, "status") == Some("succeeded"))
-            .collect(),
-        Err(_) => Vec::new(),
+            .filter_map(|(row, data)| Some((row, crate::wiki_work::visible(parse(&data).ok()?))))
+            .collect())
     };
+    // The sources by ID, as the log names them: a web address, or the name of the file.
+    let names: HashMap<String, String> =
+        match connection.prepare("SELECT id, data FROM wiki_sources") {
+            Ok(mut statement) => statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(sql)?
+                .filter_map(Result::ok)
+                .filter_map(|(id, data)| {
+                    let source = parse(&data).ok()?;
+                    let name = string_field(&source, "url")
+                        .filter(|url| url.starts_with("http"))
+                        .or_else(|| string_field(&source, "objectId"))?
+                        .to_owned();
+                    Some((id, name))
+                })
+                .collect(),
+            Err(_) => HashMap::new(),
+        };
     let rules = project.rules_file();
     let rules = std::path::Path::new(&rules).is_file().then(|| {
         let relative = node_path::relative(&folder, &rules);
@@ -548,11 +710,19 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
     let about = &project.request.about;
     let title = str_of(about, "title");
     if !taken("log") {
-        write(
-            &project.publication_path("log")?,
-            LOG_MARK,
-            &log(title, &works, &known),
-        )?;
+        let path = project.publication_path("log")?;
+        let existing = read_text(&path)?;
+        let through = existing
+            .as_deref()
+            .and_then(|text| log_through(text, title));
+        let content = log(
+            through.and(existing.as_deref()),
+            title,
+            &works(through.unwrap_or(0))?,
+            &known,
+            &names,
+        );
+        write(&path, LOG_MARK, &content)?;
     }
     if !taken("index") {
         write(
@@ -702,36 +872,79 @@ mod tests {
     }
 
     #[test]
-    fn the_log_starts_each_work_with_its_day_and_command() {
-        let work = object(vec![
-            ("command", text("ingress")),
-            ("status", text("succeeded")),
-            ("finished_at", text("2026-11-22T13:03:16.341Z")),
-            (
-                "result",
-                object(vec![
-                    ("sources", ConfigValue::Number(2.0)),
-                    (
-                        "pages",
-                        ConfigValue::Array(vec![
-                            object(vec![
-                                ("id", text("a/scrum")),
-                                ("title", text("スクラム")),
-                                ("previous", ConfigValue::Null),
-                            ]),
-                            object(vec![
-                                ("id", text("gone")),
-                                ("title", text("消えた")),
-                                ("previous", text("x")),
-                            ]),
+    fn the_log_adds_each_work_at_its_end() {
+        let work = |command: &str, status: &str, result: ConfigValue| {
+            object(vec![
+                ("command", text(command)),
+                ("status", text(status)),
+                ("finished_at", text("2026-11-22T13:03:16.341Z")),
+                ("result", result),
+            ])
+        };
+        let ingest = work(
+            "ingress",
+            "succeeded",
+            object(vec![
+                ("sources", ConfigValue::Number(2.0)),
+                (
+                    "source_ids",
+                    ConfigValue::Array(vec![text("s1"), text("s2")]),
+                ),
+                (
+                    "pages",
+                    ConfigValue::Array(vec![
+                        object(vec![
+                            ("id", text("a/scrum")),
+                            ("title", text("スクラム")),
+                            ("previous", ConfigValue::Null),
                         ]),
-                    ),
-                ]),
-            ),
-        ]);
+                        object(vec![
+                            ("id", text("gone")),
+                            ("title", text("消えた")),
+                            ("previous", text("x")),
+                        ]),
+                    ]),
+                ),
+            ]),
+        );
         let known: HashSet<String> = ["a/scrum".to_owned()].into();
-        let html = log("ノート", &[work], &known);
-        assert!(html.contains(LOG_MARK));
-        assert!(html.contains("<li><h2><time>[2026-11-22] ingress</time> | 取り込み</h2><p>原本 2 件 · ページ 2 件</p><ul><li><a href=\"a/scrum.html\">スクラム</a>（新規）</li><li>消えた</li></ul></li>"));
+        let names: HashMap<String, String> = [
+            ("s1".to_owned(), "スクラムガイド.md".to_owned()),
+            ("s2".to_owned(), "https://example.com/kanban".to_owned()),
+        ]
+        .into();
+        let first = log(None, "ノート", &[(1, ingest)], &known, &names);
+        assert!(first.contains(LOG_MARK));
+        // An entry starts a line with its day, what was done and what it was about.
+        assert!(first.contains("\n<h2>[2026-11-22] ingest | スクラムガイド.md、https://example.com/kanban</h2>\n<p>原本 2 件 · ページ 2 件</p>\n<ul><li><a href=\"a/scrum.html\">スクラム</a>（新規）</li><li>消えた</li></ul>\n<!-- knowledge-nest:log-through 1 -->\n"));
+        assert_eq!(log_through(&first, "ノート"), Some(1));
+        // A log under another title, or of another form, is written anew.
+        assert_eq!(log_through(&first, "別の題"), None);
+        assert_eq!(log_through("<!-- knowledge-nest:log -->", "ノート"), None);
+
+        let question = object(vec![
+            ("question", text("スプリントの長さは？")),
+            ("pages", ConfigValue::Array(vec![text("a/scrum")])),
+        ]);
+        let later = [
+            (2, work("query", "succeeded", question)),
+            (3, work("instruct", "failed", ConfigValue::Null)),
+            (
+                4,
+                work(
+                    "verify",
+                    "succeeded",
+                    object(vec![("issues", ConfigValue::Array(vec![text("x")]))]),
+                ),
+            ),
+            // A work that still runs is added when it is done, and so are those after it.
+            (5, work("ingress", "running", ConfigValue::Null)),
+            (6, work("verify", "succeeded", ConfigValue::Null)),
+        ];
+        let second = log(Some(&first), "ノート", &later, &known, &names);
+        assert!(second.starts_with(&first[..first.find(LOG_END).unwrap()]));
+        assert!(second.contains("</ul>\n<h2>[2026-11-22] query | スプリントの長さは？</h2>\n<p>読んだページ 1 件</p>\n<h2>[2026-11-22] lint | 指摘 1 件</h2>\n<!-- knowledge-nest:log-through 4 -->\n"));
+        assert_eq!(second.matches("<h2>[").count(), 3);
+        assert_eq!(log_through(&second, "ノート"), Some(4));
     }
 }

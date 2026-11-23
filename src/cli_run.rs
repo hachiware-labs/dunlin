@@ -115,6 +115,12 @@ pub fn run(
         print(&crate::cli_args::help_text());
         return 0;
     };
+    // The names an LLM Wiki gives two of its operations.
+    let command = match command.as_str() {
+        "ingest" => "ingress".to_owned(),
+        "lint" => "verify".to_owned(),
+        _ => command,
+    };
     if command == "--help" || command == "-h" {
         print(&crate::cli_args::help_text());
         return 0;
@@ -841,7 +847,9 @@ fn dispatch(
             serve_wiki(state, &project, serving.unwrap_or_default())?;
             return Ok(Done::Quiet);
         }
-        if !read_only {
+        // A check changes nothing, but it is a work of the log like the others.
+        let tracked = !read_only || command == "verify";
+        if tracked {
             state.run_id = Some(new_run_id());
         }
         let mut input: Vec<ConfigValue> = positionals.iter().map(|item| text(item)).collect();
@@ -855,8 +863,8 @@ fn dispatch(
             ConfigValue::Array(input),
             parsed.object(),
             state.run_id.as_deref(),
+            tracked,
             !read_only,
-            true,
         )?;
         let request: crate::wiki_project::WikiRequest = deserialize(&request, "Wiki")?;
         let outcome = crate::wiki_commands::run(&request, state.cancel).map_err(CliError::from)?;
@@ -1732,7 +1740,7 @@ fn initialize(
         ))?;
         write_new(
             &node_path::join(&root, &["rules.md"]),
-            "# 運用の決まり\n",
+            &crate::config_check::rules_template(kind),
             true,
         )?;
     }

@@ -14,6 +14,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::KnowledgeBase;
 use crate::config_value::ConfigValue;
+use crate::eval_data::js_trim;
 use crate::eval_stage::parse;
 use crate::evidence_match::nfkc;
 use crate::index_stage::{assign, items, object, sql, string_field, text, truthy};
@@ -30,6 +31,164 @@ use crate::wiki_work::Tracker;
 const FINDINGS_SCHEMA: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"issues":{"type":"array","items":{"type":"object","properties":{"kind":{"type":"string","enum":["contradiction","source_disagreement","duplicate"]},"first":{"type":"object","properties":{"item":{"type":"integer","exclusiveMinimum":0,"maximum":9007199254740991},"quote":{"type":"string","minLength":1}},"required":["item","quote"],"additionalProperties":false},"second":{"type":"object","properties":{"item":{"type":"integer","exclusiveMinimum":0,"maximum":9007199254740991},"quote":{"type":"string","minLength":1}},"required":["item","quote"],"additionalProperties":false},"description":{"type":"string","minLength":1}},"required":["kind","first","second","description"],"additionalProperties":false}}},"required":["issues"],"additionalProperties":false}"#;
 
 const INSTRUCTIONS: &str = "Assess the numbered excerpts for factual contradictions, disagreement between a source and a page, or duplicate page content. Every comparison must include item 1. Use two verbatim quotes, one from each excerpt. Return an empty list where there is no issue.";
+
+/// `z.toJSONSchema(suggested)`
+const SUGGESTED_SCHEMA: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"concepts":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string","minLength":1},"pages":{"type":"array","items":{"type":"integer","exclusiveMinimum":0,"maximum":9007199254740991}}},"required":["name","pages"],"additionalProperties":false}},"questions":{"type":"array","items":{"type":"string"}},"sources":{"type":"array","items":{"type":"string"}}},"required":["concepts","questions","sources"],"additionalProperties":false}"#;
+
+const SUGGEST_INSTRUCTIONS: &str = "Read the list of pages of the wiki. Name the important concepts that the pages mention but that have no page of their own, with the numbers of the pages that mention them. Suggest questions worth investigating next, and sources worth looking for to fill the gaps of the wiki. Write in the language of the project.";
+
+/// `suggestWikiContent(db, pages, about, generate)`: the concepts that pages name but that have
+/// no page, as issues, and the questions and sources the model suggests next. A concept counts
+/// only where a page it was named for holds its name. The answer is kept until the pages change.
+pub(crate) fn suggest(
+    project: &Project<'_>,
+    connection: &Connection,
+    pages: &[ConfigValue],
+) -> Result<(Vec<ConfigValue>, ConfigValue), StageError> {
+    let model = items(project.request.plan.get("content"))
+        .first()
+        .and_then(|content| string_field(content, "model"))
+        .unwrap_or_default()
+        .to_owned();
+    let active: Vec<&ConfigValue> = pages
+        .iter()
+        .filter(|page| !truthy(page.get("archived")))
+        .collect();
+    let none = || ConfigValue::Array(Vec::new());
+    if active.is_empty() {
+        return Ok((
+            Vec::new(),
+            object(vec![("questions", none()), ("sources", none())]),
+        ));
+    }
+    let field =
+        |page: &ConfigValue, name: &str| In::Value(page.get(name).cloned().unwrap_or_default());
+    let input = In::Map(vec![
+        ("about", In::Value(project.request.about.clone())),
+        (
+            "pages",
+            In::List(
+                active
+                    .iter()
+                    .enumerate()
+                    .map(|(index, page)| {
+                        In::Map(vec![
+                            ("item", In::number(index + 1)),
+                            ("id", field(page, "id")),
+                            ("title", field(page, "title")),
+                            (
+                                "text",
+                                In::Units(utf16_prefix(str_of(page, "markdown"), 600)),
+                            ),
+                        ])
+                    })
+                    .collect(),
+            ),
+        ),
+    ]);
+    let fingerprint = sha256_hex(input.json().as_bytes());
+    let saved: Option<String> = connection
+        .query_row(
+            "SELECT data FROM wiki_suggestions WHERE id = 'latest'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sql)?;
+    if let Some(record) = saved.map(|data| parse(&data)).transpose()?
+        && string_field(&record, "fingerprint") == Some(fingerprint.as_str())
+    {
+        return Ok((
+            items(record.get("issues")).to_vec(),
+            record.get("suggestions").cloned().unwrap_or_default(),
+        ));
+    }
+    let answer = project.generate(&model, SUGGESTED_SCHEMA, SUGGEST_INSTRUCTIONS, &input)?;
+    let [concepts, questions, sources] =
+        strict(&answer, &["concepts", "questions", "sources"]).ok_or_else(model_output)?[..]
+    else {
+        return Err(model_output());
+    };
+    let folded = |text: &str| nfkc(text).to_lowercase();
+    // Up to ten lines that say something.
+    let lines = |value: &ConfigValue| -> Option<ConfigValue> {
+        let all: Option<Vec<&str>> = array(value)?.iter().map(ConfigValue::as_str).collect();
+        Some(ConfigValue::Array(
+            all?.into_iter()
+                .map(js_trim)
+                .filter(|line| !line.is_empty())
+                .take(10)
+                .map(text)
+                .collect(),
+        ))
+    };
+    let mut issues = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    for concept in array(concepts).ok_or_else(model_output)? {
+        let [name, numbers] = strict(concept, &["name", "pages"]).ok_or_else(model_output)?[..]
+        else {
+            return Err(model_output());
+        };
+        let name = nonempty(name).ok_or_else(model_output)?;
+        let numbers: Vec<usize> = array(numbers)
+            .and_then(|numbers| numbers.iter().map(positive_integer).collect())
+            .ok_or_else(model_output)?;
+        let name = js_trim(&name);
+        let key = folded(name);
+        let own = |page: &&ConfigValue| {
+            let id = str_of(page, "id");
+            folded(js_trim(str_of(page, "title"))) == key
+                || folded(id.rsplit('/').next().unwrap_or(id)) == key
+        };
+        if key.chars().count() < 2 || seen.contains(&key) || active.iter().any(own) {
+            continue;
+        }
+        let mut mentioned: Vec<&str> = Vec::new();
+        for number in numbers {
+            if let Some(page) = active.get(number - 1)
+                && folded(str_of(page, "markdown")).contains(&key)
+                && !mentioned.contains(&str_of(page, "id"))
+            {
+                mentioned.push(str_of(page, "id"));
+            }
+        }
+        if mentioned.is_empty() {
+            continue;
+        }
+        seen.push(key);
+        issues.push(object(vec![
+            ("code", text("MISSING_PAGE")),
+            ("concept", text(name)),
+            (
+                "pages",
+                ConfigValue::Array(mentioned.iter().map(|id| text(id)).collect()),
+            ),
+            (
+                "description",
+                text(&format!(
+                    "「{name}」は {} に出てきますが、ページがありません",
+                    mentioned.join("、")
+                )),
+            ),
+        ]));
+    }
+    let suggestions = object(vec![
+        ("questions", lines(questions).ok_or_else(model_output)?),
+        ("sources", lines(sources).ok_or_else(model_output)?),
+    ]);
+    let record = object(vec![
+        ("fingerprint", text(&fingerprint)),
+        ("issues", ConfigValue::Array(issues.clone())),
+        ("suggestions", suggestions.clone()),
+    ]);
+    connection
+        .execute(
+            "INSERT OR REPLACE INTO wiki_suggestions VALUES ('latest', ?1)",
+            [record.to_js_json()],
+        )
+        .map_err(sql)?;
+    Ok((issues, suggestions))
+}
 
 /// A page or source in the check.
 struct Item {

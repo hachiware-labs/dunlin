@@ -52,23 +52,62 @@ ${navigation}<main>${up(metadata)}<h1>${safeTitle}</h1>${body}</main>
 ${record}</html>\n`;
 }
 
+/** The documents a page cites, in the order they are first cited: the indices of their citations. */
+function citedDocuments(citations) {
+  const documents = new Map();
+  citations.forEach(({ source }, index) => {
+    const key = source?.sourceId ?? source?.objectId ?? '';
+    if (!documents.has(key)) documents.set(key, []);
+    documents.get(key).push(index);
+  });
+  return [...documents.values()];
+}
+
+/** The source markers as the numbers of their documents, once after statements in a row that cite the same ones. */
+function documentMarkers(html, citations) {
+  const numberOf = [];
+  citedDocuments(citations).forEach((list, at) => { for (const index of list) numberOf[index] = at + 1; });
+  const found = [...html.matchAll(/(?: \[\d+\])+/gu)].map((group) => {
+    const numbers = group[0].split(' [').slice(1).map((part) => Number(part.slice(0, -1)));
+    const documents = numbers.every((number) => Number.isInteger(number) && number >= 1 && number <= citations.length)
+      ? [...new Set(numbers.map((number) => numberOf[number - 1]))].sort((a, b) => a - b) : null;
+    return { start: group.index, end: group.index + group[0].length, documents };
+  });
+  let out = '';
+  let last = 0;
+  found.forEach(({ start, end, documents }, at) => {
+    out += html.slice(last, start);
+    last = end;
+    if (!documents) {
+      out += html.slice(start, end);
+      return;
+    }
+    const next = found[at + 1];
+    const continued = next?.documents && next.documents.join() === documents.join() && !html.slice(end, next.start).includes('<h');
+    if (!continued) out += documents.map((document) => `<a class="ref" href="#source-${document}">${document}</a>`).join('');
+  });
+  return out + html.slice(last);
+}
+
 export function renderPublication({ title, markdown: content, citations }, metadata) {
-  const entries = citations.map(({ source, range, original, locations }, index) => {
+  const entries = citedDocuments(citations).map((list, index) => {
+    const { source, original } = citations[list[0]];
     const useOriginal = original && source.url.startsWith('knowledge-nest://');
     const url = useOriginal ? original.uri : source.url;
     // A source in the project is a path from the page, which has no scheme.
     const linked = sourceProtocols.has(URL.parse(url)?.protocol) || (URL.parse(url) === null && url !== '');
     const sourceLink = linked ? link(url, source.objectId) : escapeHtml(source.objectId);
-    const position = citationLocations(locations);
     const originalLink = original && !useOriginal ? ` · ${link(original.uri, '原本')}` : '';
-    return `<li id="cite-${index + 1}">${sourceLink} · L${range.startLine}–L${range.endLine}${position ? ` · ${escapeHtml(position)}` : ''}${originalLink}</li>`;
+    const lines = list.map((at) => {
+      const { range, locations } = citations[at];
+      const position = citationLocations(locations);
+      return `L${range.startLine}–L${range.endLine}${position ? ` (${escapeHtml(position)})` : ''}`;
+    }).filter((line, at, all) => all.indexOf(line) === at).join(', ');
+    return `<li id="source-${index + 1}">${sourceLink} · ${lines}${originalLink}</li>`;
   });
   const sources = entries.length ? `<section class="notes"><h2>出典</h2><ol>${entries.join('\n')}</ol></section>` : '';
   const [text, contents] = sectioned(renderMarkdown(content));
-  const cited = text.replace(/ \[(\d+)\]/gu, (found, digits) => {
-    const number = Number(digits);
-    return number >= 1 && number <= citations.length ? `<a class="ref" href="#cite-${number}">${number}</a>` : found;
-  });
+  const cited = documentMarkers(text, citations);
   return renderDocument(title, `${contents}<article class="body">${cited}</article>${sources}`, { metadata });
 }
 

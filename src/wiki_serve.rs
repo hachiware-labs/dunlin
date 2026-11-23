@@ -29,7 +29,7 @@ use crate::serve::{
 };
 use crate::transform_stage::StageError;
 use crate::wiki_folder::{self, snippet};
-use crate::wiki_html::{CONTENT_SECURITY_POLICY, cited_markers, sectioned};
+use crate::wiki_html::{CONTENT_SECURITY_POLICY, cited_documents, document_markers, sectioned};
 use crate::wiki_project::{
     CATEGORIES, WikiRequest, encode_uri_component, link_targets, linked_page, pages, realpath,
     str_of,
@@ -177,6 +177,8 @@ const STYLE: &str = concat!(
     "@media(max-width:520px){.toc ol{columns:1}}",
     ".ref{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:6px;background:var(--hover);color:var(--muted);font:600 11px/18px ui-sans-serif,system-ui,sans-serif;font-feature-settings:'tnum';text-align:center;vertical-align:2px;text-decoration:none}.ref:hover{background:var(--text);color:var(--bg);text-decoration:none}",
     ".notes{margin-top:72px}article .notes h2{font-size:14px;font-weight:600;margin:0 0 12px}",
+    // The lines a document is quoted at, each a button that opens the passage.
+    ".notes .lines{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:2px 10px}.notes .lines form{margin:0}.notes .lines form.inline button{font-feature-settings:'tnum'}",
     ".notes ol{list-style:none;padding:0;margin:0;counter-reset:cite;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;font-size:12.5px;line-height:1.5}",
     ".notes li{counter-increment:cite;display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--muted);scroll-margin-top:24px;transition:border-color .15s,box-shadow .15s}",
     ".notes li::before{content:counter(cite);flex:none;min-width:18px;padding:0 5px;border-radius:6px;background:var(--hover);font:600 11px/18px ui-sans-serif,system-ui,sans-serif;font-feature-settings:'tnum';text-align:center}",
@@ -1795,12 +1797,14 @@ impl WikiServer {
                     } else {
                         ""
                     },
-                    cited_markers(&text, items(page.get("citations")).len()),
-                    items(page.get("citations"))
+                    document_markers(&text, items(page.get("citations"))),
+                    // One entry for each document; each line it quotes opens the passage.
+                    cited_documents(items(page.get("citations")))
                         .iter()
                         .enumerate()
-                        .map(|(index, citation)| {
-                            let source = citation.get("source");
+                        .map(|(index, list)| {
+                            let citations = items(page.get("citations"));
+                            let source = citations[list[0]].get("source");
                             let name = escape_html(&js_text(
                                 source.and_then(|source| source.get("objectId")),
                             ));
@@ -1814,11 +1818,28 @@ impl WikiServer {
                                 ),
                                 None => name,
                             };
+                            // Lines that several statements quote are listed once.
+                            let mut seen: Vec<String> = Vec::new();
+                            let lines = list
+                                .iter()
+                                .filter(|&&at| {
+                                    let range = line_range(citations[at].get("range"));
+                                    let new = !seen.contains(&range);
+                                    seen.push(range);
+                                    new
+                                })
+                                .map(|&at| {
+                                    format!(
+                                        "{}<input type=\"hidden\" name=\"value\" value=\"{}\"><button name=\"action\" value=\"cite\" title=\"引用箇所を見る\">{}</button></form>",
+                                        form("inline"),
+                                        at + 1,
+                                        line_range(citations[at].get("range"))
+                                    )
+                                })
+                                .collect::<String>();
                             format!(
-                                "<li id=\"cite-{number}\">{label} {}{}<input type=\"hidden\" name=\"value\" value=\"{number}\"><button name=\"action\" value=\"cite\">引用箇所を見る</button></form></li>",
-                                line_range(citation.get("range")),
-                                form("inline"),
-                                number = index + 1
+                                "<li id=\"source-{}\">{label} <span class=\"lines\">{lines}</span></li>",
+                                index + 1
                             )
                         })
                         .collect::<String>()
@@ -2121,7 +2142,7 @@ impl WikiServer {
                     Shown::Page(page) => format!(
                         "<em>更新 {} · 出典 {} 件</em>",
                         escape_html(&ago(&js_text(page.get("changed")), now)),
-                        items(page.get("citations")).len()
+                        cited_documents(items(page.get("citations"))).len()
                     ),
                     _ => String::new(),
                 }

@@ -150,7 +150,7 @@ pub(crate) fn entries<'a>(pages: impl IntoIterator<Item = &'a ConfigValue>) -> V
                 _ => str_of(page, "id").to_owned(),
             },
             summary: summary(str_of(page, "markdown")),
-            citations: items(page.get("citations")).len(),
+            citations: crate::wiki_html::cited_documents(items(page.get("citations"))).len(),
             changed: str_of(page, "changed").chars().take(10).collect(),
             archived: truthy(page.get("archived")),
         })
@@ -871,6 +871,8 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
             read_text(&project.publication_path(id)?)?.is_some_and(|existing| {
                 !existing.contains(crate::wiki_html::PAGE_MARK)
                     || !existing.contains(crate::wiki_html::RECORD_START)
+                    // Sources listed by citation rather than by document.
+                    || existing.contains("<li id=\"cite-")
             }),
         )
     };

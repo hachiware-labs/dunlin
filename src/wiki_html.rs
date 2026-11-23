@@ -85,19 +85,87 @@ pub(crate) fn sectioned(html: &str) -> (String, String) {
     (text, contents)
 }
 
-/// The citation numbers of a page's text (` [1]`) as links to their citation in the list below.
-pub(crate) fn cited_markers(html: &str, citations: usize) -> String {
-    let marker = regex::Regex::new(r" \[(\d+)\]").expect("a valid pattern");
-    marker
-        .replace_all(html, |found: &regex::Captures<'_>| {
-            match found[1].parse::<usize>() {
-                Ok(number) if (1..=citations).contains(&number) => {
-                    format!("<a class=\"ref\" href=\"#cite-{number}\">{number}</a>")
-                }
-                _ => found[0].to_owned(),
+/// The documents a page cites, in the order they are first cited: for each, the indices of the
+/// citations that quote it. A document is a source, by its ID.
+pub(crate) fn cited_documents(citations: &[ConfigValue]) -> Vec<Vec<usize>> {
+    let key = |citation: &ConfigValue| {
+        let source = field(citation, "source");
+        source
+            .and_then(|source| string_field(source, "sourceId"))
+            .or_else(|| source.and_then(|source| string_field(source, "objectId")))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let mut keys: Vec<String> = Vec::new();
+    let mut documents: Vec<Vec<usize>> = Vec::new();
+    for (index, citation) in citations.iter().enumerate() {
+        let key = key(citation);
+        match keys.iter().position(|known| *known == key) {
+            Some(at) => documents[at].push(index),
+            None => {
+                keys.push(key);
+                documents.push(vec![index]);
             }
+        }
+    }
+    documents
+}
+
+/// The source markers of a page's text (` [1] [2]`) as the numbers of the documents they cite,
+/// each a link to the document in the list below. Statements in a row that cite the same
+/// documents get the numbers once, after the last of them; a heading ends a row.
+pub(crate) fn document_markers(html: &str, citations: &[ConfigValue]) -> String {
+    let mut number_of = vec![0; citations.len()];
+    for (at, list) in cited_documents(citations).iter().enumerate() {
+        for &index in list {
+            number_of[index] = at + 1;
+        }
+    }
+    let marker = regex::Regex::new(r"(?: \[\d+\])+").expect("a valid pattern");
+    // Each group of markers, with the documents it cites; none when a number is not a citation.
+    let found: Vec<(usize, usize, Option<Vec<usize>>)> = marker
+        .find_iter(html)
+        .map(|group| {
+            let documents: Option<Vec<usize>> = group
+                .as_str()
+                .split(" [")
+                .skip(1)
+                .map(|number| {
+                    number
+                        .trim_end_matches(']')
+                        .parse::<usize>()
+                        .ok()
+                        .filter(|number| (1..=citations.len()).contains(number))
+                        .map(|number| number_of[number - 1])
+                })
+                .collect();
+            let documents = documents.map(|mut documents| {
+                documents.sort_unstable();
+                documents.dedup();
+                documents
+            });
+            (group.start(), group.end(), documents)
         })
-        .into_owned()
+        .collect();
+    let mut out = String::with_capacity(html.len());
+    let mut last = 0;
+    for (at, (start, end, documents)) in found.iter().enumerate() {
+        out += &html[last..*start];
+        last = *end;
+        let Some(documents) = documents else {
+            out += &html[*start..*end];
+            continue;
+        };
+        let continued = found.get(at + 1).is_some_and(|(next, _, following)| {
+            following.as_ref() == Some(documents) && !html[*end..*next].contains("<h")
+        });
+        if !continued {
+            for document in documents {
+                out += &format!("<a class=\"ref\" href=\"#source-{document}\">{document}</a>");
+            }
+        }
+    }
+    out + &html[last..]
 }
 
 /// The start of the page a file holds, as JSON: its ID, title, Markdown and citations. The
@@ -205,10 +273,12 @@ pub fn render_publication(
     citations: &[ConfigValue],
     metadata: &ConfigValue,
 ) -> String {
-    let entries: Vec<String> = citations
+    // One entry for each document, with the lines it quotes.
+    let entries: Vec<String> = cited_documents(citations)
         .iter()
         .enumerate()
-        .map(|(index, citation)| {
+        .map(|(index, list)| {
+            let citation = &citations[list[0]];
             let source = field(citation, "source");
             let source_url = source
                 .and_then(|source| string_field(source, "url"))
@@ -235,23 +305,38 @@ pub fn render_publication(
                 None if !url.is_empty() => link(url, object_id),
                 _ => escape_html(object_id),
             };
-            let position = citation_locations(field(citation, "locations"));
-            let range = field(citation, "range");
             let original_link = if original.is_some() && !use_original {
                 format!(" · {}", link(original_uri, "原本"))
             } else {
                 String::new()
             };
+            let lines = list
+                .iter()
+                .map(|&at| {
+                    let range = field(&citations[at], "range");
+                    let position = citation_locations(field(&citations[at], "locations"));
+                    format!(
+                        "L{}–L{}{}",
+                        line(range, "startLine"),
+                        line(range, "endLine"),
+                        if position.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({})", escape_html(&position))
+                        }
+                    )
+                })
+                .fold(Vec::<String>::new(), |mut lines, line| {
+                    // Lines that several statements quote are listed once.
+                    if !lines.contains(&line) {
+                        lines.push(line);
+                    }
+                    lines
+                })
+                .join(", ");
             format!(
-                "<li id=\"cite-{}\">{source_link} · L{}–L{}{}{original_link}</li>",
-                index + 1,
-                line(range, "startLine"),
-                line(range, "endLine"),
-                if position.is_empty() {
-                    String::new()
-                } else {
-                    format!(" · {}", escape_html(&position))
-                }
+                "<li id=\"source-{}\">{source_link} · {lines}{original_link}</li>",
+                index + 1
             )
         })
         .collect();
@@ -268,7 +353,7 @@ pub fn render_publication(
         title,
         &format!(
             "{contents}<article class=\"body\">{}</article>{sources}",
-            cited_markers(&text, citations.len())
+            document_markers(&text, citations)
         ),
         Some(metadata),
     )
@@ -327,12 +412,62 @@ mod tests {
             ),
         ]);
         let html = render_publication("スクラム", "枠組みである。 [1] [2]", &[citation], &page);
+        // A number that is no citation stays as written.
         assert!(html.contains(
-            "<main><nav class=\"up\"><a href=\"../../index.html\">目録</a><span>a</span><span>b</span></nav><h1>スクラム</h1><article class=\"body\"><p>枠組みである。<a class=\"ref\" href=\"#cite-1\">1</a> [2]</p>\n</article>"
+            "<main><nav class=\"up\"><a href=\"../../index.html\">目録</a><span>a</span><span>b</span></nav><h1>スクラム</h1><article class=\"body\"><p>枠組みである。 [1] [2]</p>\n</article>"
         ));
         assert!(html.contains(
-            "<section class=\"notes\"><h2>出典</h2><ol><li id=\"cite-1\"><a href=\"../../../docs/scrum.md\">scrum.md</a> · L3–L4</li></ol></section></main>"
+            "<section class=\"notes\"><h2>出典</h2><ol><li id=\"source-1\"><a href=\"../../../docs/scrum.md\">scrum.md</a> · L3–L4</li></ol></section></main>"
         ));
         assert!(html.contains(PAGE_MARK));
+    }
+
+    #[test]
+    fn the_sources_of_a_page_are_its_documents() {
+        let cited = |source: &str, line: f64| {
+            object(vec![
+                (
+                    "source",
+                    object(vec![
+                        ("sourceId", text(source)),
+                        ("objectId", text(&format!("{source}.md"))),
+                        ("url", text(&format!("../{source}.md"))),
+                    ]),
+                ),
+                (
+                    "range",
+                    object(vec![
+                        ("startLine", ConfigValue::Number(line)),
+                        ("endLine", ConfigValue::Number(line)),
+                    ]),
+                ),
+            ])
+        };
+        let citations = [
+            cited("a", 3.0),
+            cited("a", 5.0),
+            cited("b", 1.0),
+            cited("a", 9.0),
+            // The same line again, by another statement: listed once.
+            cited("a", 5.0),
+        ];
+        assert_eq!(cited_documents(&citations), vec![vec![0, 1, 3, 4], vec![2]]);
+        // Statements in a row from the same document get its number once, after the last; a
+        // heading and another document end a row.
+        let html = "<p>一。 [1]</p><p>二。 [2]</p><h2>節</h2><p>三。 [4]</p><p>四。 [3] [4]</p><p>五。 [1]</p>";
+        assert_eq!(
+            document_markers(html, &citations),
+            concat!(
+                "<p>一。</p><p>二。<a class=\"ref\" href=\"#source-1\">1</a></p><h2>節</h2>",
+                "<p>三。<a class=\"ref\" href=\"#source-1\">1</a></p>",
+                "<p>四。<a class=\"ref\" href=\"#source-1\">1</a><a class=\"ref\" href=\"#source-2\">2</a></p>",
+                "<p>五。<a class=\"ref\" href=\"#source-1\">1</a></p>"
+            )
+        );
+        let page = object(vec![("id", text("x"))]);
+        let file = render_publication("x", "一。 [1]\n\n二。 [2] [3]", &citations, &page);
+        assert!(file.contains(
+            "<ol><li id=\"source-1\"><a href=\"../a.md\">a.md</a> · L3–L3, L5–L5, L9–L9</li>\n<li id=\"source-2\"><a href=\"../b.md\">b.md</a> · L1–L1</li></ol>"
+        ));
     }
 }

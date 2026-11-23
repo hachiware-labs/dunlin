@@ -206,14 +206,14 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   const pageFile = await readFile(join(base, 'wiki', ...decodeURIComponent(pageId).split('/')) + '.html', 'utf8');
   assert.match(pageFile, /<main><nav class="up"><a href="\.\.\/index\.html">目録<\/a><span>guides<\/span><\/nav><h1>/u);
   assert.match(pageFile, /<nav class="toc" aria-label="目次">.*<article class="body"><h2 id="section-1">概要<\/h2>/su);
-  assert.match(pageFile, /<a class="ref" href="#cite-1">1<\/a>.*<section class="notes"><h2>出典<\/h2><ol><li id="cite-1">/su);
+  assert.match(pageFile, /<a class="ref" href="#source-1">1<\/a>.*<section class="notes"><h2>出典<\/h2><ol><li id="source-1">/su);
   const page = await send(port, { path: '/?page=' + pageId });
   // A page of three sections or more has its contents, and each entry jumps to its section.
   assert.match(page.body, /<nav class="toc" aria-label="目次"><h2>目次<\/h2><ol><li><a href="#section-1">概要<\/a><\/li><li><a href="#section-2">手順<\/a><\/li><li><a href="#section-3">根拠<\/a><\/li><\/ol><\/nav><div class="body"><h2 id="section-1">概要<\/h2>/u);
-  assert.match(page.body, /<h2 id="section-3">根拠<\/h2>.*<\/div><section class="notes"><h2>出典<\/h2><ol><li id="cite-1">/su);
-  assert.match(page.body, /<h2>出典<\/h2><ol><li id="cite-1"><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a>/u);
+  assert.match(page.body, /<h2 id="section-3">根拠<\/h2>.*<\/div><section class="notes"><h2>出典<\/h2><ol><li id="source-1">/su);
+  assert.match(page.body, /<h2>出典<\/h2><ol><li id="source-1"><a href="\/\?source=source-[0-9a-f]{24}">http:\/\/127\.0\.0\.1:\d+\/manuals\/pump<\/a> <span class="lines"><form class="inline"[^>]*>.*?<button name="action" value="cite" title="引用箇所を見る">L\d+–\d+<\/button><\/form><\/span><\/li>/u);
   // Citation numbers in the text jump to their citation.
-  assert.match(page.body, /<a class="ref" href="#cite-1">1<\/a>/u);
+  assert.match(page.body, /<a class="ref" href="#source-1">1<\/a>/u);
   assert.match(page.body, /<div class="crumbs"><span>ページ<\/span><span>guides<\/span><span>[^<]*<\/span><em>更新 [^<]* · 出典 1 件<\/em><\/div>/u);
   // The actions of a page sit under it: ask about it, have it revised, and manage it.
   assert.match(page.body, /<h2>このページでできること<\/h2><details name="act" open><summary>質問する<\/summary>.*<summary>AI に指示して直す<\/summary>.*<summary>検査・アーカイブ<\/summary>/su);

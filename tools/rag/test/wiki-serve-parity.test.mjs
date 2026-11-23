@@ -90,8 +90,11 @@ function screenParts(body) {
   const work = /<section aria-live="polite"[\s\S]*?<\/section>/u.exec(body)?.[0] ?? '';
   // On the Rust screen citation numbers jump to their citation, and citations link to their
   // source and open their quoted passage.
-  center = center.replace(/<form class="inline"[\s\S]*?<\/form>/gu, '').replace(/<a href="\/\?source=[^"]*">(.*?)<\/a>/gu, '$1')
-    .replace(/<a class="ref" href="#cite-\d+">(\d+)<\/a>/gu, ' [$1]').replace(/<li id="cite-\d+">/gu, '<li>');
+  // Its citations are listed by document, each line a button that opens the passage; with one
+  // citation of one document they read as the reference's.
+  center = center.replace(/<form class="inline"[\s\S]*?<button[^>]*>([^<]*)<\/button><\/form>/gu, '$1')
+    .replace(/<span class="lines">(.*?)<\/span>/gu, '$1').replace(/<a href="\/\?source=[^"]*">(.*?)<\/a>/gu, '$1')
+    .replace(/<a class="ref" href="#source-\d+">(\d+)<\/a>/gu, ' [$1]').replace(/<li id="source-\d+">/gu, '<li>');
   // A page of the Rust screen has its contents, and its text and its citations in boxes of their own.
   center = center.replace(/<nav class="toc"[\s\S]*?<\/nav>/gu, '').replace(/<h2 id="section-\d+">/gu, '<h2>')
     .replace('<div class="body">', '').replace('</div><section class="notes">', '').replace(/<\/ol><\/section>$/u, '</ol>');

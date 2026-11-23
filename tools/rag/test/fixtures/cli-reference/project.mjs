@@ -177,6 +177,8 @@ async function initialize(type, directory, values) {
     await writeFile(join(root, 'rules.md'), rules, { flag: 'wx' }).catch((error) => {
       if (error.code !== 'EEXIST') throw error;
     });
+    // The raw sources of a Wiki.
+    if (type === 'wiki') await mkdir(join(root, 'raw'), { recursive: true });
   }
   if (type === 'para') {
     for (const category of categories) await mkdir(join(root, 'site', category), { recursive: true });
@@ -203,7 +205,8 @@ async function initialize(type, directory, values) {
     ? 'Run nest ask or nest serve.' : 'Set models.answerer.model before using ask or the responses endpoint.');
   else {
     const missing = [!models.llm?.model && 'models.writer.model', !purpose && 'about.purpose'].filter(Boolean);
-    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run nest ingress.' : 'Run nest ingress <path>.';
+    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run nest ingress.'
+      : type === 'wiki' ? 'Put sources in raw/, then run nest ingest raw/<file>.' : 'Run nest ingress <path>.';
   }
   return { config: configPath, type, next: ocr ? next + ' To prepare ' + ocr + ', run nest add ocr.' : next };
 }

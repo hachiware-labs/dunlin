@@ -449,7 +449,7 @@ fn wiki_args(name: &str, value: &ConfigValue) -> Option<ConfigValue> {
     let fields: &[&str] = match name {
         "loader.auto" => &["unsupported", "ocr"],
         "index.keyword" => &["tokenizer", "short_query"],
-        "wiki.write" | "para.write" => &["model", "rules", "max_pages_per_job"],
+        "wiki.write" | "para.write" => &["model", "rules", "max_pages_per_job", "update"],
         "citation.verify" => &["on_failure"],
         "wiki.search" => &["include_archived"],
         "wiki.answer" => &["model"],
@@ -471,6 +471,10 @@ fn wiki_args(name: &str, value: &ConfigValue) -> Option<ConfigValue> {
     };
     let mut parsed = Vec::new();
     for &field in fields {
+        // How an ingest changes the pages that exist: optional, with a default by the model.
+        if field == "update" && get(field).is_none() {
+            continue;
+        }
         let value = get(field)?;
         let valid = match (name, field) {
             ("loader.auto", "unsupported") => matches!(value.as_str(), Some("error" | "skip")),
@@ -481,6 +485,7 @@ fn wiki_args(name: &str, value: &ConfigValue) -> Option<ConfigValue> {
             (_, "max_pages_per_job") => matches!(value, ConfigValue::Number(n)
                 if n.fract() == 0.0 && (1.0..=32.0).contains(n)),
             ("citation.verify", "on_failure") => value.as_str() == Some("reject"),
+            (_, "update") => matches!(value.as_str(), Some("rewrite" | "append")),
             (_, "include_archived") => matches!(value, ConfigValue::Bool(_)),
             (_, "keep_links") => value == &ConfigValue::Bool(true),
             (_, "scope") => value.as_str() == Some("changed_and_related"),

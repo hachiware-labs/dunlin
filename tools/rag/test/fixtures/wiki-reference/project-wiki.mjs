@@ -44,7 +44,7 @@ function writer(config, name) {
   try {
     return createGenerator(model.provider, resolveConfigValue(model.model, 'models.' + name + '.model'),
       resolveConfigValue(model.base_url, 'models.' + name + '.base_url'), resolveApiKey(model.api_key_env, 'models.' + name),
-      { maxInputBytes: model.max_input_bytes, maxOutputTokens: 8192 });
+      { maxInputBytes: model.max_input_bytes, maxOutputTokens: 32768 });
   } catch {
     throw new WikiError(2, 'INVALID_MODEL', 'Check the provider, model, URL and environment references for models.' + name + '.');
   }
@@ -71,7 +71,8 @@ export function validateWiki(config, file, line) {
   if (config.init.version !== 1) add('VERSION_UNSUPPORTED', ['init', 'version'], 1, 'Create a version 1 project.');
   const loader = z.strictObject({ unsupported: z.enum(['error', 'skip']), ocr: z.enum(['none', 'loader.ocr']) });
   const keyword = z.strictObject({ tokenizer: z.literal('trigram'), short_query: z.literal('bigram') });
-  const writerArgs = z.strictObject({ model: z.string(), rules: z.string(), max_pages_per_job: z.number().int().min(1).max(32) });
+  const writerArgs = z.strictObject({ model: z.string(), rules: z.string(), max_pages_per_job: z.number().int().min(1).max(32),
+    update: z.enum(['rewrite', 'append']).optional() });
   const modelRef = z.strictObject({ model: z.string() });
   const empty = z.strictObject({});
   const checks = {
@@ -755,7 +756,10 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
       'Write in the language of the project. Create or update relevant pages only, using exact supporting quotes. Return zero pages for out-of-scope sources. Use safe relative page IDs. ' +
       (project.config.init.type === 'para' ? 'An ID must start with Projects/, Areas/, Resources/ or Archives/. ' : '') +
       'Each fact must have a citation.', {
-      about: project.config.about, rules, sources: refs.map(({ id, text }) => ({ id, text })),
+      about: project.config.about, rules,
+      // Each source with its name: the web address it was read from, or its file name.
+      sources: refs.map(({ id, text, evidence }) => ({ id,
+        name: /^https?:\/\//u.test(evidence.source?.url ?? '') ? evidence.source.url : evidence.source?.objectId ?? '', text })),
       pages: existing.map(({ id, title }) => ({ id, title })),
       pages_needing_revision: affected,
     });
@@ -798,7 +802,7 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
 
 const workStages = {
   queued: '順番待ち', starting: '処理を開始', finding_sources: '資料を確認中', extracting_sources: 'テキストを抽出中',
-  indexing_sources: '資料を索引に追加中', writing_pages: 'ページを作成中', validating_citations: '出典を確認中',
+  indexing_sources: '資料を索引に追加中', choosing_pages: '書き直すページを選択中', writing_pages: 'ページを作成中', validating_citations: '出典を確認中',
   saving_pages: 'ページを保存中', answering: '回答を作成中', checking_citations: '引用とリンクを検査中', suggesting_next: '次に調べることを検討中',
   reviewing_content: '関連する資料とページを検査中', succeeded: '完了', failed: '失敗',
 };
@@ -909,10 +913,26 @@ export async function serveWiki(db, project, execute, settings) {
             response.writeHead(400).end('資料ファイルの名前が無効です'); return;
           }
           const bytes = Buffer.from(await upload.arrayBuffer());
-          const folder = join(project.paths.artifacts, 'uploads', revision(bytes));
-          value = join(folder, name);
-          await mkdir(folder, { recursive: true });
-          await writeFile(value, bytes, { flag: 'wx' }).catch((error) => { if (error.code !== 'EEXIST') throw error; });
+          // The file is kept with the raw sources: in raw/ when the project has it.
+          const raw = join(project.root, 'raw');
+          if ((await stat(raw).catch(() => null))?.isDirectory()) {
+            const digest = revision(bytes);
+            const dot = name.lastIndexOf('.');
+            const names = [name, dot > 0 ? name.slice(0, dot) + '-' + digest.slice(0, 8) + name.slice(dot) : name + '-' + digest.slice(0, 8)];
+            value = undefined;
+            for (const candidate of names) {
+              const existing = await readFile(join(raw, candidate)).catch(() => null);
+              if (existing && !existing.equals(bytes)) continue;
+              if (!existing) await writeFile(join(raw, candidate), bytes);
+              value = join(raw, candidate);
+              break;
+            }
+          } else {
+            const folder = join(project.paths.artifacts, 'uploads', revision(bytes));
+            value = join(folder, name);
+            await mkdir(folder, { recursive: true });
+            await writeFile(value, bytes, { flag: 'wx' }).catch((error) => { if (error.code !== 'EEXIST') throw error; });
+          }
           options.uploadName = name;
           input = [value];
         }

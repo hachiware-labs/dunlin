@@ -17,7 +17,8 @@ export function validateWiki(config, file, line) {
   if (config.init.version !== 1) add('VERSION_UNSUPPORTED', ['init', 'version'], 1, 'Create a version 1 project.');
   const loader = z.strictObject({ unsupported: z.enum(['error', 'skip']), ocr: z.enum(['none', 'loader.ocr']) });
   const keyword = z.strictObject({ tokenizer: z.literal('trigram'), short_query: z.literal('bigram') });
-  const writerArgs = z.strictObject({ model: z.string(), rules: z.string(), max_pages_per_job: z.number().int().min(1).max(32) });
+  const writerArgs = z.strictObject({ model: z.string(), rules: z.string(), max_pages_per_job: z.number().int().min(1).max(32),
+    update: z.enum(['rewrite', 'append']).optional() });
   const modelRef = z.strictObject({ model: z.string() });
   const empty = z.strictObject({});
   const checks = {

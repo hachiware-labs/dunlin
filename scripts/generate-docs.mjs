@@ -148,7 +148,7 @@ function moduleGuide() {
       '| 区切り | モジュール | 主な引数と初期値 |',
       '| --- | --- | --- |',
       '| `ingress` | `loader.auto`、`index.keyword` | `unsupported: error` と `ocr: none`。索引は `tokenizer: trigram`、`short_query: bigram` 固定 |',
-      '| `ingress` | `wiki.write` または `para.write`、`citation.verify` | `model: writer`、`rules: ./rules.md`、`max_pages_per_job: 20`（1〜32）。`on_failure` は `reject` 固定 |',
+      '| `ingress` | `wiki.write` または `para.write`、`citation.verify` | `model: writer`、`rules: ./rules.md`、`max_pages_per_job: 20`（1〜32）、`update`（`rewrite` か `append`。省くと Ollama では `append`、それ以外は `rewrite`）。`on_failure` は `reject` 固定 |',
       '| `query` | `wiki.search`、`wiki.answer` | 真偽値 `include_archived: false`、モデル参照 `model: writer` |',
       '| `verify` | `check.citations`、`check.stale_versions`、`check.links`、`check.orphans` | 引数なし |',
       '| `verify.content` | `check.contradictions` | `model: writer`、`scope: changed_and_related` 固定 |',

@@ -74,7 +74,6 @@ pub(crate) fn compose(units: &[Unit]) -> (String, Vec<ConfigValue>) {
 }
 
 /// What a citation points at: the source, its version and the bytes quoted.
-#[cfg(test)]
 pub(crate) fn passage(citation: &ConfigValue) -> String {
     let source = citation.get("source");
     let part = |name: &str| {
@@ -95,6 +94,25 @@ pub(crate) fn passage(citation: &ConfigValue) -> String {
     .to_js_json()
 }
 
+/// The earlier statements that a new version of a page left out: neither their text nor any
+/// passage they cite is on the page any more.
+pub(crate) fn removed<'a>(earlier: &'a [Unit], current: &[Unit]) -> Vec<&'a Unit> {
+    let cited: std::collections::HashSet<String> = current
+        .iter()
+        .flat_map(|unit| unit.citations.iter().map(passage))
+        .collect();
+    earlier
+        .iter()
+        .filter(|unit| !unit.citations.is_empty())
+        .filter(|unit| current.iter().all(|kept| kept.text != unit.text))
+        .filter(|unit| {
+            unit.citations
+                .iter()
+                .all(|citation| !cited.contains(&passage(citation)))
+        })
+        .collect()
+}
+
 /// A page with more statements: those it had, then the new ones. A statement that comes again
 /// in the same words stays where it was and cites what the new one cites.
 pub(crate) fn extended(earlier: Vec<Unit>, added: Vec<Unit>) -> Vec<Unit> {
@@ -110,7 +128,7 @@ pub(crate) fn extended(earlier: Vec<Unit>, added: Vec<Unit>) -> Vec<Unit> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Unit, compose, extended, passage, units};
+    use super::{Unit, compose, extended, passage, removed, units};
     use crate::config_value::ConfigValue;
     use crate::index_stage::{object, text};
 
@@ -146,6 +164,27 @@ mod tests {
         let (again, numbered) = compose(&found);
         assert_eq!(again, markdown);
         assert_eq!(numbered.len(), 3);
+    }
+
+    #[test]
+    fn a_statement_is_removed_when_neither_its_text_nor_its_passage_stays() {
+        let citations = [citation("a", 0.0), citation("a", 10.0), citation("a", 20.0)];
+        let earlier = units("一。 [1]\n\n二。 [2]\n\n三。 [3]", &citations);
+        let current = vec![
+            // The same text, cited anew.
+            Unit {
+                text: "一。".into(),
+                citations: vec![citation("b", 0.0)],
+            },
+            // Other words for the same passage.
+            Unit {
+                text: "二つめ。".into(),
+                citations: vec![citation("a", 10.0)],
+            },
+        ];
+        let gone = removed(&earlier, &current);
+        assert_eq!(gone.len(), 1);
+        assert_eq!(gone[0].text, "三。");
     }
 
     #[test]

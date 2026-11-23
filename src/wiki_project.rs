@@ -37,7 +37,10 @@ pub(crate) const WRITTEN_SCHEMA: &str = r#"{"$schema":"https://json-schema.org/d
 
 /// The most tokens a model may write for a Wiki. An ingest returns several pages with the
 /// quotes of every statement, far more than an answer to a question.
-const OUTPUT_TOKENS: f64 = 8192.0;
+const OUTPUT_TOKENS: f64 = 32768.0;
+
+/// `z.toJSONSchema(chosen)`: the pages that new sources add to.
+pub(crate) const CHOSEN_SCHEMA: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"update":{"type":"array","items":{"type":"string"}}},"required":["update"],"additionalProperties":false}"#;
 
 /// `z.toJSONSchema(answer)`
 pub(crate) const ANSWER_SCHEMA: &str = r#"{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"facts":{"type":"array","items":{"type":"object","properties":{"text":{"type":"string","minLength":1},"citations":{"minItems":1,"type":"array","items":{"type":"object","properties":{"id":{"type":"integer","exclusiveMinimum":0,"maximum":9007199254740991},"quote":{"type":"string","minLength":1}},"required":["id","quote"],"additionalProperties":false}}},"required":["text","citations"],"additionalProperties":false}}},"required":["facts"],"additionalProperties":false}"#;
@@ -1012,33 +1015,114 @@ pub(crate) fn url_path(relative: &str) -> String {
 // ---------------------------------------------------------------------------------------------
 // Stored pages, sources and jobs.
 
-/// `pages(db, archived)`: the pages by ID, with or without archived pages.
-pub(crate) fn pages(
-    connection: &Connection,
-    archived: bool,
-) -> Result<Vec<ConfigValue>, StageError> {
-    let mut statement = connection
-        .prepare("SELECT data FROM wiki_pages ORDER BY id")
-        .map_err(sql)?;
+/// The pages of the state of an earlier form, which kept them in a table.
+fn stored_pages(connection: &Connection) -> Result<Vec<ConfigValue>, StageError> {
+    let Ok(mut statement) = connection.prepare("SELECT data FROM wiki_pages ORDER BY id") else {
+        return Ok(Vec::new());
+    };
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))
         .map_err(sql)?;
-    let mut found = Vec::new();
-    for row in rows {
-        let page = parse(&row.map_err(sql)?)?;
-        if archived || !truthy(page.get("archived")) {
-            found.push(page);
-        }
-    }
-    Ok(found)
+    rows.map(|row| parse(&row.map_err(sql)?)).collect()
 }
 
-pub(crate) fn write_page(connection: &Connection, page: &ConfigValue) -> Result<(), StageError> {
+/// The pages the files of the folder hold, by ID. A file holds a page when its record has the
+/// ID its path names; the copy of an archived page under `Archives/` is part of that page.
+fn filed_pages(request: &WikiRequest) -> Result<Vec<ConfigValue>, StageError> {
+    let folder = node_path::resolve(&request.root, &request.pages);
+    let mut found: Vec<(String, ConfigValue)> = Vec::new();
+    let mut directories = vec![folder.clone()];
+    while let Some(directory) = directories.pop() {
+        let entries = match std::fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(fs_error("scandir", &directory, &error)),
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = node_path::join(&directory, &[&name]);
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if name.starts_with('.') || kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                directories.push(path);
+                continue;
+            }
+            let Some(stem) = name.strip_suffix(".html") else {
+                continue;
+            };
+            let Some(record) = read_text(&path)?
+                .as_deref()
+                .and_then(crate::wiki_html::page_record)
+            else {
+                continue;
+            };
+            let relative = node_path::relative(&folder, &node_path::join(&directory, &[stem]));
+            let id = relative.replace('\\', "/");
+            if str_of(&record, "id") == id {
+                found.push((id, record));
+            }
+        }
+    }
+    let copies: std::collections::HashSet<String> = found
+        .iter()
+        .filter_map(|(_, page)| string_field(page, "archive_id").map(str::to_owned))
+        .collect();
+    found.retain(|(id, _)| !copies.contains(id));
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(found.into_iter().map(|(_, page)| page).collect())
+}
+
+/// `pages(db, archived)`: the pages by ID, with or without archived pages. The pages are the
+/// files of the folder; a page of an earlier state that no file holds yet is read from the state.
+pub(crate) fn pages(
+    request: &WikiRequest,
+    connection: &Connection,
+    archived: bool,
+) -> Result<Vec<ConfigValue>, StageError> {
+    let mut all = filed_pages(request)?;
+    let filed: std::collections::HashSet<String> = all
+        .iter()
+        .map(|page| str_of(page, "id").to_owned())
+        .collect();
+    let earlier: Vec<ConfigValue> = stored_pages(connection)?
+        .into_iter()
+        .filter(|page| !filed.contains(str_of(page, "id")))
+        .collect();
+    if !earlier.is_empty() {
+        all.extend(earlier);
+        all.sort_by(|a, b| str_of(a, "id").cmp(str_of(b, "id")));
+    }
+    Ok(all
+        .into_iter()
+        .filter(|page| archived || !truthy(page.get("archived")))
+        .collect())
+}
+
+/// Moves the pages of a state of an earlier form into their files: a page the folder does not
+/// hold yet is written, and the table is emptied.
+pub(crate) fn move_pages_to_files(
+    project: &Project<'_>,
+    connection: &Connection,
+) -> Result<(), StageError> {
+    let earlier = stored_pages(connection)?;
+    if earlier.is_empty() {
+        return Ok(());
+    }
+    let filed: std::collections::HashSet<String> = filed_pages(project.request)?
+        .iter()
+        .map(|page| str_of(page, "id").to_owned())
+        .collect();
+    for page in &earlier {
+        if !filed.contains(str_of(page, "id")) {
+            project.save_page(page)?;
+        }
+    }
     connection
-        .execute(
-            "INSERT INTO wiki_pages VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-            [str_of(page, "id"), &page.to_js_json()],
-        )
+        .execute("DELETE FROM wiki_pages", [])
         .map(|_| ())
         .map_err(sql)
 }

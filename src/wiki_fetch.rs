@@ -1,8 +1,9 @@
 //! Sources given as web addresses: `ingress https://...`, from the CLI or the screen.
 //!
-//! The page or file is downloaded once, saved beside uploaded files (`artifacts/uploads/<sha256>/`)
-//! under a name whose extension tells the loader its format, and then read like any other file.
-//! Each address is one source: fetching it again saves a new version of the same source.
+//! The page or file is downloaded once and kept with the raw sources: in `raw/<host>/<path>` when
+//! the project has a `raw/` folder, else beside uploaded files (`artifacts/uploads/<sha256>/`).
+//! Its name has the extension that tells the loader its format, and it is then read like any
+//! other file. Each address is one source: fetching it again saves a new version of the source.
 
 use std::time::Duration;
 
@@ -18,6 +19,64 @@ const LIMIT: u64 = 16 * 1024 * 1024;
 pub(crate) struct Fetched {
     pub file: String,
     pub url: String,
+}
+
+/// The folder of raw sources: the project's `raw/`, when it has one.
+pub(crate) fn raw_folder(root: &str) -> Option<String> {
+    let path = node_path::join(root, &["raw"]);
+    std::path::Path::new(&path).is_dir().then_some(path)
+}
+
+/// Keeps the bytes of a source and returns the file. With a `raw/` folder the file is
+/// `raw/<folders>/<name>`; a file of that name with other content stays as it is, and the new one
+/// gets the start of its SHA-256 before its extension. Without it, the file is
+/// `artifacts/uploads/<sha256>/<name>`.
+pub(crate) fn keep_source(
+    root: &str,
+    artifacts: &str,
+    folders: &[String],
+    name: &str,
+    bytes: &[u8],
+) -> Result<String, StageError> {
+    let digest = sha256_hex(bytes);
+    let (folder, names) = match raw_folder(root) {
+        Some(raw) => {
+            let parts: Vec<&str> = folders.iter().map(String::as_str).collect();
+            let (stem, extension) = match name.rfind('.').filter(|&at| at > 0) {
+                Some(at) => (&name[..at], &name[at..]),
+                None => (name, ""),
+            };
+            (
+                node_path::join(&raw, &parts),
+                vec![
+                    name.to_owned(),
+                    format!("{stem}-{}{extension}", &digest[..8]),
+                ],
+            )
+        }
+        None => (
+            node_path::join(artifacts, &["uploads", &digest]),
+            vec![name.to_owned()],
+        ),
+    };
+    std::fs::create_dir_all(&folder).map_err(|error| fs_error("mkdir", &folder, &error))?;
+    for name in names {
+        let file = node_path::join(&folder, &[&name]);
+        match std::fs::read(&file) {
+            Ok(existing) if existing == bytes => return Ok(file),
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::write(&file, bytes).map_err(|error| fs_error("write", &file, &error))?;
+                return Ok(file);
+            }
+            Err(error) => return Err(fs_error("open", &file, &error)),
+        }
+    }
+    Err(coded(
+        4,
+        "SOURCE_EXISTS",
+        format!("Another file uses the name of this source in {folder}."),
+    ))
 }
 
 /// Whether an `ingress` input is a web address rather than a path.
@@ -43,8 +102,8 @@ pub(crate) fn normalize(input: &str) -> Result<url::Url, StageError> {
     Ok(url)
 }
 
-/// Downloads `input` and saves it under `artifacts/uploads`.
-pub(crate) fn fetch(input: &str, artifacts: &str) -> Result<Fetched, StageError> {
+/// Downloads `input` and keeps it with the raw sources, in a folder of its host and path.
+pub(crate) fn fetch(input: &str, root: &str, artifacts: &str) -> Result<Fetched, StageError> {
     let url = normalize(input)?;
     let failed = |message: String| coded(1, "FETCH_FAILED", format!("{url}: {message}"));
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -93,23 +152,21 @@ pub(crate) fn fetch(input: &str, artifacts: &str) -> Result<Fetched, StageError>
     } else {
         bytes
     };
-    let folder = node_path::join(artifacts, &["uploads", &sha256_hex(&bytes)]);
-    std::fs::create_dir_all(&folder).map_err(|error| fs_error("mkdir", &folder, &error))?;
-    let file = node_path::join(&folder, &[&name]);
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&file)
-    {
-        Ok(mut handle) => {
-            use std::io::Write;
-            handle
-                .write_all(&bytes)
-                .map_err(|error| fs_error("write", &file, &error))?;
+    // The host and the folders of the path, as `raw/example.com/manuals/`.
+    let mut folders = vec![sanitize(landed.host_str().unwrap_or("web"))];
+    if let Some(segments) = landed.path_segments() {
+        let segments: Vec<&str> = segments.collect();
+        for segment in &segments[..segments.len().saturating_sub(1)] {
+            let decoded = percent_encoding::percent_decode_str(segment)
+                .decode_utf8_lossy()
+                .into_owned();
+            let part = sanitize(&decoded);
+            if !part.is_empty() {
+                folders.push(part);
+            }
         }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(fs_error("open", &file, &error)),
     }
+    let file = keep_source(root, artifacts, &folders, &name, &bytes)?;
     Ok(Fetched {
         file,
         url: url.to_string(),

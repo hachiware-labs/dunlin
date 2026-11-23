@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, request as httpRequest } from 'node:http';
-import { cp, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,6 +22,7 @@ import { parse, stringify } from 'yaml';
 import { KnowledgeNest } from 'knowledge-nest';
 import { chunkCorpus } from './fixtures/cli-reference/project-content.mjs';
 import { atomicWrite } from './fixtures/wiki-reference/files.mjs';
+import { readPublication } from './fixtures/wiki-reference/html.mjs';
 import { ensureWiki, runWiki, serveWiki, validateWiki } from './fixtures/wiki-reference/project-wiki.mjs';
 
 const cli = fileURLToPath(new URL('../cli.mjs', import.meta.url));
@@ -140,6 +141,19 @@ test('serves the Wiki screen like the former JavaScript screen', { timeout: 300_
   await cliJson('verify', '--content');
   const refBase = join(root, 'ref');
   await cp(base, refBase, { recursive: true });
+  // The pages of the CLI are the files of its folder; the reference reads them from its table.
+  {
+    const db = new DatabaseSync(join(refBase, '.knowledge-nest', 'state.sqlite'));
+    ensureWiki(db);
+    for (const name of await readdir(join(refBase, 'wiki'), { recursive: true })) {
+      if (!name.endsWith('.html')) continue;
+      const html = await readFile(join(refBase, 'wiki', name), 'utf8');
+      if (!html.includes('id="knowledge-nest-page"')) continue;
+      const page = readPublication(html);
+      db.prepare('INSERT INTO wiki_pages VALUES (?, ?)').run(page.id, JSON.stringify(page));
+    }
+    db.close();
+  }
   for (const directory of [base, refBase]) await writeFile(join(directory, 'other.txt'), '点検の予定を立てる。\n');
 
   // The reference screen, in this process.

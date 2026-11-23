@@ -114,6 +114,8 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   const planned = await nest('ingress', web + '/notes.md', '--dry-run');
   assert.equal(planned.data.files, 1);
   await nest('ingress', web + '/notes.md', '--source-only');
+  // A page read from a web address is kept with the raw sources, under its host and path.
+  assert.equal(await readFile(join(base, 'raw', '127.0.0.1', 'notes.md'), 'utf8'), '# 記録\n\n点検の記録を保管する。\n');
   await assert.rejects(nest('ingress', web + '/missing'), (error) => /"FETCH_FAILED".*HTTP 404/u.test(error.stdout));
 
   const child = spawn(process.execPath, [cli, '--project', 'kb', 'serve'], { cwd: root, env, stdio: ['ignore', 'ignore', 'pipe'] });
@@ -170,6 +172,7 @@ test('shows pages and sources as a tree and adds sources by web address', { time
     else await delay(50);
   }
   assert.match(done.body, /data-work-status="succeeded"/u, done.body);
+  assert.match(await readFile(join(base, 'raw', '127.0.0.1', 'manuals', 'pump.html'), 'utf8'), /ポンプの点検/u);
   assert.match(done.body, /<div class="work succeeded"><header><span class="dot succeeded"><\/span><strong>取り込み<\/strong><span>完了<\/span><\/header><p>原本 1 件を読みました。<\/p><p>書いたページ：<a href="\/\?page=guides%2Fnote-1">/u);
 
   // The new page sits in its folder; the page cites the web page, decoded from Shift_JIS.

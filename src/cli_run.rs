@@ -1743,6 +1743,10 @@ fn initialize(
             &crate::config_check::rules_template(kind),
             true,
         )?;
+        // The raw sources of a Wiki: the files the AI reads and never changes.
+        if kind == "wiki" {
+            mkdir(&node_path::join(&root, &["raw"]))?;
+        }
     }
     if kind == "para" {
         for category in ["Projects", "Areas", "Resources", "Archives"] {
@@ -1795,7 +1799,9 @@ fn initialize(
             .into_iter()
             .flatten()
             .collect();
-            if missing.is_empty() {
+            if missing.is_empty() && kind == "wiki" {
+                "Put sources in raw/, then run nest ingest raw/<file>.".into()
+            } else if missing.is_empty() {
                 "Run nest ingress <path>.".into()
             } else {
                 format!("Set {}, then run nest ingress.", missing.join(" and "))

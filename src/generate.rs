@@ -238,8 +238,31 @@ pub fn generate(
                     Some(Value::String(status)) => status.clone(),
                     Some(other) => other.to_string(),
                 };
+                // Why the answer stopped, and how much of the output budget thinking took.
+                let reason = result
+                    .get("incomplete_details")
+                    .and_then(|details| details.get("reason"))
+                    .and_then(Value::as_str);
+                let usage = result.get("usage");
+                let count = |value: Option<&Value>| value.and_then(Value::as_u64);
+                let written = count(usage.and_then(|usage| usage.get("output_tokens")));
+                let thought = count(
+                    usage
+                        .and_then(|usage| usage.get("output_tokens_details"))
+                        .and_then(|details| details.get("reasoning_tokens")),
+                );
+                let detail = match (reason, written, thought) {
+                    (Some(reason), Some(written), Some(thought)) => {
+                        format!(" ({reason}: {written} output tokens, {thought} of them reasoning)")
+                    }
+                    (Some(reason), Some(written), None) => {
+                        format!(" ({reason}: {written} output tokens)")
+                    }
+                    (Some(reason), None, _) => format!(" ({reason})"),
+                    _ => String::new(),
+                };
                 return Err(EmbedError::plain(format!(
-                    "OpenAI response status: {shown}"
+                    "OpenAI response status: {shown}{detail}"
                 )));
             }
             let content: Vec<&Value> = result

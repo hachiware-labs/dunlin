@@ -391,6 +391,8 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
     await waitFor(nextPage, /data-work-status="queued"/u);
     pauseModel.resolve();
     assert.match(await waitFor(workPage, /data-work-status="succeeded"/u), /pane-manual.txt/u);
+    // A file added on the screen is kept with the raw sources.
+    assert.equal(await readFile(join(root, 'wiki', 'raw', 'pane-manual.txt'), 'utf8'), '交換手順を確認する。\n');
     await waitFor(nextPage, /data-work-status="succeeded"/u);
   } finally { pauseModel?.resolve(); site.kill(); await stopped; }
   await run('init', 'para', 'para', '--purpose', '設備保全の記録');

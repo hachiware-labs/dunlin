@@ -100,14 +100,40 @@ pub(crate) fn cited_markers(html: &str, citations: usize) -> String {
         .into_owned()
 }
 
+/// The start of the page a file holds, as JSON: its ID, title, Markdown and citations. The
+/// file is the page; the commands read it from here.
+pub(crate) const RECORD_START: &str =
+    "<script type=\"application/json\" id=\"knowledge-nest-page\">";
+
+/// The page a file holds, or none for a file that is no page. A file of an earlier form kept
+/// the page as Base64 in a comment at its end.
+pub(crate) fn page_record(html: &str) -> Option<ConfigValue> {
+    let record = match html.find(RECORD_START) {
+        Some(at) => {
+            let rest = &html[at + RECORD_START.len()..];
+            crate::eval_stage::parse(&rest[..rest.find("</script>")?]).ok()?
+        }
+        None => {
+            const EARLIER: &str = "<!-- knowledge-nest:publication ";
+            let rest = &html[html.rfind(EARLIER)? + EARLIER.len()..];
+            let data = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(rest[..rest.find(" -->")?].trim())
+                .ok()?;
+            crate::eval_stage::parse(&String::from_utf8(data).ok()?).ok()?
+        }
+    };
+    let named = string_field(&record, "id").is_some_and(|id| !id.is_empty());
+    named.then_some(record)
+}
+
 /// `renderDocument(title, body, { metadata })`: the way up is the contents of the folder, as far
 /// above the page as its ID is deep.
 pub fn render_document(title: &str, body: &str, metadata: Option<&ConfigValue>) -> String {
     let title = escape_html(title);
-    let footer = metadata.map_or_else(String::new, |metadata| {
+    let record = metadata.map_or_else(String::new, |metadata| {
         format!(
-            "<!-- knowledge-nest:publication {} -->\n",
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(metadata.to_js_json())
+            "{RECORD_START}{}</script>\n",
+            metadata.to_js_json().replace('<', "\\u003c")
         )
     });
     let id = metadata
@@ -133,7 +159,7 @@ pub fn render_document(title: &str, body: &str, metadata: Option<&ConfigValue>) 
 <title>{title} | Knowledge-Nest</title>
 <style>{STYLE}</style>
 <main>{navigation}<h1>{title}</h1>{body}</main>
-</html>\n{footer}"
+{record}</html>\n"
     )
 }
 

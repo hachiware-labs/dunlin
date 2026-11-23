@@ -120,7 +120,8 @@ function normalizer() {
     .replace(/<style>[^<]*<\/style>/gu, '<style></style>')
     .replace(/<!-- knowledge-nest:publication ([\w-]+) -->/gu, (_, data) => '<!-- ' + Buffer.from(data, 'base64url').toString('utf8') + ' -->')
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/gu, 'TIME')
-    .replace(/(\\?")(acquiredAtMs|pid)\1:\d+/gu, '$1$2$1:0')
+    // Also in the record of a page file that a work kept as text, escaped once more.
+    .replace(/(\\*")(acquiredAtMs|pid)\1:\d+/gu, '$1$2$1:0')
     .replace(/(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/gu, (digest) => {
       if (!digests.has(digest)) digests.set(digest, 'digest-' + digests.size);
       return digests.get(digest);
@@ -135,7 +136,8 @@ function equalText(left, right, label) {
   assert.equal(left.length, right.length, label);
 }
 
-const tables = ['wiki_pages', 'wiki_sources', 'wiki_jobs', 'wiki_issues', 'wiki_work', 'wiki_reviewed_material', 'wiki_content_pairs', 'wiki_suggestions'];
+// The pages are the files of the folder, compared below; the reference kept them in a table too.
+const tables = ['wiki_sources', 'wiki_jobs', 'wiki_issues', 'wiki_work', 'wiki_reviewed_material', 'wiki_content_pairs', 'wiki_suggestions'];
 
 /** The rows of the Wiki tables and the published files, with each publication's record decoded. */
 async function snapshot(base) {

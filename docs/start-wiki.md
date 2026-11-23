@@ -49,9 +49,14 @@ cd wiki
 
 ## 3 資料を取り込む
 
+資料は、Wiki のフォルダの `raw/` に置いて取り込みます。AI は `raw/` の資料を読むだけで、書き換えません。AI が書いたページは `wiki/` に、ページの書き方の決まりは `rules.md` にあります。
+
 ```sh
-nest ingress ../manuals
+cp ../manuals/*.md raw/
+nest ingest raw/
 ```
+
+`raw/` に資料を足したら、足したファイルを `nest ingest raw/<ファイル>` で1件ずつ取り込むのがおすすめです（フォルダごと渡すと、1回で AI が読めるのは合計 16,000 文字までです）。
 
 `ingress` は、次の順で進みます。
 
@@ -62,7 +67,7 @@ nest ingress ../manuals
 
 数分かかることがあります。表示された作業 ID を `nest progress <作業ID>` に渡すと、進み具合を見られます。原本の保存だけ先に済ませ、読み書きは後でしたいときは `--source-only` を付け、あとで `nest ingress --pending` を実行します。
 
-Web のページも、URL を渡せば取り込めます。HTML、PDF、Markdown、Office 文書を取得し、その時点の内容を原本として保存します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。
+Web のページも、URL を渡せば取り込めます。HTML、PDF、Markdown、Office 文書を取得し、その時点の内容を原本として `raw/<ホスト名>/<パス>` に保存します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。
 
 ```sh
 nest ingress https://example.com/manuals/pump

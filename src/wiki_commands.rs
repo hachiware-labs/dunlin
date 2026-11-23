@@ -22,7 +22,7 @@ use crate::wiki_project::{
     Citation, Fact, In, Project, REVISION_SCHEMA, WikiOutcome, WikiRequest, atomic_write, coded,
     current_document, ensure, fs_error, job, json_or_undefined, line_count, model_output, pages,
     read_citation, read_file, read_text, remember, remove, restore, str_of, strict, unique_index,
-    write_page, written_pages,
+    written_pages,
 };
 use crate::wiki_work::{self, Tracker};
 use crate::{Cancellation, KnowledgeBase};
@@ -236,19 +236,6 @@ pub(crate) fn cited_text(
     Ok(chunks_for_model(documents))
 }
 
-pub(crate) fn ref_inputs(refs: &[Ref]) -> In {
-    In::List(
-        refs.iter()
-            .map(|reference| {
-                In::Map(vec![
-                    ("id", In::number(reference.id)),
-                    ("text", In::text(&reference.text)),
-                ])
-            })
-            .collect(),
-    )
-}
-
 /// The project execution lock, as `withExecutionLock` took it.
 fn lock(path: Option<&str>) -> Result<Option<File>, StageError> {
     let Some(path) = path else {
@@ -293,6 +280,8 @@ pub fn run(request: &WikiRequest, cancel: &Cancellation) -> Result<WikiOutcome, 
     let connection = open_state(&request.state, read_only)?;
     if !read_only {
         ensure(&connection)?;
+        // The pages of an earlier form move into their files.
+        crate::wiki_project::move_pages_to_files(&Project { request, cancel }, &connection)?;
     }
     let project = Project { request, cancel };
     let mut warnings = Vec::new();
@@ -347,7 +336,7 @@ pub(crate) fn execute(
     warnings: &mut Vec<ConfigValue>,
 ) -> Result<ConfigValue, StageError> {
     let command = project.request.command.as_str();
-    if command == "verify" && pages(connection, true)?.is_empty() {
+    if command == "verify" && pages(project.request, connection, true)?.is_empty() {
         return Ok(object(vec![("issues", ConfigValue::Array(Vec::new()))]));
     }
     match command {
@@ -399,7 +388,7 @@ pub(crate) fn commit_pages(
     before_commit: impl FnOnce(&Connection) -> Result<(), StageError>,
 ) -> Result<ConfigValue, StageError> {
     tracker.progress("saving_pages", Some((0, changes.len())));
-    let prior: HashMap<String, ConfigValue> = pages(connection, true)?
+    let prior: HashMap<String, ConfigValue> = pages(project.request, connection, true)?
         .into_iter()
         .map(|page| (str_of(&page, "id").to_owned(), page))
         .collect();
@@ -412,9 +401,6 @@ pub(crate) fn commit_pages(
         }
         connection.execute_batch("BEGIN IMMEDIATE").map_err(sql)?;
         let written = (|| {
-            for page in &changes {
-                write_page(connection, page)?;
-            }
             before_commit(connection)?;
             let mut entries = vec![
                 (
@@ -521,7 +507,7 @@ fn issue(project: &Project<'_>, connection: &Connection) -> Result<ConfigValue, 
 fn cite(project: &Project<'_>, connection: &Connection) -> Result<ConfigValue, StageError> {
     let id = arg(project, 0);
     let index = crate::wiki_project::marker_index(arg(project, 1));
-    let citation = pages(connection, true)?
+    let citation = pages(project.request, connection, true)?
         .into_iter()
         .find(|page| str_of(page, "id") == id)
         .and_then(|page| index.and_then(|index| items(page.get("citations")).get(index).cloned()));
@@ -560,7 +546,7 @@ fn save_answer(
             "Supply a query run with sourced facts.",
         ));
     }
-    let all = pages(connection, true)?;
+    let all = pages(project.request, connection, true)?;
     if all.iter().any(|page| str_of(page, "id") == id) {
         return Err(coded(4, "PAGE_EXISTS", "Choose an unused page ID."));
     }
@@ -637,7 +623,7 @@ fn undo(project: &Project<'_>, connection: &Connection) -> Result<ConfigValue, S
             "The job has no reversible page changes.",
         ));
     };
-    let current = pages(connection, true)?;
+    let current = pages(project.request, connection, true)?;
     let mut changes: Vec<(String, Option<ConfigValue>)> = Vec::new();
     for entry in items(found.get("previous_pages")) {
         let id = str_of(entry, "id");
@@ -680,16 +666,6 @@ fn undo(project: &Project<'_>, connection: &Connection) -> Result<ConfigValue, S
         }
         connection.execute_batch("BEGIN IMMEDIATE").map_err(sql)?;
         let written = (|| {
-            for (id, before) in &changes {
-                match before {
-                    Some(before) => write_page(connection, before)?,
-                    None => {
-                        connection
-                            .execute("DELETE FROM wiki_pages WHERE id = ?1", [id])
-                            .map_err(sql)?;
-                    }
-                }
-            }
             for source in items(found.get("source_ids")) {
                 connection
                     .execute(
@@ -737,7 +713,7 @@ fn archive(
     tracker: &Tracker,
 ) -> Result<ConfigValue, StageError> {
     let target = arg(project, 0);
-    let all = pages(connection, true)?;
+    let all = pages(project.request, connection, true)?;
     let Some(page) = all.iter().find(|page| str_of(page, "id") == target) else {
         return Err(coded(
             3,
@@ -897,7 +873,7 @@ fn instruct(
             let _ = atomic_write(&file, before.as_bytes());
         });
     }
-    let prior = pages(connection, true)?;
+    let prior = pages(project.request, connection, true)?;
     let target = arg(project, 0);
     let Some(page) = prior
         .iter()

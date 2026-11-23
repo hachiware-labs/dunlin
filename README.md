@@ -192,11 +192,12 @@ LLM が書いた文は、もっともらしい誤りを含むことがありま�
 nest config set llm --provider ollama --model qwen3:4b
 nest init wiki ./wiki --purpose "設備保全の手順と部品情報をまとめる"
 cd wiki
-nest ingress ../manuals
+cp ../manuals/*.md raw/   # 原本は raw/、AI の書くページは wiki/、決まりは rules.md
+nest ingest raw/
 nest serve        # ページを Web と MCP で提供。http://127.0.0.1:4319 をブラウザで開く
 ```
 
-エージェントは MCP でページを引けます。MCP クライアントの設定に Knowledge-Nest の Wiki を登録すれば、Claude などが、AI のまとめたページを根拠に答えます。ほかに `nest query "質問" --json` でページに基づく答えを、プロジェクトの `site/` から HTML のページを得られます。 [Wiki 入門](docs/start-wiki.md) · [Wiki・PARA の使い方](docs/wiki.md)
+エージェントは MCP でページを引けます。MCP クライアントの設定に Knowledge-Nest の Wiki を登録すれば、Claude などが、AI のまとめたページを根拠に答えます。ほかに `nest query "質問" --json` でページに基づく答えを、プロジェクトの `wiki/` から HTML のページを得られます。 [Wiki 入門](docs/start-wiki.md) · [Wiki・PARA の使い方](docs/wiki.md)
 
 ### PARA：AI が、資料とメモを整理する
 

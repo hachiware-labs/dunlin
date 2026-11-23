@@ -312,6 +312,8 @@ pub(crate) struct About<'a> {
     pub pending: usize,
     /// The link to the rules file from the folder of pages, when it is in the project.
     pub rules: Option<String>,
+    /// The link to the folder of raw sources, when the project has one.
+    pub raw: Option<String>,
     pub log: bool,
 }
 
@@ -376,12 +378,18 @@ pub(crate) fn catalog(about: &About<'_>, entries: &[Entry]) -> String {
     body += "<p id=\"none\" class=\"meta\" hidden>該当するページがありません。</p>";
     body += concat!(
         "<section class=\"guide\"><h2>この Wiki の保ち方</h2><ul>",
-        "<li>原本は人が集め、ページは AI が書いて保ちます。資料が増えるたびに、関係するページに書き足します。保存の前に、Knowledge-Nest が引用を原本と照らして確かめます。このフォルダの HTML を直接書き換えても、次の更新で上書きされます。</li>",
-        "<li><b>取り込む（ingest）</b>：<code>nest ingest &lt;ファイルか URL&gt;</code>　資料を読み、目録から関係するページを選んで書き足し、足りないページを作ります。</li>",
+        "<li>原本は人が集め、ページは AI が書いて保ちます。資料が増えるたびに、関係するページに書き足します。保存の前に、Knowledge-Nest が引用を原本と照らして確かめます。ページはこのフォルダの HTML ファイルそのものです。ページの内容は、各ファイルの末尾にある JSON（<code>knowledge-nest-page</code>）にあり、画面に見える部分はそこから作られます。</li>",
+        "<li><b>取り込む（ingest）</b>：<code>nest ingest raw/&lt;ファイル&gt;</code> か <code>nest ingest &lt;URL&gt;</code>　資料を読み、関係するページに書き足し、足りないページを作ります。</li>",
         "<li><b>質問する（query）</b>：<code>nest query \"質問\"</code>　ページを読んで、引用つきで答えます。残したい答えは <code>nest save-answer</code> でページにします。</li>",
         "<li><b>点検する（lint）</b>：<code>nest lint</code>　原本にない引用、古くなった引用、リンク切れ、どこからもリンクされないページ、相互リンクの抜けを調べます。<code>--content</code> を付けると、ページ同士の食い違い、ページのない概念、次に調べるとよい問いと資料を AI が挙げます。</li>",
         "<li>ページを直す：<code>nest instruct &lt;ページ ID&gt; \"指示\"</code></li>",
     );
+    if let Some(raw) = &about.raw {
+        body += &format!(
+            "<li><b>原本（raw）</b>：<a href=\"{}\">raw/</a>　集めた資料。AI は読むだけで、書き換えません。URL から取り込んだ資料も、ここに保存されます。</li>",
+            escape_html(raw)
+        );
+    }
     if let Some(rules) = &about.rules {
         body += &format!(
             "<li><b>決まり（schema）</b>：<a href=\"{}\">rules.md</a>　ページの種類、書き方、取り込みの手順。<code>nest instruct --persistent \"決まり\"</code> で足します。</li>",
@@ -507,6 +515,13 @@ fn log_entry(
     if let (true, Some(ConfigValue::Array(issues))) = (command != "verify", field("issues")) {
         notes.push(format!("指摘 {} 件", issues.len()));
     }
+    let left_out: usize = items(field("statements_removed"))
+        .iter()
+        .map(|entry| items(entry.get("statements")).len())
+        .sum();
+    if left_out > 0 {
+        notes.push(format!("書き直しで外れた記述 {left_out} 件"));
+    }
     let day: String = str_of(work, "finished_at").chars().take(10).collect();
     let subject = subject(work, names);
     // What the first line says already is not said again below it.
@@ -618,7 +633,7 @@ fn write(path: &str, mark: &str, content: &str) -> Result<(), StageError> {
 /// Writes `index.html` and `log.html` in the folder of pages from the state. A page that has
 /// one of these names keeps its file.
 pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(), StageError> {
-    let all = pages(connection, true)?;
+    let all = pages(project.request, connection, true)?;
     let taken = |name: &str| {
         all.iter()
             .any(|page| str_of(page, "id").eq_ignore_ascii_case(name))
@@ -684,8 +699,12 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
     });
     // A page file of an earlier form is written again in this one.
     let earlier = |id: &str| -> Result<bool, StageError> {
-        Ok(read_text(&project.publication_path(id)?)?
-            .is_some_and(|existing| !existing.contains(crate::wiki_html::PAGE_MARK)))
+        Ok(
+            read_text(&project.publication_path(id)?)?.is_some_and(|existing| {
+                !existing.contains(crate::wiki_html::PAGE_MARK)
+                    || !existing.contains(crate::wiki_html::RECORD_START)
+            }),
+        )
     };
     for page in &all {
         if earlier(str_of(page, "id"))? {
@@ -737,6 +756,10 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
                     sources: usize::try_from(sources).unwrap_or(0),
                     pending: usize::try_from(pending).unwrap_or(0),
                     rules,
+                    raw: crate::wiki_fetch::raw_folder(&project.request.root).map(|raw| {
+                        let relative = node_path::relative(&folder, &raw);
+                        url_path(&relative) + "/"
+                    }),
                     log: !taken("log"),
                 },
                 &entries(&all),
@@ -853,6 +876,7 @@ mod tests {
                 sources: 3,
                 pending: 1,
                 rules: Some("../rules.md".into()),
+                raw: Some("../raw/".into()),
                 log: true,
             },
             &entries(&sample()),
@@ -864,6 +888,7 @@ mod tests {
         ));
         assert!(html.contains("<section data-group><h2>a<small>2</small></h2><ul class=\"pages\"><li data-text=\"スクラム スクラムはスプリントで進める枠組みである。 a/scrum\"><a href=\"a/scrum.html\"><strong>スクラム</strong><small>出典 1 · 2026-11-22</small>"));
         assert!(html.contains("<a href=\"../rules.md\">rules.md</a>"));
+        assert!(html.contains("<a href=\"../raw/\">raw/</a>"));
         assert!(html.contains("<a href=\"log.html\">作業の記録</a>"));
         let hash = base64::engine::general_purpose::STANDARD
             .encode(Sha256::digest(FILTER_SCRIPT.as_bytes()));

@@ -51,12 +51,13 @@ pub trait WikiServeHost: Send + Sync {
     fn listening(&self, port: u16);
 }
 
-const WORK_STAGES: [(&str, &str); 14] = [
+const WORK_STAGES: [(&str, &str); 15] = [
     ("queued", "順番待ち"),
     ("starting", "処理を開始"),
     ("finding_sources", "資料を確認中"),
     ("extracting_sources", "テキストを抽出中"),
     ("indexing_sources", "資料を索引に追加中"),
+    ("choosing_pages", "書き直すページを選択中"),
     ("writing_pages", "ページを作成中"),
     ("validating_citations", "出典を確認中"),
     ("saving_pages", "ページを保存中"),
@@ -382,6 +383,21 @@ fn render_work(work: Option<&ConfigValue>, token: &str, page: Option<&str>) -> S
             )
         })
         .collect();
+    // The statements that a page written again no longer makes.
+    let left_out: String = items(result.get("statements_removed"))
+        .iter()
+        .map(|entry| {
+            format!(
+                "<article><h4>{}：前のページにあった記述 {} 件が、新しいページにありません</h4><ul>{}</ul><p class=\"hint\">意図した書き直しでなければ、下の「取り消す」で前のページに戻せます。</p></article>",
+                escape_html(&js_text(entry.get("page"))),
+                items(entry.get("statements")).len(),
+                items(entry.get("statements"))
+                    .iter()
+                    .map(|line| format!("<li>{}</li>", escape_html(&js_text(Some(line)))))
+                    .collect::<String>()
+            )
+        })
+        .collect();
     let undo = if !items(result.get("previous_pages")).is_empty() || truthy(result.get("rules")) {
         action_form(
             token,
@@ -482,7 +498,7 @@ fn render_work(work: Option<&ConfigValue>, token: &str, page: Option<&str>) -> S
     };
     let suggestions =
         suggested("questions", "次に調べるとよい問い") + &suggested("sources", "探すとよい資料");
-    out + &answer + &changes + &undo + &issues + &suggestions + &details + "</section>"
+    out + &answer + &left_out + &changes + &undo + &issues + &suggestions + &details + "</section>"
 }
 
 /// The folders and files of the left column, in the order they were added.
@@ -1414,26 +1430,14 @@ impl WikiServer {
             {
                 return Ok(html(400, "資料ファイルの名前が無効です"));
             }
-            let folder = node_path::join(
+            // The file is kept with the raw sources.
+            value = crate::wiki_fetch::keep_source(
+                &self.base().root,
                 &self.base().artifacts,
-                &["uploads", &crate::source_load::sha256_hex(bytes)],
-            );
-            std::fs::create_dir_all(&folder)
-                .map_err(|error| crate::wiki_project::fs_error("mkdir", &folder, &error))?;
-            value = node_path::join(&folder, &[&name]);
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&value)
-            {
-                Ok(mut file) => {
-                    use std::io::Write;
-                    file.write_all(bytes)
-                        .map_err(|error| crate::wiki_project::fs_error("write", &value, &error))?;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(crate::wiki_project::fs_error("open", &value, &error)),
-            }
+                &[],
+                &name,
+                bytes,
+            )?;
             options.push(("uploadName", text(&name)));
             input = vec![Some(value.clone())];
         }
@@ -1519,7 +1523,7 @@ impl WikiServer {
             .as_ref()
             .and_then(|work| string_field(work, "status"))
             .is_some_and(|status| status == "queued" || status == "running");
-        let content = pages(&connection, true)?;
+        let content = pages(base, &connection, true)?;
         let requested = param("page");
         let current = requested.and_then(|requested| {
             content.iter().find(|page| {

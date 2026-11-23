@@ -3,7 +3,7 @@ import MarkdownIt from 'markdown-it';
 import { citationLocations } from './files.mjs';
 
 const markdown = new MarkdownIt({ html: false });
-const publicationMetadata = /\n<!-- knowledge-nest:publication ([\w-]+) -->\r?\n?$/u;
+const recordStart = '<script type="application/json" id="knowledge-nest-page">';
 const sourceProtocols = new Set(['http:', 'https:', 'file:', 's3:', 'knowledge-nest:']);
 export const contentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'";
 export const escapeHtml = markdown.utils.escapeHtml;
@@ -34,7 +34,8 @@ function sectioned(html) {
 
 export function renderDocument(title, body, { metadata, navigation = '' } = {}) {
   const safeTitle = escapeHtml(title);
-  const footer = metadata ? `<!-- knowledge-nest:publication ${Buffer.from(JSON.stringify(metadata)).toString('base64url')} -->\n` : '';
+  // The page the file holds, as JSON.
+  const record = metadata ? `${recordStart}${JSON.stringify(metadata).replaceAll('<', '\\u003c')}</script>\n` : '';
   return `<!doctype html>
 <html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${contentSecurityPolicy}">
@@ -48,7 +49,7 @@ export function renderDocument(title, body, { metadata, navigation = '' } = {}) 
   img { max-width: 100%; height: auto; }
 </style>
 ${navigation}<main>${up(metadata)}<h1>${safeTitle}</h1>${body}</main>
-</html>\n${footer}`;
+${record}</html>\n`;
 }
 
 export function renderPublication({ title, markdown: content, citations }, metadata) {
@@ -72,7 +73,8 @@ export function renderPublication({ title, markdown: content, citations }, metad
 }
 
 export function readPublication(content) {
-  const match = publicationMetadata.exec(content);
-  if (!match) throw new Error('Knowledge-Nest publication metadata is missing');
-  return JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8'));
+  const at = content.indexOf(recordStart);
+  if (at < 0) throw new Error('Knowledge-Nest publication metadata is missing');
+  const rest = content.slice(at + recordStart.length);
+  return JSON.parse(rest.slice(0, rest.indexOf('</script>')));
 }

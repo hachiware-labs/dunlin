@@ -131,13 +131,13 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   assert.ok(port, log);
   const origin = { origin: 'http://127.0.0.1:' + port };
 
-  // The left column: the source from the command line, under its host, not yet in the pages.
+  // The left column: raw/ as it is. The page from the web is kept under its host, not yet in
+  // the pages.
   const top = await send(port, {});
   assert.equal(top.status, 200);
   const host = new URL(web).host;
   assert.match(top.body, /<nav>.*<summary>資料を取り込む<\/summary>.*<input type="url" name="url"/su);
-  assert.match(top.body, new RegExp(`<h2>原本<small>取り込んだ資料</small></h2><ul class="tree"><li><details open><summary>Web</summary><ul class="tree"><li><details open><summary>${host.replace(/\./gu, '\\.')}</summary>`, 'u'));
-  assert.match(top.body, /<a class="web" href="\/\?source=source-[0-9a-f]{24}" title="http:\/\/127\.0\.0\.1:\d+\/notes\.md"><span class="name">\/notes\.md<\/span><span class="badge">未反映<\/span><\/a>/u);
+  assert.match(top.body, /<h2 class="root">raw\/<small>集めた資料（原本）<\/small><\/h2><ul class="tree"><li><details open><summary>127\.0\.0\.1<\/summary><ul class="tree"><li><a class="file" href="\/\?source=source-[0-9a-f]{24}" title="127\.0\.0\.1\/notes\.md"><span class="name">notes\.md<\/span><span class="badge">未反映<\/span><\/a><\/li><\/ul><\/details><\/li><\/ul>/u);
   // The home: what the project is for, a question box, and its state with the next thing to do.
   assert.match(top.body, /<article id="content" class="top"><h1>kb<\/h1><p class="lead">設備保全の手順<\/p><form class="ask"/u);
   assert.match(top.body, /<a class="tile" href="#pages"><b>0<\/b><span>ページ<\/span>/u);
@@ -177,10 +177,10 @@ test('shows pages and sources as a tree and adds sources by web address', { time
 
   // The new page sits in its folder; the page cites the web page, decoded from Shift_JIS.
   const after = await send(port, {});
-  assert.match(after.body, /<h2>ページ<small>AI がまとめた記事<\/small><\/h2><ul class="tree"><li><details open><summary>guides<\/summary>/u);
-  assert.match(after.body, /title="http:\/\/127\.0\.0\.1:\d+\/manuals\/pump"><span class="name">\/manuals\/pump<\/span><\/a><\/li>/u);
+  assert.match(after.body, /<h2 class="root">wiki\/<small>AI が書くページ<\/small><\/h2><ul class="tree"><li><details open><summary>guides<\/summary>/u);
+  assert.match(after.body, /title="127\.0\.0\.1\/manuals\/pump\.html"><span class="name">pump\.html<\/span><\/a><\/li>/u);
   // The top is the contents of the Wiki: every page under its folder, with a line about it.
-  assert.match(after.body, /<section class="panel" id="pages"><h2>guides<small>1<\/small><\/h2><ul class="cards"><li><a href="\/\?page=guides%2Fnote-\d+"><strong>[^<]+<\/strong><span>概要<\/span><time>出典 1 · \d{4}-\d\d-\d\d<\/time><\/a><\/li><\/ul><\/section>/u);
+  assert.match(after.body, /<section class="panel" id="pages"><h2>guides\/<small>1<\/small><\/h2><ul class="cards"><li><a href="\/\?page=guides%2Fnote-\d+"><strong>[^<]+<\/strong><span>概要<\/span><time>出典 1 · \d{4}-\d\d-\d\d<\/time><\/a><\/li><\/ul><\/section>/u);
   assert.match(after.body, /<form class="ask" method="get" action="\/"><input type="search" name="q" required placeholder="ページを検索する"/u);
   assert.match(after.body, /<h2>AI に質問する<\/h2>.*<button class="primary" name="action" value="query">質問する<\/button>.*<h2>保守<\/h2>/su);
   // A search finds the pages that hold every word, and marks the words in the passage.
@@ -192,7 +192,10 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   // The folder of pages has its contents and its log as files of their own.
   const contents = await readFile(join(base, 'wiki', 'index.html'), 'utf8');
   assert.match(contents, /<!-- knowledge-nest:catalog -->/u);
-  assert.match(contents, /<section data-group><h2>guides<small>1<\/small><\/h2><ul class="pages"><li data-text="[^"]*"><a href="guides\/note-\d+\.html"><strong>/u);
+  assert.match(contents, /<h2 class="root">wiki\/<small>AI が書くページ · 1 件<\/small><\/h2><section data-group><h3>guides\/<small>1<\/small><\/h3><ul class="pages"><li data-text="[^"]*"><a href="guides\/note-\d+\.html"><strong>/u);
+  // raw/ as it is, each file with what became of it.
+  assert.match(contents, /<h2 class="root"><a href="\.\.\/raw\/">raw\/<\/a><small>集めた資料（原本）· 2 件<\/small><\/h2><section data-group><h3>127\.0\.0\.1\/<small>1<\/small><\/h3>.*<h3>127\.0\.0\.1\/manuals\/<small>1<\/small><\/h3>/su);
+  assert.match(contents, /<a href="\.\.\/raw\/127\.0\.0\.1\/notes\.md"><strong>notes\.md<\/strong><small class="todo">未反映<\/small><\/a>/u);
   assert.match(contents, /<p class="meta">ページ 1 件 · 原本 2 件（未反映 1 件） · 最終更新 \d{4}-\d\d-\d\d<\/p>/u);
   // The log names each work at the start of a line, oldest first: the day, what was done, and the source.
   const record = await readFile(join(base, 'wiki', 'log.html'), 'utf8');

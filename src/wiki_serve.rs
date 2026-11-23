@@ -101,6 +101,10 @@ const STYLE: &str = concat!(
     ".tree .name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
     ".tree a[aria-current]{background:var(--hover);font-weight:600}.tree a[aria-current]::before{opacity:.9}",
     ".tree .archived{color:var(--muted)}",
+    // A file of raw/ that is not taken in yet: shown like a source, without a link.
+    "span.file{display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:13px;line-height:1.5;color:var(--muted)}span.file::before{content:'';flex:none;width:15px;height:15px;background:currentColor;opacity:.35;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}",
+    // The two folders of a Wiki, by their names.
+    "main>nav h2.root{font:650 13px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:0;color:var(--text);text-transform:none}",
     ".badge{margin-left:auto;flex:none;font-size:10.5px;font-weight:700;padding:0 7px;border-radius:99px;background:var(--warn-bg);color:var(--warn)}",
     ".page{--icon:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='3' width='16' height='18' rx='2'/%3E%3Cpath d='M8 8h8M8 12h8M8 16h5'/%3E%3C/svg%3E\")}",
     ".file{--icon:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z'/%3E%3Cpath d='M14 3v5h5'/%3E%3C/svg%3E\")}",
@@ -1634,11 +1638,53 @@ impl WikiServer {
         let requested_source = param("source").filter(|_| current.is_none());
         let current_source = requested_source
             .and_then(|requested| sources.iter().find(|(id, _, _)| id == requested));
-        // Sources as a tree: the folders of their paths, and web pages by their host.
+        // The name of the folder of pages, as `wiki`.
+        let pages_folder = base
+            .pages
+            .trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|name| !name.is_empty() && *name != ".")
+            .unwrap_or("wiki")
+            .to_owned();
+        // Sources as a tree. With a raw/ folder, its files as they are, each with what became of
+        // it; the sources from elsewhere follow. Without one, the folders of their paths, and
+        // web pages by their host.
+        let raw_folder = crate::wiki_fetch::raw_folder(&base.root);
         let mut source_tree = Tree::default();
-        for (id, source, reflected) in &sources {
+        let elsewhere: Vec<&(String, ConfigValue, bool)> = match &raw_folder {
+            Some(raw) => {
+                let (files, outside) = wiki_folder::raw_files(raw, &sources);
+                for file in &files {
+                    let mut parts: Vec<String> = file.path.split('/').map(str::to_owned).collect();
+                    let name = parts.pop().unwrap_or_default();
+                    let leaf = match &file.source {
+                        Some(id) => leaf_link(
+                            "file",
+                            &format!("source={}", encode_uri_component(id)),
+                            &name,
+                            &file.path,
+                            requested_source == Some(id.as_str()),
+                            (!file.reflected).then_some("未反映"),
+                        ),
+                        None => format!(
+                            "<span class=\"file\" title=\"{}\"><span class=\"name\">{}</span><span class=\"badge\">未取り込み</span></span>",
+                            escape_html(&file.path),
+                            escape_html(&name)
+                        ),
+                    };
+                    source_tree.leaf(&parts, leaf);
+                }
+                outside
+            }
+            None => sources.iter().collect(),
+        };
+        for (id, source, reflected) in elsewhere {
             let object_id = js_text(source.get("objectId"));
-            let (parts, label) = source_path(&object_id);
+            let (mut parts, label) = source_path(&object_id);
+            if raw_folder.is_some() {
+                parts.insert(0, "raw/ の外".into());
+            }
             source_tree.leaf(
                 &parts,
                 leaf_link(
@@ -1992,7 +2038,11 @@ impl WikiServer {
                             format!(
                                 "<section class=\"panel\"{}><h2>{}<small>{}</small></h2><ul class=\"cards\">{}</ul></section>",
                                 if index == 0 { " id=\"pages\"" } else { "" },
-                                escape_html(name),
+                                escape_html(&if name.is_empty() {
+                                    format!("{pages_folder}/")
+                                } else {
+                                    name.clone()
+                                }),
                                 list.len(),
                                 list.iter()
                                     .map(|entry| format!(
@@ -2102,7 +2152,7 @@ impl WikiServer {
                 "<button class=\"primary\" name=\"action\" value=\"ingress\">取り込む</button></form></details>",
                 "<ul class=\"menu\"><li><a href=\"/\"{top_current}>目録</a></li><li><a href=\"/?history\"{history_current}>作業の履歴</a></li>",
                 "<li><a href=\"/?rules\"{rules_current}>運用の決まり</a></li></ul>",
-                "<h2>ページ<small>AI がまとめた記事</small></h2>{menu}<h2>原本<small>取り込んだ資料</small></h2>{sources}",
+                "<h2 class=\"root\">{pages_folder}/<small>AI が書くページ</small></h2>{menu}{sources_heading}{sources}",
                 "{archived}</details></nav>",
                 "<section class=\"view\">{crumbs}{work}<article id=\"content\" class=\"{name}\">{center}</article>{panels}</section></main>",
                 "{script}</html>"
@@ -2122,6 +2172,12 @@ impl WikiServer {
             rules_current = current_mark(matches!(shown, Shown::Rules(_))),
             menu = tree_or_empty(&page_tree),
             sources = tree_or_empty(&source_tree),
+            pages_folder = escape_html(&pages_folder),
+            sources_heading = if raw_folder.is_some() {
+                "<h2 class=\"root\">raw/<small>集めた資料（原本）</small></h2>"
+            } else {
+                "<h2>原本<small>取り込んだ資料</small></h2>"
+            },
             archived = if archive_tree.leaves.is_empty() {
                 String::new()
             } else {

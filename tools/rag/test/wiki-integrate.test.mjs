@@ -214,7 +214,9 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
 
   // The contents name the kinds of pages and the three operations.
   const contents = await readFile(join(base, 'wiki', 'index.html'), 'utf8');
-  assert.match(contents, /<h2>考え方・用語（concepts）<small>2<\/small><\/h2>.*<h2>資料の要約（sources）<small>1<\/small><\/h2>/su);
+  // The pages by the folders of wiki/, and the files of raw/ with what became of each.
+  assert.match(contents, /<h2 class="root">wiki\/<small>AI が書くページ · 3 件<\/small><\/h2>.*<h3>concepts\/<small>2<\/small><\/h3>.*<h3>sources\/<small>1<\/small><\/h3>/su);
+  assert.match(contents, /<h2 class="root"><a href="\.\.\/raw\/">raw\/<\/a><small>集めた資料（原本）· 0 件<\/small><\/h2>/u);
   for (const name of ['取り込む（ingest）', '質問する（query）', '点検する（lint）', '決まり（schema）', '記録（log）']) assert.ok(contents.includes(name), name);
 });
 

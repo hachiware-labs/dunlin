@@ -43,6 +43,9 @@ const STYLE: &str = concat!(
     "#q:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}",
     "section{margin-top:36px}",
     "h2{display:flex;align-items:baseline;gap:8px;font-size:15px;font-weight:650;margin:0 0 10px}h2 small{font-size:12px;font-weight:400;color:var(--muted)}",
+    "h2.root{margin:44px 0 0;padding-top:20px;border-top:1px solid var(--line);font:650 19px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace}h2.root small{font-family:Inter,'Segoe UI','Hiragino Sans','Noto Sans JP',Meiryo,sans-serif}h2.root a{color:inherit}",
+    "h3{display:flex;align-items:baseline;gap:8px;margin:0 0 8px;font:600 14px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted)}h3 small{font:400 12px Inter,'Segoe UI',sans-serif}",
+    "section[data-group]{margin-top:20px}.files small.todo{color:var(--accent)}",
     ".pages{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--card)}",
     ".pages li+li{border-top:1px solid var(--line)}",
     ".pages a{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 16px;padding:12px 16px;color:var(--text)}.pages a:hover{background:var(--hover);text-decoration:none}",
@@ -159,18 +162,120 @@ pub(crate) fn folder(id: &str) -> &str {
     id.rfind('/').map_or("", |at| &id[..at])
 }
 
-/// What a folder is called in the contents. The kinds of pages of an LLM Wiki say what they hold.
-fn folder_label(folder: &str) -> String {
-    match folder {
-        "sources" => "資料の要約（sources）".to_owned(),
-        "entities" => "人・組織・もの（entities）".to_owned(),
-        "concepts" => "考え方・用語（concepts）".to_owned(),
-        other => other.to_owned(),
+/// A file of `raw/` and what became of it.
+pub(crate) struct RawFile {
+    /// The path from `raw/`, with `/` between its parts.
+    pub path: String,
+    /// The source it was taken in as, when it was.
+    pub source: Option<String>,
+    /// Whether the pages cite it.
+    pub reflected: bool,
+}
+
+/// What became of a raw file, in a word.
+pub(crate) fn raw_state(file: &RawFile) -> &'static str {
+    match (&file.source, file.reflected) {
+        (None, _) => "未取り込み",
+        (Some(_), false) => "未反映",
+        (Some(_), true) => "反映済み",
     }
 }
 
-/// The entries by folder, in the order of their IDs. Pages outside every folder come first, and
-/// archived pages last, each under a name of their own.
+/// The sources of the state: their ID, their record and whether the pages cite them.
+pub(crate) fn sources(connection: &Connection) -> Vec<(String, ConfigValue, bool)> {
+    let Ok(mut statement) =
+        connection.prepare("SELECT id, data, reflected FROM wiki_sources ORDER BY id")
+    else {
+        return Vec::new();
+    };
+    statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)? != 0,
+            ))
+        })
+        .map(|rows| {
+            rows.filter_map(Result::ok)
+                .filter_map(|(id, data, reflected)| Some((id, parse(&data).ok()?, reflected)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The files of `raw/` by path, each with the source it was taken in as, and the sources that
+/// are not in `raw/`. A source is a file of `raw/` by the path in its address, and a web page by
+/// the place an address is kept at.
+pub(crate) fn raw_files<'a>(
+    raw: &str,
+    sources: &'a [(String, ConfigValue, bool)],
+) -> (Vec<RawFile>, Vec<&'a (String, ConfigValue, bool)>) {
+    let mut found: Vec<String> = Vec::new();
+    let mut directories = vec![raw.to_owned()];
+    while let Some(directory) = directories.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if name.starts_with('.') || kind.is_symlink() {
+                continue;
+            }
+            let path = node_path::join(&directory, &[&name]);
+            if kind.is_dir() {
+                directories.push(path);
+            } else {
+                found.push(node_path::relative(raw, &path).replace('\\', "/"));
+            }
+        }
+    }
+    found.sort();
+    let place = |source: &ConfigValue| -> Option<String> {
+        let url = string_field(source, "url")?;
+        if crate::wiki_fetch::is_web_address(url) {
+            return None;
+        }
+        let file = url::Url::parse(url).ok()?.to_file_path().ok()?;
+        let within = node_path::relative(raw, &file.to_string_lossy());
+        (!within.is_empty() && !within.starts_with("..") && !node_path::is_absolute(&within))
+            .then(|| within.replace('\\', "/"))
+    };
+    let mut used = vec![false; sources.len()];
+    let files = found
+        .into_iter()
+        .map(|path| {
+            let at = sources.iter().position(|(_, source, _)| {
+                place(source).as_deref() == Some(path.as_str())
+                    || string_field(source, "url").is_some_and(|url| {
+                        crate::wiki_fetch::is_web_address(url)
+                            && crate::wiki_fetch::kept_at(url, &path)
+                    })
+            });
+            if let Some(at) = at {
+                used[at] = true;
+            }
+            RawFile {
+                path,
+                source: at.map(|at| sources[at].0.clone()),
+                reflected: at.is_some_and(|at| sources[at].2),
+            }
+        })
+        .collect();
+    let outside = sources
+        .iter()
+        .zip(used)
+        .filter(|(_, used)| !used)
+        .map(|(source, _)| source)
+        .collect();
+    (files, outside)
+}
+
+/// The entries by folder, in the order of their IDs: pages outside every folder first, under no
+/// name, then each folder by its path, as `concepts/`, and archived pages last.
 pub(crate) fn groups(entries: &[Entry]) -> Vec<(String, Vec<&Entry>)> {
     let mut groups: Vec<(String, Vec<&Entry>)> = Vec::new();
     let mut put = |name: &str, entry| match groups.iter_mut().find(|(group, _)| group == name) {
@@ -179,12 +284,12 @@ pub(crate) fn groups(entries: &[Entry]) -> Vec<(String, Vec<&Entry>)> {
     };
     for entry in entries.iter().filter(|entry| !entry.archived) {
         if folder(&entry.id).is_empty() {
-            put("トップ", entry);
+            put("", entry);
         }
     }
     for entry in entries.iter().filter(|entry| !entry.archived) {
         if !folder(&entry.id).is_empty() {
-            put(&folder_label(folder(&entry.id)), entry);
+            put(&format!("{}/", folder(&entry.id)), entry);
         }
     }
     for entry in entries.iter().filter(|entry| entry.archived) {
@@ -314,6 +419,10 @@ pub(crate) struct About<'a> {
     pub rules: Option<String>,
     /// The link to the folder of raw sources, when the project has one.
     pub raw: Option<String>,
+    /// The name of the folder of pages, as `wiki`.
+    pub folder: &'a str,
+    /// The files of `raw/`, when the project has it.
+    pub raw_files: &'a [RawFile],
     pub log: bool,
 }
 
@@ -351,16 +460,24 @@ pub(crate) fn catalog(about: &About<'_>, entries: &[Entry]) -> String {
                 escape_html(day)
             ))
     );
-    body += "<input id=\"q\" type=\"search\" placeholder=\"ページを絞り込む（題名と要約）\" aria-label=\"ページを絞り込む\"></header>";
+    body += "<input id=\"q\" type=\"search\" placeholder=\"ページと原本を絞り込む（題名、要約、ファイル名）\" aria-label=\"ページと原本を絞り込む\"></header>";
+    body += &format!(
+        "<h2 class=\"root\">{}/<small>AI が書くページ · {active} 件</small></h2>",
+        escape_html(about.folder)
+    );
     if entries.is_empty() {
         body += "<section><p class=\"meta\">まだページがありません。<code>nest ingest</code> に資料を渡すと、AI が読んでページを書きます。</p></section>";
     }
     for (name, list) in groups(entries) {
-        body += &format!(
-            "<section data-group><h2>{}<small>{}</small></h2><ul class=\"pages\">",
-            escape_html(&name),
-            list.len()
-        );
+        body += &if name.is_empty() {
+            "<section data-group><ul class=\"pages\">".to_owned()
+        } else {
+            format!(
+                "<section data-group><h3>{}<small>{}</small></h3><ul class=\"pages\">",
+                escape_html(&name),
+                list.len()
+            )
+        };
         for entry in list {
             let line = format!("{} {} {}", entry.title, entry.summary, entry.id).to_lowercase();
             body += &format!(
@@ -375,7 +492,58 @@ pub(crate) fn catalog(about: &About<'_>, entries: &[Entry]) -> String {
         }
         body += "</ul></section>";
     }
-    body += "<p id=\"none\" class=\"meta\" hidden>該当するページがありません。</p>";
+    if let Some(raw) = &about.raw {
+        body += &format!(
+            "<h2 class=\"root\"><a href=\"{}\">raw/</a><small>集めた資料（原本）· {} 件</small></h2>",
+            escape_html(raw),
+            about.raw_files.len()
+        );
+        if about.raw_files.is_empty() {
+            body += "<section><p class=\"meta\">まだ資料がありません。<code>raw/</code> にファイルを置き、<code>nest ingest raw/&lt;ファイル&gt;</code> で取り込みます。</p></section>";
+        }
+        let mut folders: Vec<(&str, Vec<&RawFile>)> = Vec::new();
+        for file in about.raw_files {
+            let folder = file.path.rfind('/').map_or("", |at| &file.path[..=at]);
+            match folders.iter_mut().find(|(name, _)| *name == folder) {
+                Some((_, list)) => list.push(file),
+                None => folders.push((folder, vec![file])),
+            }
+        }
+        // Each folder before the folders in it: the files at the top first.
+        folders.sort_by(|a, b| a.0.cmp(b.0));
+        for (folder, list) in folders {
+            body += &if folder.is_empty() {
+                "<section data-group><ul class=\"pages files\">".to_owned()
+            } else {
+                format!(
+                    "<section data-group><h3>{}<small>{}</small></h3><ul class=\"pages files\">",
+                    escape_html(folder),
+                    list.len()
+                )
+            };
+            for file in list {
+                let name = &file.path[folder.len()..];
+                let link = format!(
+                    "{raw}{}",
+                    file.path
+                        .split('/')
+                        .map(encode_uri_component)
+                        .collect::<Vec<_>>()
+                        .join("/")
+                );
+                body += &format!(
+                    "<li data-text=\"{}\"><a href=\"{}\"><strong>{}</strong><small class=\"{}\">{}</small></a></li>",
+                    escape_html(&file.path.to_lowercase()),
+                    escape_html(&link),
+                    escape_html(name),
+                    if file.reflected { "done" } else { "todo" },
+                    raw_state(file)
+                );
+            }
+            body += "</ul></section>";
+        }
+    }
+    body += "<p id=\"none\" class=\"meta\" hidden>該当するページも原本もありません。</p>";
     body += concat!(
         "<section class=\"guide\"><h2>この Wiki の保ち方</h2><ul>",
         "<li>原本は人が集め、ページは AI が書いて保ちます。資料が増えるたびに、関係するページに書き足します。保存の前に、Knowledge-Nest が引用を原本と照らして確かめます。ページはこのフォルダの HTML ファイルそのものです。ページの内容は、各ファイルの末尾にある JSON（<code>knowledge-nest-page</code>）にあり、画面に見える部分はそこから作られます。</li>",
@@ -726,6 +894,20 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
             }
         }
     }
+    // The two folders of the pattern: the pages, and the raw sources with what became of each.
+    let pages_folder = std::path::Path::new(&folder).file_name().map_or_else(
+        || "wiki".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let raw = crate::wiki_fetch::raw_folder(&project.request.root);
+    let raw_link = raw
+        .as_ref()
+        .map(|raw| url_path(&node_path::relative(&folder, raw)) + "/");
+    let known_sources = self::sources(connection);
+    let raw_files = raw
+        .as_deref()
+        .map(|raw| raw_files(raw, &known_sources).0)
+        .unwrap_or_default();
     let about = &project.request.about;
     let title = str_of(about, "title");
     if !taken("log") {
@@ -756,10 +938,9 @@ pub(crate) fn sync(project: &Project<'_>, connection: &Connection) -> Result<(),
                     sources: usize::try_from(sources).unwrap_or(0),
                     pending: usize::try_from(pending).unwrap_or(0),
                     rules,
-                    raw: crate::wiki_fetch::raw_folder(&project.request.root).map(|raw| {
-                        let relative = node_path::relative(&folder, &raw);
-                        url_path(&relative) + "/"
-                    }),
+                    raw: raw_link,
+                    folder: &pages_folder,
+                    raw_files: &raw_files,
                     log: !taken("log"),
                 },
                 &entries(&all),
@@ -830,8 +1011,8 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                ("トップ".to_owned(), vec!["home"]),
-                ("a".to_owned(), vec!["a/scrum", "a/sprint"]),
+                (String::new(), vec!["home"]),
+                ("a/".to_owned(), vec!["a/scrum", "a/sprint"]),
                 ("アーカイブ".to_owned(), vec!["old/x"]),
             ]
         );
@@ -877,6 +1058,19 @@ mod tests {
                 pending: 1,
                 rules: Some("../rules.md".into()),
                 raw: Some("../raw/".into()),
+                folder: "wiki",
+                raw_files: &[
+                    RawFile {
+                        path: "a/x.md".into(),
+                        source: Some("source-1".into()),
+                        reflected: true,
+                    },
+                    RawFile {
+                        path: "b.md".into(),
+                        source: None,
+                        reflected: false,
+                    },
+                ],
                 log: true,
             },
             &entries(&sample()),
@@ -886,7 +1080,11 @@ mod tests {
         assert!(html.contains(
             "<p class=\"meta\">ページ 3 件 · 原本 3 件（未反映 1 件） · 最終更新 2026-11-22</p>"
         ));
-        assert!(html.contains("<section data-group><h2>a<small>2</small></h2><ul class=\"pages\"><li data-text=\"スクラム スクラムはスプリントで進める枠組みである。 a/scrum\"><a href=\"a/scrum.html\"><strong>スクラム</strong><small>出典 1 · 2026-11-22</small>"));
+        // The two folders, as they are: wiki/ with its folders of pages, raw/ with its files.
+        assert!(html.contains("<h2 class=\"root\">wiki/<small>AI が書くページ · 3 件</small></h2><section data-group><ul class=\"pages\"><li data-text=\"はじめに"));
+        assert!(html.contains("<section data-group><h3>a/<small>2</small></h3><ul class=\"pages\"><li data-text=\"スクラム スクラムはスプリントで進める枠組みである。 a/scrum\"><a href=\"a/scrum.html\"><strong>スクラム</strong><small>出典 1 · 2026-11-22</small>"));
+        // The files at the top of raw/ come first, then each folder.
+        assert!(html.contains("<h2 class=\"root\"><a href=\"../raw/\">raw/</a><small>集めた資料（原本）· 2 件</small></h2><section data-group><ul class=\"pages files\"><li data-text=\"b.md\"><a href=\"../raw/b.md\"><strong>b.md</strong><small class=\"todo\">未取り込み</small></a></li></ul></section><section data-group><h3>a/<small>1</small></h3><ul class=\"pages files\"><li data-text=\"a/x.md\"><a href=\"../raw/a/x.md\"><strong>x.md</strong><small class=\"done\">反映済み</small>"));
         assert!(html.contains("<a href=\"../rules.md\">rules.md</a>"));
         assert!(html.contains("<a href=\"../raw/\">raw/</a>"));
         assert!(html.contains("<a href=\"log.html\">作業の記録</a>"));
@@ -894,6 +1092,66 @@ mod tests {
             .encode(Sha256::digest(FILTER_SCRIPT.as_bytes()));
         assert!(html.contains(&format!("script-src 'sha256-{hash}'")));
         assert!(html.contains(&format!("<script>{FILTER_SCRIPT}</script>")));
+    }
+
+    #[test]
+    fn the_files_of_raw_are_matched_with_their_sources() {
+        let folder =
+            std::env::temp_dir().join(format!("knowledge-nest-raw-{}", std::process::id()));
+        let raw = folder.to_string_lossy().into_owned();
+        for path in [
+            "a/x.md",
+            "b.md",
+            "example.com/manuals/pump.html",
+            "example.com/manuals/pump-0123abcd.html",
+        ] {
+            let file = folder.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, path).unwrap();
+        }
+        let file_url = |path: &str| {
+            url::Url::from_file_path(folder.join(path))
+                .unwrap()
+                .to_string()
+        };
+        let source = |id: &str, url: &str, reflected: bool| {
+            (
+                id.to_owned(),
+                crate::index_stage::object(vec![("url", text(url))]),
+                reflected,
+            )
+        };
+        let sources = vec![
+            source("s1", &file_url("a/x.md"), true),
+            source("s2", "https://example.com/manuals/pump", false),
+            source("s3", "file:///elsewhere/y.md", true),
+        ];
+        let (files, outside) = raw_files(&raw, &sources);
+        let seen: Vec<(&str, Option<&str>, &str)> = files
+            .iter()
+            .map(|file| (file.path.as_str(), file.source.as_deref(), raw_state(file)))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                ("a/x.md", Some("s1"), "反映済み"),
+                ("b.md", None, "未取り込み"),
+                (
+                    "example.com/manuals/pump-0123abcd.html",
+                    Some("s2"),
+                    "未反映"
+                ),
+                ("example.com/manuals/pump.html", Some("s2"), "未反映"),
+            ]
+        );
+        assert_eq!(
+            outside
+                .iter()
+                .map(|(id, _, _)| id.as_str())
+                .collect::<Vec<_>>(),
+            ["s3"]
+        );
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

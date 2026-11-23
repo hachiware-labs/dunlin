@@ -152,9 +152,18 @@ pub(crate) fn fetch(input: &str, root: &str, artifacts: &str) -> Result<Fetched,
     } else {
         bytes
     };
-    // The host and the folders of the path, as `raw/example.com/manuals/`.
-    let mut folders = vec![sanitize(landed.host_str().unwrap_or("web"))];
-    if let Some(segments) = landed.path_segments() {
+    let file = keep_source(root, artifacts, &raw_folders(&landed), &name, &bytes)?;
+    Ok(Fetched {
+        file,
+        url: url.to_string(),
+    })
+}
+
+/// The folders a web page is kept in under `raw/`: its host and the folders of its path, as
+/// `example.com/manuals`.
+fn raw_folders(url: &url::Url) -> Vec<String> {
+    let mut folders = vec![sanitize(url.host_str().unwrap_or("web"))];
+    if let Some(segments) = url.path_segments() {
         let segments: Vec<&str> = segments.collect();
         for segment in &segments[..segments.len().saturating_sub(1)] {
             let decoded = percent_encoding::percent_decode_str(segment)
@@ -166,11 +175,40 @@ pub(crate) fn fetch(input: &str, root: &str, artifacts: &str) -> Result<Fetched,
             }
         }
     }
-    let file = keep_source(root, artifacts, &folders, &name, &bytes)?;
-    Ok(Fetched {
-        file,
-        url: url.to_string(),
-    })
+    folders
+}
+
+/// Whether a file of `raw/`, by its path from there, is where a web address was kept: the
+/// folders of the address and its name, with an extension and the start of a SHA-256 or not.
+pub(crate) fn kept_at(address: &str, path: &str) -> bool {
+    let Ok(url) = url::Url::parse(address) else {
+        return false;
+    };
+    let name = url
+        .path_segments()
+        .and_then(|mut segments| segments.next_back().map(str::to_owned))
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| {
+            percent_encoding::percent_decode_str(&segment)
+                .decode_utf8_lossy()
+                .into_owned()
+        });
+    let name = sanitize(&name.unwrap_or_else(|| url.host_str().unwrap_or("page").to_owned()));
+    let mut stem = raw_folders(&url).join("/");
+    stem.push('/');
+    stem.push_str(&name);
+    let Some(rest) = path.strip_prefix(&stem) else {
+        return false;
+    };
+    let rest = match rest.strip_prefix('-') {
+        Some(after)
+            if after.len() >= 8 && after[..8].bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+        {
+            &after[8..]
+        }
+        _ => rest,
+    };
+    rest.is_empty() || (rest.starts_with('.') && !rest.contains('/'))
 }
 
 /// The media type of a `content-type` header, in lower case and without parameters.

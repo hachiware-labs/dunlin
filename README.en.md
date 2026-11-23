@@ -67,10 +67,14 @@ nest serve               # open http://127.0.0.1:4319 in a browser
 
 **Compared with other ways**
 
-- **Rather than a tool that only has an AI summarize.** Each page keeps the documents it was written from as its sources, and a program checks that its numbers, dates and quotations are in them. When a document gets a new version, `nest lint` points out the pages written from the old one.
-- **Knowledge stays as files on your machine.** Pages are HTML files in `wiki/`, originals are files in `raw/`. They open without a server and can go to other tools. Each change the AI makes is recorded as a job and `nest undo` takes it back; originals are never changed.
-- **People and agents use the same pages.** People read in a browser and instruct a page, such as "list the checks before inspection as bullets". Agents look up the same pages over MCP.
-- **Pages behind a sign-in can be ingested.** Sign in once in nest's own browser, and internal pages drawn by scripts, or posts on X, are taken in as originals.
+Have a chat summarize your documents, and the answer is gone when the chat ends. Have a notes app's AI write, and you no longer know what came from the documents. Knowledge-Nest's Wiki piles up what it read as pages with sources, and follows the documents when they change.
+
+- **Knowledge piles up.** A new document extends the pages it concerns. A document with nothing new is recorded as having nothing to add, and does not pad the Wiki. An answer worth keeping becomes a page with `nest save-answer`.
+- **When a document is revised, only its pages are rewritten.** Ingest a new version, and the AI rewrites just the pages written from that document. `nest lint` points out pages not yet brought up to date.
+- **A program doubts what the AI wrote.** At every ingest, the numbers, dates and quotations of a page are checked against its sources. `nest lint --content` names contradictions between pages, terms with no page, and even questions to look into next and documents to look for.
+- **What people know is kept as a source too.** Field knowledge that is in no document, such as "we actually replace it every three months", is recorded with who said it, and the page is fixed with it as a source. Each change the AI makes is recorded as a job, and `nest undo` takes it back. Originals are never changed.
+- **Knowledge stays as files on your machine.** Pages are HTML files in `wiki/`, with a contents page (`index.html`) and a log of the work (`log.html`). They open without a server and move with the folder. People use the pages in a browser, and agents the same pages over MCP.
+- **Collect from pages behind a sign-in, and from X.** Sign in once in nest's own browser, and internal pages can be ingested. X bookmarks come in one post at a time, with the pages they link to and the posts they quote.
 
 It follows Andrej Karpathy's LLM-Wiki idea ([what an LLM-Wiki is](#what-an-llm-wiki-is)). [Wiki guide](docs/start-wiki.en.md)
 
@@ -89,9 +93,13 @@ You list your projects and areas in `rules.md`. The AI picks, from that list, wh
 
 **Compared with other ways**
 
-- **Rather than filing by hand in a notes app.** Put documents in, and the AI writes how each serves a project in a note and puts it where it will be used, with a copy of the document beside it.
-- **No folders appear on their own.** The AI can only use the projects and areas you listed in `rules.md`. A note aimed anywhere else is not saved, and you are told.
-- **Put away a finished project in one step.** `nest archive` moves its notes, document copies, links from other notes and its line of `rules.md` to Archives together; `nest undo` brings them back. `nest lint` points out projects past their deadline.
+PARA takes effort to keep up. Each new document needs a decision about which project it serves, and each finished project needs putting away; that effort is where PARA tends to fall apart. Knowledge-Nest hands that effort to the AI and to commands, and leaves setting the frame to you.
+
+- **Not just filed, but with how to use it.** A note says how this document serves this project. Unlike filing that stops at a folder, you can tell later why it is there.
+- **You set the frame, the AI keeps to it.** The AI can only use the projects and areas you listed in `rules.md`. A note aimed anywhere else is not saved, and its document stays pending; list the project and run `nest ingress --pending` to place it.
+- **A project's folder is ready to use.** A copy of each document sits in `資料/` beside its note, so opening a project's folder gives you the notes and the originals together.
+- **Put away in one step, and bring back any time.** `nest archive` moves a project's notes, document copies, links from other notes and its line of `rules.md` to Archives together; `--restore` or `nest undo` brings them back. `nest lint` points out projects past their deadline.
+- **Agents look things up in the context of your current work.** Notes are served over MCP too, so ask Claude "which parts do we replace in next month's work?" and it answers from that project's notes. Checks against sources, undo and the browser screen are shared with the Wiki.
 
 ## What all of them share
 

@@ -96,6 +96,10 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   const first = await run('ingest', join(root, 'guide.md'));
   assert.equal(first.status, 'succeeded', JSON.stringify(first.errors));
   assert.equal(first.command, 'ingress');
+  // A source from outside raw/ is copied into raw/ and read from there.
+  assert.equal(await readFile(join(base, 'raw', 'guide.md'), 'utf8'), 'スクラムは枠組みである。\nスプリントは1か月以内。\n');
+  const cited = JSON.parse(/id="knowledge-nest-page">(.*?)<\/script>/su.exec(await readFile(join(base, 'wiki', 'concepts', 'scrum.html'), 'utf8'))[1]);
+  assert.match(cited.citations[0].source.url, /\/kb\/raw\/guide\.md$/u);
   assert.deepEqual(first.data.pages.map(({ id }) => id), ['concepts/scrum', 'sources/guide']);
   assert.equal(requests.length, 1);
   assert.deepEqual(sent(0).pages, []);
@@ -132,6 +136,13 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   await writeFile(join(root, 'guide.md'), 'スクラムは軽量な枠組みである。\nスプリントは1か月以内。\n');
   const changed = await run('ingest', join(root, 'guide.md'));
   assert.equal(changed.status, 'succeeded', JSON.stringify(changed.errors));
+  // The changed file is a new copy beside the first, which stays as it was, and a new version of
+  // the same source.
+  assert.deepEqual(changed.data.source_ids, first.data.source_ids);
+  const copies = (await readdir(join(base, 'raw'))).filter((name) => name.startsWith('guide')).sort();
+  assert.equal(copies.length, 2);
+  assert.match(copies[0], /^guide-[0-9a-f]{8}\.md$/u);
+  assert.equal(await readFile(join(base, 'raw', 'guide.md'), 'utf8'), 'スクラムは枠組みである。\nスプリントは1か月以内。\n');
   assert.equal(requests.length, 4);
   assert.deepEqual(sent(3).pages_needing_revision, ['concepts/scrum', 'sources/guide']);
   assert.equal(sent(3).sources.length, 1);
@@ -216,7 +227,7 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   const contents = await readFile(join(base, 'wiki', 'index.html'), 'utf8');
   // The pages by the folders of wiki/, and the files of raw/ with what became of each.
   assert.match(contents, /<h2 class="root">wiki\/<small>AI が書くページ · 3 件<\/small><\/h2>.*<h3>concepts\/<small>2<\/small><\/h3>.*<h3>sources\/<small>1<\/small><\/h3>/su);
-  assert.match(contents, /<h2 class="root"><a href="\.\.\/raw\/">raw\/<\/a><small>集めた資料（原本）· 0 件<\/small><\/h2>/u);
+  assert.match(contents, /<h2 class="root"><a href="\.\.\/raw\/">raw\/<\/a><small>集めた資料（原本）· 4 件<\/small><\/h2>/u);
   for (const name of ['取り込む（ingest）', '質問する（query）', '点検する（lint）', '決まり（schema）', '記録（log）']) assert.ok(contents.includes(name), name);
 });
 

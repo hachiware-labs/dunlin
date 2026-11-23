@@ -121,7 +121,9 @@ function normalizer() {
     .replace(/<!-- knowledge-nest:publication ([\w-]+) -->/gu, (_, data) => '<!-- ' + Buffer.from(data, 'base64url').toString('utf8') + ' -->')
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/gu, 'TIME')
     // Also in the record of a page file that a work kept as text, escaped once more.
-    .replace(/(\\*")(acquiredAtMs|pid)\1:\d+/gu, '$1$2$1:0')
+    // The copy of a source in raw/ keeps the time of its file, which each side writes to the
+    // millisecond in its own way.
+    .replace(/(\\*")(acquiredAtMs|modifiedAtMs|pid)\1:\d+/gu, '$1$2$1:0')
     .replace(/(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/gu, (digest) => {
       if (!digests.has(digest)) digests.set(digest, 'digest-' + digests.size);
       return digests.get(digest);
@@ -224,7 +226,10 @@ test('runs Wiki and PARA commands like the former JavaScript code', { timeout: 6
     'image.xyz': 'unsupported\n',
   };
   for (const [name, content] of Object.entries(files)) await writeFile(join(sources, name), content);
-  const [actualIds, expectedIds] = [normalizer(), normalizer()];
+  const [actualIds, referenceIds] = [normalizer(), normalizer()];
+  // Each copy keeps the sources in its own raw/: the paths of the reference's copy are named as
+  // those of the CLI's.
+  const expectedIds = (text) => referenceIds(text.replace(/(?<=[\\/])(wiki|para)-ref(?=[\\/])/gu, '$1'));
 
   const check = (pair) => {
     /**

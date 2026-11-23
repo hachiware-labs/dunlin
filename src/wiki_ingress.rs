@@ -577,6 +577,8 @@ pub(crate) fn ingress(
     };
     // Files downloaded from web addresses, with the address each stands for.
     let mut fetched: HashMap<String, String> = HashMap::new();
+    // The folder that the files of a folder given as input are in: its name, as `manuals`.
+    let mut folder_of: HashMap<String, String> = HashMap::new();
     let mut addresses = 0;
     for input in request.args.iter().flatten() {
         if crate::wiki_fetch::is_web_address(input) {
@@ -602,7 +604,12 @@ pub(crate) fn ingress(
         if metadata.is_dir() {
             let mut listed = Vec::new();
             list_files(&root, &mut listed)?;
+            let name = std::path::Path::new(&root)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
             for file in listed {
+                folder_of.insert(file.clone(), name.clone());
                 let relative = node_path::relative(&root, &file);
                 let object_id = if cfg!(windows) {
                     relative.replace('\\', "/")
@@ -617,6 +624,45 @@ pub(crate) fn ingress(
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default();
             add(&mut files, root.clone(), name);
+        }
+    }
+    // A file from outside raw/ is copied into it and read from there: raw/ holds every source.
+    // It stays the source of its first path, so a changed file is a new version of it.
+    let mut origins: HashMap<String, String> = HashMap::new();
+    if !dry_run && let Some(raw) = crate::wiki_fetch::raw_folder(&request.root) {
+        let raw = realpath(&raw)?;
+        for (file, object_id) in &mut files {
+            let within = node_path::relative(&raw, file);
+            let outside = within == ".."
+                || within.starts_with("../")
+                || within.starts_with("..\\")
+                || node_path::is_absolute(&within);
+            if !outside || fetched.contains_key(file.as_str()) {
+                continue;
+            }
+            let bytes = std::fs::read(&*file).map_err(|error| fs_error("open", file, &error))?;
+            let mut folders: Vec<String> =
+                folder_of.get(file.as_str()).cloned().into_iter().collect();
+            let mut parts: Vec<&str> = object_id.split('/').collect();
+            let name = parts.pop().unwrap_or_default().to_owned();
+            folders.extend(parts.into_iter().map(str::to_owned));
+            let copy = crate::wiki_fetch::keep_source(
+                &request.root,
+                &request.artifacts,
+                &folders,
+                &name,
+                &bytes,
+            )?;
+            // The copy keeps the time the file was last changed: it is when the source was written.
+            let changed = std::fs::metadata(&*file)
+                .and_then(|metadata| metadata.modified())
+                .map_err(|error| fs_error("stat", file, &error))?;
+            std::fs::File::options()
+                .write(true)
+                .open(&copy)
+                .and_then(|handle| handle.set_modified(changed))
+                .map_err(|error| fs_error("utime", &copy, &error))?;
+            origins.insert(copy.clone(), std::mem::replace(file, copy));
         }
     }
     let pending_only = truthy(project.value("pending"));
@@ -634,7 +680,7 @@ pub(crate) fn ingress(
             let key = match (fetched.get(file), upload) {
                 (Some(url), _) => format!("url:{url}"),
                 (None, Some(name)) => format!("browser:{}", nfkc(name)),
-                (None, None) => file.clone(),
+                (None, None) => origins.get(file).unwrap_or(file).clone(),
             };
             (
                 format!("source-{}", &sha256_hex(key.as_bytes())[..24]),

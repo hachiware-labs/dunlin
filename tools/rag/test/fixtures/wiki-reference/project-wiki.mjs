@@ -2,7 +2,7 @@
 // project-wiki.mjs, project-wiki-inspection.mjs, project-wiki-work.mjs and the authoring helpers.
 // Tests compare the Rust implementation with it.
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, stat, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -706,12 +706,39 @@ export async function runWiki(db, project, command, args, values, runId, paths, 
     const path = /^~[\\/]/u.test(input) ? resolve(homedir(), input.slice(2)) : resolve(input);
     const root = await realpath(path);
     if ((await stat(root)).isDirectory()) {
-      for await (const file of listFiles(root)) files.set(file, { file, objectId: relative(root, file).split(sep).join('/') });
+      for await (const file of listFiles(root)) files.set(file, { file, objectId: relative(root, file).split(sep).join('/'), folder: basename(root) });
     } else files.set(root, { file: root, objectId: basename(root) });
+  }
+  // A file from outside raw/ is copied into it and read from there; it stays the source of its first path.
+  const raw = await realpath(join(project.root, 'raw')).catch(() => null);
+  if (!values['dry-run'] && raw && (await stat(raw)).isDirectory()) {
+    for (const entry of files.values()) {
+      const within = relative(raw, entry.file);
+      if (!(within === '..' || within.startsWith('..' + sep) || isAbsolute(within))) continue;
+      const bytes = await readFile(entry.file);
+      const parts = entry.objectId.split('/');
+      const name = parts.pop();
+      const folder = join(raw, ...(entry.folder ? [entry.folder] : []), ...parts);
+      await mkdir(folder, { recursive: true });
+      const digest = revision(bytes);
+      const dot = name.lastIndexOf('.');
+      for (const candidate of [name, dot > 0 ? name.slice(0, dot) + '-' + digest.slice(0, 8) + name.slice(dot) : name + '-' + digest.slice(0, 8)]) {
+        const existing = await readFile(join(folder, candidate)).catch(() => null);
+        if (existing && !existing.equals(bytes)) continue;
+        if (!existing) await writeFile(join(folder, candidate), bytes);
+        // The copy keeps the time the file was last changed.
+        const { atime, mtime } = await stat(entry.file);
+        await utimes(join(folder, candidate), atime, mtime);
+        entry.origin = entry.file;
+        entry.file = join(folder, candidate);
+        break;
+      }
+    }
   }
   if (!args.length && !values.pending) throw new WikiError(2, 'SOURCE_REQUIRED', 'Provide a path or specify --pending.');
   const grouped = [...files.values()].map((file) => ({ id: 'source-' +
-    revision(values.uploadName ? 'browser:' + values.uploadName.normalize('NFKC') : file.file).slice(0, 24), files: [file] }));
+    revision(values.uploadName ? 'browser:' + values.uploadName.normalize('NFKC') : file.origin ?? file.file).slice(0, 24),
+    files: [{ file: file.file, objectId: file.objectId }] }));
   const routes = defaultRoutes(loader.ocr === 'loader.ocr');
   const skipped = unsupportedFiles(grouped, routes);
   const pending = values.pending ? db.prepare('SELECT id, data FROM wiki_sources WHERE reflected = 0').all() : [];

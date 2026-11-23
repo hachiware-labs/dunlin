@@ -49,7 +49,7 @@ In `--purpose`, write in a line or two what this Wiki is for. It becomes the des
 
 ## 3 Ingest documents
 
-Put the documents in `raw/` in the Wiki's folder and ingest them from there. The AI only reads what is in `raw/` and never changes it. The pages it writes are in `wiki/`, and the rules for writing them are in `rules.md`.
+Put the documents in `raw/` in the Wiki's folder and ingest them from there. Files and folders from outside `raw/` are copied into it first and read from there. The AI only reads what is in `raw/` and never changes it. The pages it writes are in `wiki/`, and the rules for writing them are in `rules.md`.
 
 ```sh
 cp ../manuals/*.md raw/

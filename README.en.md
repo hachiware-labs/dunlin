@@ -31,7 +31,7 @@ Folder of documents ──→ Knowledge-Nest ──┼─ RAG    answers with so
 
 If unsure, start with MCP: it needs no model. See [Install](#install); a step-by-step walkthrough is in [Getting started](docs/getting-started.en.md), and how the four forms differ is in [How the four forms differ](docs/forms.en.md).
 
-## And each one is far less work
+## Every database, with little effort
 
 It does not just make them all. For every form, Knowledge-Nest takes on the chores that building the same thing with other libraries leaves to you. The comparison, including when another way suits better, is in [Where Knowledge-Nest fits](docs/comparison.md) (Japanese).
 

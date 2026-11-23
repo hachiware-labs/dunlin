@@ -90,7 +90,7 @@ Claude   毎月最初の営業日です。点検の前にポンプを止め、�
 | PDF、Word、Excel、PowerPoint、HTML を読む | 標準の `loader.auto` が読む。スキャンした PDF や画像は `nest add ocr` で OCR を足す |
 | 読ませたくないファイルがある | `source.filesystem` の `exclude` に書く |
 
-変えた結果が良くなったかは、勘ではなく数字で確かめられます。[使いこなす](guide.md) · [検索評価とユーザー辞書](evaluation.md)
+変えた結果が良くなったかは、勘ではなく数字で確かめられます。[検索を数字で良くする](guide.md) · [検索評価とユーザー辞書](evaluation.md)
 
 ## 5 うまくいかないとき
 

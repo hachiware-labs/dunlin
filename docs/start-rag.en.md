@@ -101,6 +101,6 @@ Other cases are in [Troubleshooting](troubleshooting.md) (Japanese).
 
 ## Where next
 
-- Improve answers by numbers: [Guide](guide.en.md) · [Evaluation and dictionary](evaluation.md) (Japanese)
+- Improve answers by numbers: [Improve search by numbers](guide.en.md) · [Evaluation and dictionary](evaluation.md) (Japanese)
 - Let an agent search directly: [MCP](start-mcp.en.md)
 - Response shape and settings in detail: [MCP and RAG](mcp.md) (Japanese)

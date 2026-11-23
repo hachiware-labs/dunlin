@@ -151,4 +151,4 @@ nest verify --content
 
 - 行動に沿ってノートを整理したい：[PARA 入門](start-para.md)
 - 画面の操作の詳細：[Wiki・PARA の使い方](wiki.md)
-- 仕組みの詳細：[設計仕様 13〜16章](knowledge-nest-spec.md#13-llm-wikipara側の概要)
+- ほかのマシンから画面を使わせる：[提供する入口と、接続を許す相手を決める](serve.md)

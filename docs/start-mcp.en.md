@@ -91,7 +91,7 @@ Edit `KnowledgeNestfile.yaml` and `build` again. `nest validate` checks the sett
 | Read PDF, Word, Excel, PowerPoint, HTML | The standard `loader.auto` reads them. For scanned PDFs and images, add OCR with `nest add ocr` |
 | Keep some files out | List them in `exclude` of `source.filesystem` |
 
-Whether a change helped can be checked by numbers, not by feel. [Guide](guide.en.md) · [Evaluation and dictionary](evaluation.md) (Japanese)
+Whether a change helped can be checked by numbers, not by feel. [Improve search by numbers](guide.en.md) · [Evaluation and dictionary](evaluation.md) (Japanese)
 
 ## 5 When something goes wrong
 

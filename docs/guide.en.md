@@ -1,4 +1,4 @@
-# Guide: change, measure, compare, release
+# Improve search by numbers: change, measure, compare, release
 
 [日本語](guide.md)
 
@@ -6,9 +6,9 @@
 
 You cannot tell how good search is by looking. A setting that helps one question may break another. In Knowledge-Nest, once you register pairs of a question and its answer, every change of setting tells you how many of the questions found their answer. And since only what you changed, and what follows it, is rebuilt, trying is fast, so you can compare as many variations as you like.
 
-It assumes `build` and `eval` work, as in [section 3 of Getting started](getting-started.en.md#3-improve-search-by-numbers-new-commands).
+It is easiest to read after you have search running with the [MCP](start-mcp.en.md) or [RAG](start-rag.en.md) introduction. Section 2 writes a first configuration, and the sections after it show how to improve it.
 
-> The new commands in this guide support text and Markdown (`.md`, `.markdown`, `.txt`), keyword search, and evidence recall for now. Vector search, user dictionaries, PDF and Office loading, `serve`, and more use the form of configuration that `init` writes (see [9 What still uses the earlier flow](#9-what-still-uses-the-earlier-flow)).
+> The new commands in this guide support text and Markdown (`.md`, `.markdown`, `.txt`), keyword search, and evidence recall for now. Vector search, user dictionaries, PDF and Office loading, `serve`, and more use the form of configuration that `init` writes (see [10 What still uses the earlier flow](#10-what-still-uses-the-earlier-flow)).
 
 ## 1 The idea
 
@@ -22,7 +22,90 @@ documents → extract → transform → index → search → eval
 - A result can have a name. Names live on separate shelves by kind: documents, chunks, indexes, evaluation data, and evaluation results.
 - Improving search is a loop: measure a baseline, change one thing, measure again, compare, choose.
 
-## 2 Prepare evaluation data
+## 2 Write a first configuration and measure
+
+### Write the configuration and build
+
+The new commands do not use `init`. They run from a configuration file whose sections are written as lists of steps. From the root of the repository, make a new folder:
+
+```sh
+mkdir store-demo
+cd store-demo
+mkdir docs
+cp ../examples/manuals/*.md docs/
+```
+
+Create `KnowledgeNestfile.yaml`. Each section (`extract`, `transform`, `index`) lists its steps from top to bottom, and the last `tag` names the result.
+
+```yaml
+extract:
+  - source.filesystem: { path: ./docs }
+  - loader.text: {}
+  - tag: docs
+
+transform:
+  - chunk.length: { unit: characters, size: 800, overlap: 100 }
+  - tag: chunks
+
+index:
+  - index.keyword: { tokenizer: lindera }
+  - tag: main
+
+search:
+  - retrieval.keyword: { top_k: 10 }
+```
+
+```sh
+nest build
+nest search "ポンプの点検はいつ実施しますか"
+nest list
+```
+
+`build` shows which sections ran and what changed among the documents. Run `build` again with nothing changed and it prints `Nothing ran: every result was there already.` and rebuilds nothing. `list` shows the named versions: documents, chunks, indexes, evaluation data, and evaluation results.
+
+### Measure
+
+Write pairs of a question and the quote that answers it (evaluation data) in `cases.json`:
+
+```json
+[
+  {
+    "id": "pump-check",
+    "question": "ポンプの点検はいつ",
+    "source": "docs",
+    "document": "maintenance.md",
+    "quote": "ポンプの点検は毎月最初の営業日に行う。",
+    "split": "dev"
+  }
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `source` | The name of the document folder (the `id` of `source.filesystem`; the folder name if you leave it out) |
+| `document` | The file's path inside that folder |
+| `quote` | The answer, quoted from a place that appears once in the document |
+| `split` | `dev` for tuning, `test` for the final check |
+
+Add an evaluation section at the end of the configuration, and measure:
+
+```yaml
+eval:
+  - eval.evidence: { data: default, split: dev }
+```
+
+```sh
+nest eval-data import cases.json
+nest eval
+```
+
+```text
+Recall: 1.000 (1 of 1 cases)
+```
+
+Recall is the share of questions whose quote was in the search result. Add questions, change a setting, measure again, compare, and choose. The sections that follow show how.
+
+## 3 Prepare evaluation data
 
 Evaluation data is a set of questions, each with the quote that answers it. Write a JSON array and bring it into the store with `eval-data import`.
 
@@ -48,7 +131,7 @@ nest eval-data import cases.json --tag v2
 
 > `eval-data generate`, which asks a model to propose questions and quotes, is a command of the earlier flow ([evaluation.md](evaluation.md), Japanese). You can write its candidates out as JSON and import them here.
 
-## 3 Measure a baseline and read the misses
+## 4 Measure a baseline and read the misses
 
 Add an evaluation section to the configuration:
 
@@ -91,7 +174,7 @@ missed    filter       フィルターの交換
 | "Replace every 2 years" does not say what it is about | Chunk context (section 5) |
 | The answer is found but ranked low | Change `top_k` of `retrieval.keyword` |
 
-## 4 Change one thing and compare (by hand)
+## 5 Change one thing and compare (by hand)
 
 Copy `KnowledgeNestfile.yaml` and rewrite only the sections you want to change. To keep the baseline's names where they are, give the changed sections new tags and start from the baseline's documents with `from`.
 
@@ -125,7 +208,7 @@ nest results
 - The result is kept as `trial-400`. `nest results` lists it next to the baseline's result, so you can compare recall.
 - A comparison is meaningful only if the evaluation data and method are the same. Keep `data` and `split` of `eval.evidence` identical.
 
-## 5 Give chunks some context
+## 6 Give chunks some context
 
 A chunk cut out of a document loses which document and which section it came from. With `context`, Knowledge-Nest puts that information at the start of the text the index searches.
 
@@ -146,7 +229,7 @@ transform:
 - Only Markdown `#` headings are read. Other formats give an empty list.
 - Changing `context` rebuilds chunks and the index. Documents are not read again.
 
-## 6 Try many settings at once (optimize)
+## 7 Try many settings at once (optimize)
 
 Instead of writing each candidate by hand, describe what to vary. Knowledge-Nest makes the candidates and measures them one after another.
 
@@ -225,7 +308,7 @@ nest eval .knowledge-nest/trials/tune/010.yaml
 
 > For now you can vary `transform`, `index`, and `search`. Options that rewrite `extract`, measures other than recall, and choosing the next values from earlier results are not there yet.
 
-## 7 Release
+## 8 Release
 
 What is served changes only when you say so. `build`, `eval`, and `optimize` never change it. Even after you add documents and rebuild, the previous index stays served until you check the new one and `release` it. A deleted document or a wrong setting never reaches users before you have looked.
 
@@ -249,7 +332,7 @@ nest release main           # serve the index you checked
 
 > `serve` does not read these served names yet. To serve over MCP or HTTP, use the earlier flow.
 
-## 8 Choose which changes of the folder to take in
+## 9 Choose which changes of the folder to take in
 
 `apply` of `source.filesystem` chooses which changes of the folder a build takes in.
 
@@ -264,8 +347,7 @@ extract:
 - Changes that were not taken in are shown by `build` as "Not taken in", and they take effect once you let the setting take them.
 - With `[add, update]`, for example, a document removed from the folder stays searchable.
 
-## 9 What still uses the earlier flow
-
+## 10 What still uses the earlier flow
 These are not in the new flow yet. Use the configuration that `nest init` writes.
 
 | To do this | Earlier command or page |
@@ -274,125 +356,32 @@ These are not in the new flow yet. Use the configuration that `nest init` writes
 | User dictionary | `dictionary suggest` and `dictionary add`. [Evaluation and dictionary](evaluation.md) |
 | Generate and review questions | `eval-data generate` and `eval-data review`. [Evaluation and dictionary](evaluation.md) |
 | PDF, Office, HTML, OCR | `loader.auto` and `nest add ocr`. [PDF extraction](pdf-extraction.md) |
-| Serve over MCP or HTTP, `ask` | `serve`, `ask`. [MCP and RAG](mcp.md) · [11 Choose what to serve and whom to let in](#11-choose-what-to-serve-and-whom-to-let-in) |
+| Serve over MCP or HTTP, `ask` | `serve`, `ask`. [MCP and RAG](mcp.md) · [Choose what to serve and whom to let in](serve.en.md) |
 | Tuning with an agent | [Agents and trials](agents.md) |
 
 Which flow a command uses depends on the form of the configuration file it reads. Sections written as lists of steps such as `- source.filesystem: ...` use the new flow; `modules:` with `use:` uses the earlier flow. One project may hold files of both forms. (Most of the linked pages are in Japanese.)
 
-## 10 Using Wiki and PARA well
+The two forms differ as follows.
 
-Wiki and PARA are a separate mechanism and are not in this guide's versioned store. See [Wiki and PARA](wiki.md) (Japanese). The essentials:
+The search commands (`mcp` and `rag`) pick their mechanism by the form of the configuration file they read.
 
-- Ingest with `nest ingress <path>`. A statement whose citation does not match the source word for word is not saved and is reported as a `CITATION_REJECTED` warning.
-- `nest verify` checks citations, source versions, and links. `nest verify --content` uses a model to look for contradictions between pages.
-- Ask a page to change with `nest instruct <page> "instruction"`. Add a rule for all future work with `nest instruct --persistent "rule"`.
-- Changes are recorded as jobs. `nest undo <job-id>` undoes one. Originals are never rewritten.
-- Follow a long ingest with `nest progress <job-id>`.
-- `serve` offers the pages both on the web and over MCP. What people fix in the browser becomes the knowledge agents use over MCP.
-
-## 11 Choose what to serve and whom to let in
-
-What `nest serve` offers, and whose connections it accepts, is set in the `serve` section of `KnowledgeNestfile.yaml`. `init` writes every default, so change only what you need. These are the defaults for RAG:
-
-```yaml
-serve:
-  transport: http
-  host: 127.0.0.1          # address to listen on; by default only this machine
-  port: 4318
-  endpoints:               # what to offer; anything not listed is not started
-    - responses            # POST /v1/responses: answers with sources
-    - search               # POST /v1/search: results and context
-    - mcp                  # /mcp: MCP over HTTP for agents
-  access:
-    allowed_hosts:         # names accepted as the request's Host
-      - localhost
-      - 127.0.0.1
-    allowed_origins: []    # origins whose pages may call from a browser
-    auth:
-      type: none           # none or token
-      token_env: null      # with token, the name of the variable holding it
-  limits:
-    max_request_bytes: 1048576
-    request_timeout_seconds: 120
-    max_concurrent: 8
-```
-
-**Endpoints** depend on the project type.
-
-| Type | `transport` | `endpoints` you can choose | Default port |
+| Form of the file | Example | Mechanism | Commands |
 |---|---|---|---|
-| `mcp` | `stdio` only | none (writing `host` through `limits` is `ARG_CONFLICT`) | none |
-| `rag` | `http` | `responses`, `search`, `mcp` | 4318 |
-| `wiki`, `para` | `http` | `web` | 4319 |
+| The `modules:` and `use:` form | What `nest init mcp` and `init rag` write (the MCP and RAG introductions) | The earlier builds | `build`, `search`, `eval`, `eval-data`, `source`, `transform`, `index`, `status`, `use`, `tag`, `serve`, `ask` |
+| Sections as lists of steps (`- source.filesystem: ...` under `extract:`) | The file in section 2 | The versioned store (`.knowledge-nest/store`) | `build`, `search`, `eval`, `eval-data import`, `list`, `results`, `optimize`, `release` |
 
-- To offer search without the answering API, use `endpoints: [search, mcp]`.
-- An endpoint the type does not have is `ARG_RANGE`.
+| Feature | The form `init` writes | Lists of steps |
+|---|---|---|
+| Documents it reads | Markdown, text, HTML, PDF, Word, Excel, PowerPoint, OCR | `.md`, `.markdown`, `.txt` |
+| Search | Keyword, vector, hybrid, rerank, user dictionary | Keyword |
+| Versions and reuse, comparing many candidates | — | Yes |
+| `serve` (MCP and HTTP), `ask` | Yes | Not yet |
 
-**Whom to let in** (`access`) is checked in this order.
+- With lists of steps, `--from`, `--until`, `--force`, `--input`, `--dry-run`, `--skip-unsupported`, and `--tag` of `build`, and `--build`, `--split`, and `--tag` of `eval`, are not available yet.
+- One folder may hold configuration files of both forms.
+- Wiki and PARA are a separate mechanism from both forms.
 
-- **Client.** With `allowed_clients`, only the listed address ranges and the machine running the server may connect; anyone else gets `403 CLIENT_FORBIDDEN`. Write an address and the number of leading bits a client shares with it, such as `192.168.11.0/24` for every `192.168.11.*` address, or a single address such as `192.168.11.7`. Left out, clients are not limited by address.
-- **Host.** A request whose `Host` is not in `allowed_hosts` gets `403 HOST_FORBIDDEN`. Write a host name or IP address without a port. If people reach the server by an internal name such as `nest.example.internal`, add that name.
-- **Origin.** A browser request whose `Origin` is neither the server itself nor in `allowed_origins` gets `403 ORIGIN_FORBIDDEN`. Write it with the scheme and no path, such as `https://app.example.com`. Left empty, pages on other sites cannot call the server, so a page you open cannot send requests to the server on your machine.
-- **Token.** When `host` is not a loopback address such as `127.0.0.1`, `auth.type: token` is required, unless `allowed_clients` lists only the ranges of home and office networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local addresses and `fc00::/7`); then the server also starts with `auth.type: none`. Keep the token out of the configuration file: `token_env` names the environment variable that holds it. Clients send `Authorization: Bearer <token>`. The Wiki and PARA pages also accept Basic authentication, with the user name `knowledge-nest` and the token as the password.
-
-An example that opens the server to other machines:
-
-```yaml
-serve:
-  host: 0.0.0.0
-  access:
-    allowed_hosts: [nest.example.internal]
-    allowed_origins: [https://app.example.com]
-    auth: { type: token, token_env: NEST_TOKEN }
-```
-
-An example that opens the server to a home or office network only. Add this machine's address on that network to `allowed_hosts`; other devices open it by that address, such as `http://192.168.11.16:4319/`.
-
-```yaml
-serve:
-  host: 0.0.0.0
-  access:
-    allowed_hosts: [localhost, 127.0.0.1, 192.168.11.16]
-    allowed_clients: [192.168.11.0/24]
-```
-
-This example has no token: every device in the range can read and write. On the Wiki and PARA pages, it can also take in a file of the server's machine by its path. If the network has devices you do not trust, add `auth: { type: token, token_env: NEST_TOKEN }`.
-
-**Setting it with a command.** Instead of editing the file, `nest config` writes the access settings.
-
-```sh
-# For every project on this machine (kept in ~/.knowledge-nest/config.yaml)
-nest config set serve --host 0.0.0.0 --allowed-hosts localhost,127.0.0.1,192.168.11.16 --allowed-clients 192.168.11.0/24
-
-# For one project only (rewrites that project's KnowledgeNestfile.yaml)
-nest config set serve --allowed-clients 192.168.11.0/24 --project ./my-wiki
-
-nest config list                              # the settings of this machine
-nest config list --project ./my-wiki          # the settings of the project
-nest config unset serve                       # remove the settings of this machine
-nest config unset serve --project ./my-wiki   # put the standard values back in the project
-```
-
-- It sets `host`, `port`, `allowed_hosts`, `allowed_clients` and `auth`. A port is written as `--port 8080`. A port in the settings of the machine goes to every project that still has the standard port of its type (4318 or 4319), so when several projects run at once, choose a port for each with `--project`. Authentication is `--auth none`, or `--auth token --token-env NEST_TOKEN`. Lists are separated by commas. An empty value (`--allowed-clients ""`) removes that setting.
-- **The project wins.** Where the project file differs from the standard value that `init` wrote, the project's value is used; where it still has the standard value, the machine's value is used. `nest serve --host` and `--port` win over both.
-- The token itself is never stored. `--token-env` takes the name of an environment variable; put the value in that variable.
-- A `host` outside loopback is refused unless `--allowed-clients` with home or office ranges, or `--auth token`, comes with it.
-
-```sh
-export NEST_TOKEN=...      # use a long random value
-nest validate --json       # reports conflicts before you start the server
-nest serve
-```
-
-- `nest serve --host` and `--port` change the values for that run only. The checks above apply to the values after the change.
-- `serve` settings are not part of the build ID or search configuration ID. Changing the port or access needs no rebuild or new evaluation.
-- There is no encryption and no limit by client address range. To serve inside an organization, leave those to a reverse proxy in front.
-
-`serve` decides only which connections come in. Where models are reached is `base_url` in `models` (a local Ollama by default). There is no setting that allows or limits the web addresses to take documents from.
-
-[HTTP limits](mcp.md#http-の接続制限) · [Spec of the serve settings](knowledge-nest-spec.md#275-serve-の設定項目) · [Full configuration files](config.md) (Japanese)
-
-## 12 Checklist
+## 11 Checklist
 
 - [ ] At least 10 evaluation cases, phrased like real questions
 - [ ] The baseline is measured with `nest eval` and its result has a name

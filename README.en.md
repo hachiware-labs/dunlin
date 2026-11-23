@@ -37,7 +37,13 @@ nest serve --print-config                      # print what to paste into the ag
 
 Paste what the last command prints into the MCP settings of Claude Desktop or Claude Code, and you are done. After you edit the documents, run `nest build` again: only the changed documents are processed, and a running agent sees the new content from its next question. [MCP guide](docs/start-mcp.en.md)
 
-**When your own app or chatbot should get answers with sources**, `nest init rag` adds an AI model that answers on top of the same search. `nest ask "question"` and HTTP return answers with sources; the HTTP API takes the OpenAI SDK as it is. [RAG guide](docs/start-rag.en.md)
+**Compared with other ways**
+
+- **Rather than letting the agent read the folder itself.** PDF, Word, Excel and scanned documents are searchable by their Japanese words too. Only the passages that answer come back, with document and line, within a set number of characters, so thousands of documents do not fill the agent's context.
+- **Rather than a vector-only search server.** Japanese keyword search, strong where you need the exact word (part numbers, clause numbers, technical terms), runs without an embedding model. Add vector search, which handles rephrasing, for a hybrid.
+- **Check by numbers whether it finds the answers.** Register questions with the quotes that answer them, and measure the share of evidence search finds. Compare a changed setting side by side and keep the better one.
+
+**When your own app or chatbot should get answers with sources**, `nest init rag` adds an AI model that answers on top of the same search. `nest ask "question"` and HTTP return answers with sources. Unlike building it with LangChain and the like, there is no code to write. The HTTP API takes the OpenAI SDK as it is, so an existing app only changes where it connects. A question with no evidence in the documents is declined rather than answered. [RAG guide](docs/start-rag.en.md)
 
 ### Build a knowledge base from your documents (Wiki)
 
@@ -59,9 +65,12 @@ nest ingest ../manuals   # ingest documents; pass a URL for a web page
 nest serve               # open http://127.0.0.1:4319 in a browser
 ```
 
-- **Checked against sources.** Each page lists the documents it was written from as its sources. `nest lint` tells you when a number, date or quotation of a page is not in its sources.
-- **Read and ask in the browser.** See documents, pages and sources side by side, and instruct a page, such as "list the checks before inspection as bullets".
-- **Everything can be undone.** Original documents are never changed. Each job is recorded, and `nest undo` takes it back.
+**Compared with other ways**
+
+- **Rather than a tool that only has an AI summarize.** Each page keeps the documents it was written from as its sources, and a program checks that its numbers, dates and quotations are in them. When a document gets a new version, `nest lint` points out the pages written from the old one.
+- **Knowledge stays as files on your machine.** Pages are HTML files in `wiki/`, originals are files in `raw/`. They open without a server and can go to other tools. Each change the AI makes is recorded as a job and `nest undo` takes it back; originals are never changed.
+- **People and agents use the same pages.** People read in a browser and instruct a page, such as "list the checks before inspection as bullets". Agents look up the same pages over MCP.
+- **Pages behind a sign-in can be ingested.** Sign in once in nest's own browser, and internal pages drawn by scripts, or posts on X, are taken in as originals.
 
 It follows Andrej Karpathy's LLM-Wiki idea ([what an LLM-Wiki is](#what-an-llm-wiki-is)). [Wiki guide](docs/start-wiki.en.md)
 
@@ -76,7 +85,13 @@ Use it when documents and notes have piled up and you no longer know what is whe
 | Resources | Reference that may help someday | A parts maker's catalog |
 | Archives | What is finished | Last year's inspection records |
 
-You list your projects and areas in `rules.md`. The AI picks, from that list, where each document will be used, and writes its key points and how to use it in a note. `nest archive` moves a finished project to Archives with its notes. It starts as the Wiki does, with `init para` in place of `init wiki`. [PARA guide](docs/start-para.en.md)
+You list your projects and areas in `rules.md`. The AI picks, from that list, where each document will be used, and writes its key points and how to use it in a note. It starts as the Wiki does, with `init para` in place of `init wiki`. [PARA guide](docs/start-para.en.md)
+
+**Compared with other ways**
+
+- **Rather than filing by hand in a notes app.** Put documents in, and the AI writes how each serves a project in a note and puts it where it will be used, with a copy of the document beside it.
+- **No folders appear on their own.** The AI can only use the projects and areas you listed in `rules.md`. A note aimed anywhere else is not saved, and you are told.
+- **Put away a finished project in one step.** `nest archive` moves its notes, document copies, links from other notes and its line of `rules.md` to Archives together; `nest undo` brings them back. `nest lint` points out projects past their deadline.
 
 ## What all of them share
 
@@ -85,7 +100,7 @@ You list your projects and areas in `rules.md`. The AI picks, from that list, wh
 - **Always with sources.** Search results, answers and pages all point back to the original documents.
 - **Agents can use it too.** Every form is served over MCP, so agents such as Claude use the same knowledge.
 
-How Knowledge-Nest compares with LangChain or a vector database is in [Where Knowledge-Nest fits](docs/comparison.md) (Japanese).
+A table comparing it with the usual other ways, for each thing you want to do, and when another way suits better, is in [Where Knowledge-Nest fits](docs/comparison.md) (Japanese).
 
 ## How the four forms differ
 
@@ -159,7 +174,7 @@ Trial  Recall  To base  What
 
 Rebuilding, evaluating, and optimizing never change the index being served. It switches only when you check and `release` (to switch on every build, use `nest build --release`).
 
-For now this supports text and Markdown with keyword search, and `serve` does not yet serve its indexes. The steps and the details are in the [Guide](docs/guide.en.md).
+For now this supports text and Markdown with keyword search, and `serve` does not yet serve its indexes. The steps and the details are in [Improve search by numbers](docs/guide.en.md).
 
 ## Install
 
@@ -178,18 +193,19 @@ nest --help
 
 Pages without an English version are in Japanese.
 
-| Goal | Page |
+| What you want | Pages |
 | --- | --- |
-| Get started | [All introductions](docs/getting-started.en.md) · [MCP](docs/start-mcp.en.md) · [RAG](docs/start-rag.en.md) · [Wiki](docs/start-wiki.en.md) · [PARA](docs/start-para.en.md) · [Quickstart](docs/quickstart.md) |
-| Use it well | [Guide](docs/guide.en.md) |
-| Search, answers, and pages | [MCP and RAG](docs/mcp.md) · [Wiki and PARA](docs/wiki.md) |
-| Improve search | [Evaluation and dictionary](docs/evaluation.md) · [Agents and trials](docs/agents.md) · [Techniques that could raise accuracy](docs/retrieval-techniques.md) |
+| Get started | [Getting started](docs/getting-started.en.md) (from what you want to do to each introduction). To try all four at once, [Start with the sample](docs/quickstart.md) |
+| Let Claude look things up, or have an app answer | [MCP](docs/start-mcp.en.md) · [RAG](docs/start-rag.en.md) · [Starting MCP and RAG](docs/mcp.md) |
+| Build a knowledge base, or sort documents and notes | [Wiki](docs/start-wiki.en.md) · [PARA](docs/start-para.en.md) · [Using Wiki and PARA](docs/wiki.md) |
+| Improve search by numbers | [Improve search by numbers](docs/guide.en.md) · [Evaluation and dictionary](docs/evaluation.md) · [Agents and trials](docs/agents.md) · [Techniques that could raise accuracy](docs/retrieval-techniques.md) |
+| Use it from other machines | [Choose what to serve and whom to let in](docs/serve.en.md) |
+| Compare with other tools | [Where Knowledge-Nest fits](docs/comparison.md) · [Benchmarks](docs/benchmarks.md) |
 | Look up commands and settings | [CLI](docs/cli.md) · [Modules](docs/modules.md) · [KnowledgeNestfile defaults](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) |
-| Understand how and where it fits | [Where Knowledge-Nest fits](docs/comparison.md) · [Data management design](docs/data-management.md) · [Builds and evaluation](docs/concepts.md) · [Architecture](docs/architecture.md) · [Benchmarks](docs/benchmarks.md) · [PDF extraction](docs/pdf-extraction.md) |
 | Embed in Node.js | [Node.js API](docs/api.md) |
+| Understand how it works | [Builds and evaluation](docs/concepts.md) · [Data management design](docs/data-management.md) · [Architecture](docs/architecture.md) · [PDF extraction](docs/pdf-extraction.md) · [Design specification](docs/knowledge-nest-spec.md) |
 | Develop and operate | [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Acceptance checks](docs/acceptance.md) |
 | Licenses and notices | [License](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md) |
-| Specification | [Knowledge-Nest design specification](docs/knowledge-nest-spec.md) |
 
 ## Development
 
@@ -219,4 +235,4 @@ npm run bench -- 1000 300
 | Versions and reuse, `list`, `results`, `optimize`, `release` | Yes | — |
 | `serve` (MCP and HTTP), `ask` | Not yet | Yes |
 
-Wiki and PARA are a separate mechanism from both forms and always available. The full difference between the two forms is in the [appendix of Getting started](docs/getting-started.en.md#appendix-the-two-forms-of-configuration).
+Wiki and PARA are a separate mechanism from both forms and always available. The full difference between the two forms is in the section 10 of [Improve search by numbers](docs/guide.en.md#10-what-still-uses-the-earlier-flow).

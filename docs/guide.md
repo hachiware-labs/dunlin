@@ -1,4 +1,4 @@
-# 使いこなす：変えて、測って、比べて、リリースする
+# 検索を数字で良くする：変えて、測って、比べて、リリースする
 
 [English](guide.en.md)
 
@@ -6,9 +6,9 @@
 
 検索の良し悪しは、見た目では分かりません。ある質問で良くなった設定が、別の質問を外していることもあります。Knowledge-Nest では、質問と答えの組を登録しておけば、設定を変えるたびに「何問中何問の答えを拾えたか」を測れます。しかも、変えた所から後ろしか作り直さないので、試すのは速く、何通りでも比べられます。
 
-[入門](getting-started.md#3-検索を数字で良くする新しいコマンド) の3章で `build` と `eval` が動いた人を想定しています。
+MCP・RAG の検索を、まず [MCP 入門](start-mcp.md) か [RAG 入門](start-rag.md) で動かしてから読むと分かりやすい文書です。2章で最初の設定を書き、3章から先で改善の進め方を説明します。
 
-> この文書の新しいコマンドは、いまはテキストと Markdown（`.md`、`.markdown`、`.txt`）、キーワード検索、根拠の回収率に対応しています。ベクトル検索、ユーザー辞書、PDF や Office の読み込み、`serve` などは `init` が作る形の設定で使います（[9 従来の流れで使うもの](#9-従来の流れで使うもの)）。
+> この文書の新しいコマンドは、いまはテキストと Markdown（`.md`、`.markdown`、`.txt`）、キーワード検索、根拠の回収率に対応しています。ベクトル検索、ユーザー辞書、PDF や Office の読み込み、`serve` などは `init` が作る形の設定で使います（[10 従来の流れで使うもの](#10-従来の流れで使うもの)）。
 
 ## 1 考え方
 
@@ -22,7 +22,90 @@
 - 結果には名前を付けられます。名前は種類ごと（文書、チャンク、索引、評価データ、評価の結果）に別の棚にあります。
 - 改善は、基準を測り、1か所を変えて測り、比べて選ぶ、という繰り返しです。
 
-## 2 評価データを用意する
+## 2 最初の設定を書いて、測る
+
+### 設定を書いて、構築する
+
+新しいコマンドは、`init` を使わず、段階ごとの並びで書いた設定ファイルで動きます。リポジトリのルートで、新しいフォルダを作ります。
+
+```sh
+mkdir store-demo
+cd store-demo
+mkdir docs
+cp ../examples/manuals/*.md docs/
+```
+
+`KnowledgeNestfile.yaml` を次の内容で作ります。段階（`extract`、`transform`、`index`）ごとに処理を上から並べ、最後の `tag` が結果の名前になります。
+
+```yaml
+extract:
+  - source.filesystem: { path: ./docs }
+  - loader.text: {}
+  - tag: docs
+
+transform:
+  - chunk.length: { unit: characters, size: 800, overlap: 100 }
+  - tag: chunks
+
+index:
+  - index.keyword: { tokenizer: lindera }
+  - tag: main
+
+search:
+  - retrieval.keyword: { top_k: 10 }
+```
+
+```sh
+nest build
+nest search "ポンプの点検はいつ実施しますか"
+nest list
+```
+
+`build` は、動いた段階と文書の増減を表示します。もう一度 `build` すると、何も変わっていなければ `Nothing ran: every result was there already.` と出て、何も作り直しません。`list` は、名前の付いた版（文書、チャンク、索引、評価データ、評価の結果）を一覧します。
+
+### 測る
+
+質問と、その答えになる引用の組（評価データ）を `cases.json` に書きます。
+
+```json
+[
+  {
+    "id": "pump-check",
+    "question": "ポンプの点検はいつ",
+    "source": "docs",
+    "document": "maintenance.md",
+    "quote": "ポンプの点検は毎月最初の営業日に行う。",
+    "split": "dev"
+  }
+]
+```
+
+| 項目 | 意味 |
+|---|---|
+| `source` | 資料のフォルダの名前（`source.filesystem` の `id`。省略時はフォルダ名） |
+| `document` | そのフォルダの中でのファイルの位置 |
+| `quote` | 文書に1か所だけ現れる、答えの引用 |
+| `split` | 調整用は `dev`、最終確認用は `test` |
+
+設定の最後に評価の区切りを足して、測ります。
+
+```yaml
+eval:
+  - eval.evidence: { data: default, split: dev }
+```
+
+```sh
+nest eval-data import cases.json
+nest eval
+```
+
+```text
+Recall: 1.000 (1 of 1 cases)
+```
+
+`Recall`（回収率）は、正解の引用が検索結果に入っていた質問の割合です。質問を増やし、設定を変えて測り直し、比べて選ぶ。その進め方を、次の章から説明します。
+
+## 3 評価データを用意する
 
 質問と、答えが書かれている引用の組です。JSON の配列にして、`eval-data import` で保管に入れます。
 
@@ -48,7 +131,7 @@ nest eval-data import cases.json --tag v2
 
 > 質問と引用の候補をモデルに作らせる `eval-data generate` は、従来の流れのコマンドです（[evaluation.md](evaluation.md)）。作った候補を JSON に書き出し、新しい流れに取り込めます。
 
-## 3 基準を測り、外れを読む
+## 4 基準を測り、外れを読む
 
 設定に評価の区切りを足します。
 
@@ -91,7 +174,7 @@ missed    filter       フィルターの交換
 | 「2年ごとに交換する」だけでは何の話か分からない | チャンクの文脈（5章） |
 | 正解は取れているが、順位が低い | `retrieval.keyword` の `top_k` を変える |
 
-## 4 1か所を変えて比べる（手で）
+## 5 1か所を変えて比べる（手で）
 
 基準の `KnowledgeNestfile.yaml` をコピーし、変えたい段階だけを書き換えます。基準の名前を動かさないよう、変えた段階にはタグを付け直し、文書は基準の名前から始めます（`from`）。
 
@@ -125,7 +208,7 @@ nest results
 - 結果は `trial-400` の名前で残ります。`nest results` に基準の結果と並ぶので、回収率を比べます。
 - 評価の方法とデータが同じでなければ、比べても意味がありません。`eval.evidence` の `data` と `split` をそろえます。
 
-## 5 チャンクに文脈を持たせる
+## 6 チャンクに文脈を持たせる
 
 チャンクは、文書から切り出すと、どの文書のどの節にあったかを失います。`context` を指定すると、その情報を検索用の本文の先頭に付けます。
 
@@ -146,7 +229,7 @@ transform:
 - 見出しを読むのは Markdown の `#` だけです。ほかの形式では空になります。
 - `context` を変えると、チャンクと索引を作り直します。文書は読み直しません。
 
-## 6 たくさんの設定を、まとめて試す（optimize）
+## 7 たくさんの設定を、まとめて試す（optimize）
 
 候補を手で1つずつ作る代わりに、変えるところを指示に書くと、Knowledge-Nest が候補を作って順に測ります。
 
@@ -223,7 +306,7 @@ nest eval .knowledge-nest/trials/tune/010.yaml
 
 > 軸にできるのは、いまのところ `transform`、`index`、`search` です。`extract` を書き換える選択肢、回収率以外の指標、前の結果から次の値を選ぶ探索は、まだありません。
 
-## 7 リリースする
+## 8 リリースする
 
 提供する索引が切り替わるのは、あなたが明示したときだけです。`build`、`eval`、`optimize` は、どれも提供を動かしません。資料を足して作り直しても、確かめて `release` するまでは、前の索引が提供され続けます。文書の削除や設定の誤りが、確かめる前に利用者へ届くことはありません。
 
@@ -247,7 +330,7 @@ nest release main           # 確かめた索引を提供する
 
 > `serve` は、この提供用の名前をまだ読みません。MCP や HTTP で提供するときは、従来の流れを使います。
 
-## 8 資料の変更の取り込み方を選ぶ
+## 9 資料の変更の取り込み方を選ぶ
 
 `source.filesystem` の `apply` で、フォルダの変更のうち取り込むものを選べます。
 
@@ -262,8 +345,7 @@ extract:
 - 取り込まなかった変更は、`build` の表示に「Not taken in」として出ます。次に取り込む設定にすると反映されます。
 - 例えば `[add, update]` にすると、フォルダから消えた文書も検索に残ります。
 
-## 9 従来の流れで使うもの
-
+## 10 従来の流れで使うもの
 次のものは、新しい流れではまだ使えません。`nest init` が作る従来の設定で使います。
 
 | やりたいこと | 従来のコマンド・文書 |
@@ -272,125 +354,32 @@ extract:
 | ユーザー辞書 | `dictionary suggest` と `dictionary add`。[検索評価とユーザー辞書](evaluation.md) |
 | 質問の自動生成と確認 | `eval-data generate` と `eval-data review`。[検索評価とユーザー辞書](evaluation.md) |
 | PDF、Office、HTML、OCR | `loader.auto` と `nest add ocr`。[PDF の抽出](pdf-extraction.md) |
-| MCP・HTTP での提供、`ask` | `serve`、`ask`。[MCP と RAG](mcp.md) · [11 提供する入口と、接続を許す相手を決める](#11-提供する入口と接続を許す相手を決める) |
+| MCP・HTTP での提供、`ask` | `serve`、`ask`。[MCP と RAG](mcp.md) · [提供する入口と、接続を許す相手を決める](serve.md) |
 | エージェントとの調整 | [エージェントと試行する](agents.md) |
 
 どちらの流れかは、コマンドが読む設定ファイルの形で決まります。段階が `- source.filesystem: ...` のような並びなら新しい流れ、`modules:` と `use:` なら従来の流れです。1つのプロジェクトに、両方の形のファイルを置いても構いません。
 
-## 10 Wiki と PARA を使いこなす
+2つの形の違いは次のとおりです。
 
-Wiki と PARA は検索の知識とは別の仕組みで、この文書の版の保管には載っていません。使い方は [Wiki・PARA の使い方](wiki.md) にあります。要点です。
+検索（`mcp`・`rag`）のコマンドは、読む設定ファイルの形で、どの仕組みを使うかを選びます。
 
-- 取り込みは `nest ingress <資料>` です。引用が資料と一字一句一致しない記述は保存されず、`CITATION_REJECTED` の警告で示されます。
-- `nest verify` で引用・原本の版・リンクを、`nest verify --content` でモデルを使ってページ間の食い違いを調べます。
-- ページへの指示は `nest instruct <ページ> "指示"`、今後も使う決まりは `nest instruct --persistent "決まり"` です。
-- 変更は作業単位で記録されます。望ましくなければ `nest undo <作業ID>` で戻せます。原本は書き換えられません。
-- 長い取り込みは `nest progress <作業ID>` で進み具合を確認できます。
-- `serve` はページを Web と MCP の両方で提供します。人がブラウザで直した内容は、そのままエージェントが MCP で引く知識になります。
-
-## 11 提供する入口と、接続を許す相手を決める
-
-`nest serve` で何を出し、誰からの接続を受けるかは、`KnowledgeNestfile.yaml` の `serve` に書きます。`init` が既定値をすべて書き出すので、変えたい所だけを直します。次は RAG の既定値です。
-
-```yaml
-serve:
-  transport: http
-  host: 127.0.0.1          # 待ち受けるアドレス。既定では自分のマシンからだけ
-  port: 4318
-  endpoints:               # 出す入口。書かなかった入口は立ち上がらない
-    - responses            # POST /v1/responses：出典付きの答え
-    - search               # POST /v1/search：検索結果と文脈
-    - mcp                  # /mcp：エージェント向けの MCP（HTTP）
-  access:
-    allowed_hosts:         # 要求の宛先名（Host）として受け付けるもの
-      - localhost
-      - 127.0.0.1
-    allowed_origins: []    # 別のページのブラウザから呼んでよい送信元
-    auth:
-      type: none           # none か token
-      token_env: null      # token のとき、合言葉を入れた環境変数の名前
-  limits:
-    max_request_bytes: 1048576
-    request_timeout_seconds: 120
-    max_concurrent: 8
-```
-
-**入口（`endpoints`）** は、種別ごとに選べるものが決まっています。
-
-| 種別 | `transport` | 選べる `endpoints` | 既定のポート |
+| 設定ファイルの形 | 例 | 仕組み | 使えるコマンド |
 |---|---|---|---|
-| `mcp` | `stdio` だけ | なし（`host` から `limits` までを書くと `ARG_CONFLICT`） | なし |
-| `rag` | `http` | `responses`、`search`、`mcp` | 4318 |
-| `wiki`、`para` | `http` | `web` | 4319 |
+| `modules:` と `use:` を使う形 | `nest init mcp`・`init rag` が作るもの（MCP 入門、RAG 入門） | これまでのビルド | `build`、`search`、`eval`、`eval-data`、`source`、`transform`、`index`、`status`、`use`、`tag`、`serve`、`ask` |
+| 段階ごとの並び（`extract:` の下に `- source.filesystem: ...`） | 2章の設定 | 版の保管（`.knowledge-nest/store`） | `build`、`search`、`eval`、`eval-data import`、`list`、`results`、`optimize`、`release` |
 
-- 回答 API を出さず、検索だけを出すときは `endpoints: [search, mcp]` にします。
-- 種別にない入口を書くと `ARG_RANGE` になります。
+| できること | `init` が作る形 | 段階ごとの並び |
+|---|---|---|
+| 読める資料 | Markdown、テキスト、HTML、PDF、Word、Excel、PowerPoint、OCR | `.md`、`.markdown`、`.txt` |
+| 検索 | キーワード、ベクトル、ハイブリッド、リランク、ユーザー辞書 | キーワード |
+| 版の記録と再利用、候補の一括比較 | — | ○ |
+| `serve`（MCP・HTTP）、`ask` | ○ | まだ |
 
-**接続を許す相手（`access`）** は、次の順に確かめられます。
+- 段階ごとの並びでは、`build` の `--from`、`--until`、`--force`、`--input`、`--dry-run`、`--skip-unsupported`、`--tag`、`eval` の `--build`、`--split`、`--tag` はまだ使えません。
+- 1つのフォルダに、両方の形の設定ファイルを置いても構いません。
+- Wiki と PARA は、どちらの形とも別の仕組みです。
 
-- **接続元。** `allowed_clients` を書くと、そこに挙げたアドレスの範囲と、サーバーを動かしているマシン自身からの接続だけを受け付けます。ほかは `403 CLIENT_FORBIDDEN` です。`192.168.11.0/24`（`192.168.11.*` のこと）のように、アドレスと、先頭から一致させるビット数で書きます。1台だけなら `192.168.11.7` のようにアドレスだけを書きます。書かなければ、接続元では絞りません。
-- **宛先名。** 要求の `Host` が `allowed_hosts` にないと `403 HOST_FORBIDDEN` です。ホスト名か IP アドレスを、ポートを付けずに書きます。社内の名前（`nest.example.internal` など）で呼ばせるときは、その名前を足します。
-- **送信元。** ブラウザが付ける `Origin` が自分自身でも `allowed_origins` にもないと `403 ORIGIN_FORBIDDEN` です。`https://app.example.com` のように、スキームを含め、パスを付けずに書きます。空のままなら、ほかのサイトのページからは呼べません。開いたページが手元のサーバーに勝手に要求を送るのを防ぐためです。
-- **合言葉。** `host` を `127.0.0.1` などのループバック以外にするときは、`auth.type: token` が必須です。ただし、`allowed_clients` が家や職場のネットワークの範囲（`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、リンクローカル、`fc00::/7`）だけなら、`auth.type: none` のままでも起動できます。合言葉は設定ファイルに書かず、`token_env` に環境変数の名前だけを書きます。クライアントは `Authorization: Bearer <token>` を送ります。Wiki・PARA の画面は Basic 認証も受け付け、ユーザー名は `knowledge-nest`、パスワードは同じ合言葉です。
-
-ほかのマシンに開くときの例です。
-
-```yaml
-serve:
-  host: 0.0.0.0
-  access:
-    allowed_hosts: [nest.example.internal]
-    allowed_origins: [https://app.example.com]
-    auth: { type: token, token_env: NEST_TOKEN }
-```
-
-家や職場の LAN の中だけに開くときの例です。`allowed_hosts` には、このマシンの LAN でのアドレスを足します。ほかの端末は `http://192.168.11.16:4319/` のように、そのアドレスで開きます。
-
-```yaml
-serve:
-  host: 0.0.0.0
-  access:
-    allowed_hosts: [localhost, 127.0.0.1, 192.168.11.16]
-    allowed_clients: [192.168.11.0/24]
-```
-
-この例は合言葉なしです。範囲の中の端末なら、だれでも読み書きできます。Wiki・PARA の画面では、サーバーのマシンにあるファイルをパスで取り込むこともできます。同じネットワークに信用できない端末があるなら、`auth: { type: token, token_env: NEST_TOKEN }` を足してください。
-
-**コマンドで設定する。** 接続の設定は、ファイルを編集する代わりに `nest config` でも書けます。
-
-```sh
-# この PC のすべてのプロジェクトに効かせる（~/.knowledge-nest/config.yaml に保存）
-nest config set serve --host 0.0.0.0 --allowed-hosts localhost,127.0.0.1,192.168.11.16 --allowed-clients 192.168.11.0/24
-
-# 1つのプロジェクトだけに効かせる（そのプロジェクトの KnowledgeNestfile.yaml を書き換える）
-nest config set serve --allowed-clients 192.168.11.0/24 --project ./my-wiki
-
-nest config list                              # この PC の設定を見る
-nest config list --project ./my-wiki          # プロジェクトの設定を見る
-nest config unset serve                       # この PC の設定を消す
-nest config unset serve --project ./my-wiki   # プロジェクトの設定を標準の値に戻す
-```
-
-- 設定できるのは `host`、`port`、`allowed_hosts`、`allowed_clients`、`auth` です。ポートは `--port 8080` のように書きます。この PC の設定にポートを書くと、種別ごとの標準のポート（4318、4319）のままのプロジェクトがすべてそのポートで待ち受けるので、同時に動かすプロジェクトがあるなら `--project` でプロジェクトごとに決めてください。認証は `--auth none`、または `--auth token --token-env NEST_TOKEN` と書きます。一覧はコンマで区切ります。空の値（`--allowed-clients ""`）を渡すと、その項目を消します。
-- **プロジェクトが優先です。** プロジェクトのファイルで標準の値（`init` が書いた値）から変えた項目は、プロジェクトの値を使います。標準の値のままの項目に、この PC の設定を使います。`nest serve --host` と `--port` は、どちらよりも優先します。
-- 合言葉そのものは保存しません。`--token-env` には環境変数の名前を渡し、値は環境変数に入れます。
-- ループバックの外の `host` は、家や職場の範囲の `--allowed-clients` か `--auth token` を一緒に渡さないと、保存を断ります。
-
-```sh
-export NEST_TOKEN=...      # 長い乱数にする
-nest validate --json       # 矛盾があれば、起動する前にここで分かる
-nest serve
-```
-
-- `nest serve --host` と `--port` は、その起動に限って値を変えます。上の検査は上書き後の値にもかかります。
-- `serve` の値はビルド ID や検索設定 ID に入りません。ポートや許可を変えても、作り直しや評価のし直しは要りません。
-- 通信の暗号化と、接続元のアドレスの範囲による制限はありません。社内に公開するときは、前に置く中継サーバー（リバースプロキシ）に任せます。
-
-`serve` が決めるのは、受ける側の接続だけです。モデルへの接続先は `models` の `base_url`（既定はローカルの Ollama）で決まります。取り込む Web のアドレスを許可したり制限したりする設定はありません。
-
-[HTTP の接続制限](mcp.md#http-の接続制限) · [serve の設定項目の仕様](knowledge-nest-spec.md#275-serve-の設定項目) · [設定ファイルの全文](config.md)
-
-## 12 チェックリスト
+## 11 チェックリスト
 
 - [ ] 評価データが、実際の質問に近い言い回しで10件以上ある
 - [ ] 基準を `nest eval` で測り、結果に名前がある

@@ -101,6 +101,6 @@ print(response.output_text)
 
 ## 次に読むもの
 
-- 答えの質を数字で良くする：[使いこなす](guide.md) · [検索評価とユーザー辞書](evaluation.md)
+- 答えの質を数字で良くする：[検索を数字で良くする](guide.md) · [検索評価とユーザー辞書](evaluation.md)
 - エージェントに直接引かせる：[MCP 入門](start-mcp.md)
 - 応答の形と設定の詳細：[MCP と RAG](mcp.md)

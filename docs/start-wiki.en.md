@@ -151,4 +151,4 @@ Other cases are in [Troubleshooting](troubleshooting.md) (Japanese).
 
 - Organize notes by how you act on them: [PARA](start-para.en.md)
 - Screen operations in detail: [Wiki and PARA](wiki.md) (Japanese)
-- How it works in detail: [Specification, chapters 13–16](knowledge-nest-spec.md#13-llm-wikipara側の概要) (Japanese)
+- Let other machines open the screen: [Choose what to serve and whom to let in](serve.en.md)

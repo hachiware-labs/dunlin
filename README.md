@@ -36,7 +36,13 @@ nest serve --print-config                      # エージェントの設定に�
 
 最後のコマンドが出す設定を、Claude Desktop や Claude Code の MCP の設定に貼れば完了です。資料を直したら `nest build` をもう一度実行します。変わった文書だけが処理され、動いているエージェントは次の質問から新しい内容を引きます。 [MCP 入門](docs/start-mcp.md)
 
-**自分のアプリやチャットボットに、出典付きの答えを返させたいとき**は、`nest init rag` で、同じ検索に回答用の AI モデルを足します。`nest ask "質問"` や HTTP で、出典付きの答えが返ります。HTTP は OpenAI の SDK がそのまま使える形です。 [RAG 入門](docs/start-rag.md)
+**ほかの方法と比べて**
+
+- **エージェントにフォルダを直接読ませるより。** PDF・Word・Excel・スキャンした資料も、日本語の語で引けます。返すのは答えのある箇所だけで、資料名と行が付き、決めた文字数に収まります。資料が何千件あっても、エージェントの文脈を埋めません。
+- **ベクトル検索だけの検索サーバーより。** 型番、条番号、専門用語のように「その語で探したい」検索に強い日本語のキーワード検索が、埋め込みモデルなしで動きます。言い換えに強いベクトル検索を足して、ハイブリッドにもできます。
+- **当たっているかを、数字で確かめられる。** 質問と正解の引用を登録すると、検索が根拠を拾えた割合を測れます。設定を変えた結果と並べて比べ、良いほうを選べます。
+
+**自分のアプリやチャットボットに、出典付きの答えを返させたいとき**は、`nest init rag` で、同じ検索に回答用の AI モデルを足します。`nest ask "質問"` や HTTP で、出典付きの答えが返ります。LangChain などで組むのと違い、コードは書きません。HTTP は OpenAI の SDK がそのまま使える形なので、既存のアプリは接続先を変えるだけで呼べます。資料に根拠が見つからない質問には、答えを作らずに断ります。 [RAG 入門](docs/start-rag.md)
 
 ### 資料から、ナレッジベースを作る（Wiki）
 
@@ -57,9 +63,12 @@ nest ingest ../manuals   # 資料を取り込む。Web のページは URL で�
 nest serve               # http://127.0.0.1:4319 をブラウザで開く
 ```
 
-- **出典と照らす。** 各ページは、書くのに使った資料を出典として持ちます。本文の数字・日付・「」の引用が出典にないと、`nest lint` が知らせます。
-- **ブラウザで読み、頼む。** 画面で資料・ページ・出典を並べて読み、「点検前の確認事項を箇条書きに」のようにページへ指示できます。
-- **何をしても戻せる。** 資料の原本は書き換えません。変更は作業ごとに記録され、`nest undo` で取り消せます。
+**ほかの方法と比べて**
+
+- **AI に要約させるだけの道具より。** 各ページは、書くのに使った資料を出典として持ちます。本文の数字・日付・「」の引用が出典にあるかを、プログラムが照らします。資料が新しい版になれば、古い版から書いたページを `nest lint` が知らせます。
+- **知識が、手元のファイルのまま。** ページは `wiki/` の HTML ファイル、原本は `raw/` のファイルです。サーバーがなくても開け、ほかの道具にも持っていけます。AI の変更は作業ごとに記録され、`nest undo` で取り消せます。原本は書き換えません。
+- **人とエージェントが、同じページを使う。** 人はブラウザで読み、「点検前の確認事項を箇条書きに」のようにページへ指示します。エージェントは同じページを MCP で引きます。
+- **ログインの要るページも取り込める。** nest 専用のブラウザでログインしておけば、スクリプトで描かれる社内のページや X の投稿も、原本として取り込めます。
 
 Andrej Karpathy の LLM-Wiki の考え方に沿っています（[LLM-Wiki とは](#llm-wiki-とは)）。 [Wiki 入門](docs/start-wiki.md)
 
@@ -74,7 +83,13 @@ Andrej Karpathy の LLM-Wiki の考え方に沿っています（[LLM-Wiki と�
 | Resources | いつか役立つ参考資料 | 部品メーカーのカタログ |
 | Archives | 終わったもの | 昨年度の点検記録 |
 
-取り組みと領域は、人が `rules.md` に書きます。AI は、資料を使う場所をその中から選び、要点と使い道をノートに書きます。終わった取り組みは `nest archive` で、ノートごと Archives へ移せます。始め方は Wiki と同じで、`init wiki` を `init para` に読み替えます。 [PARA 入門](docs/start-para.md)
+取り組みと領域は、人が `rules.md` に書きます。AI は、資料を使う場所をその中から選び、要点と使い道をノートに書きます。始め方は Wiki と同じで、`init wiki` を `init para` に読み替えます。 [PARA 入門](docs/start-para.md)
+
+**ほかの方法と比べて**
+
+- **ノートアプリで、手で振り分けるより。** 資料を入れるだけで、AI が「この取り組みにどう使うか」をノートに書き、使う場所に置きます。資料の写しもノートの隣に置かれます。
+- **フォルダが勝手に増えない。** AI が置けるのは、あなたが `rules.md` に書いた取り組みと領域だけです。一覧にない場所に置こうとしたノートは保存せず、知らせます。
+- **終わった取り組みを、一度で片付けられる。** `nest archive` が、ノート、資料の写し、ほかのノートからのリンク、`rules.md` の行をまとめて Archives へ移します。`nest undo` で戻せます。期限を過ぎた取り組みは `nest lint` が知らせます。
 
 ## どれにも共通すること
 
@@ -83,7 +98,7 @@ Andrej Karpathy の LLM-Wiki の考え方に沿っています（[LLM-Wiki と�
 - **いつも出典が付く。** 検索結果も、答えも、ページも、元の資料を指します。
 - **エージェントからも引ける。** どの形も MCP で提供するので、Claude などが同じ知識を使えます。
 
-LangChain やベクトルデータベースとの比べ方は [Knowledge-Nest が向いている構成](docs/comparison.md) にあります。
+やりたいことごとに、よくあるほかの方法と比べた表と、ほかを選ぶほうがよい場合は [Knowledge-Nest が向いている構成](docs/comparison.md) にあります。
 
 ## 4つの形の違い
 
@@ -157,7 +172,7 @@ Trial  Recall  To base  What
 
 作り直しても、評価しても、最適化しても、提供する索引は変わりません。確かめてから `release` したときだけ切り替わります（毎回切り替えたいなら `nest build --release`）。
 
-いまはテキストと Markdown、キーワード検索に対応しています。`serve` はまだこの仕組みの索引を提供しません。手順と、対応範囲は [使いこなす](docs/guide.md) にあります。
+いまはテキストと Markdown、キーワード検索に対応しています。`serve` はまだこの仕組みの索引を提供しません。手順と、対応範囲は [検索を数字で良くする](docs/guide.md) にあります。
 
 ## インストール
 
@@ -174,18 +189,19 @@ nest --help
 
 ## ドキュメント
 
-| 目的 | 文書 |
+| やりたいこと | 文書 |
 | --- | --- |
-| 初めて使う | [入門の一覧](docs/getting-started.md) · [MCP 入門](docs/start-mcp.md) · [RAG 入門](docs/start-rag.md) · [Wiki 入門](docs/start-wiki.md) · [PARA 入門](docs/start-para.md) · [クイックスタート](docs/quickstart.md) |
-| 使いこなす | [使いこなす](docs/guide.md) |
-| 検索・回答・ページを使う | [MCP と RAG](docs/mcp.md) · [Wiki と PARA](docs/wiki.md) |
-| 検索を改善する | [検索評価とユーザー辞書](docs/evaluation.md) · [エージェントと試行する](docs/agents.md) · [精度を上げる手法の候補](docs/retrieval-techniques.md) |
+| 初めて使う | [入門](docs/getting-started.md)（やりたいことから各入門へ）。4つを一度に試すなら [サンプル資料で始める](docs/quickstart.md) |
+| Claude に調べさせる・アプリに答えさせる | [MCP 入門](docs/start-mcp.md) · [RAG 入門](docs/start-rag.md) · [MCP と RAG の起動](docs/mcp.md) |
+| ナレッジベースを作る・資料とメモを整理する | [Wiki 入門](docs/start-wiki.md) · [PARA 入門](docs/start-para.md) · [Wiki・PARA の使い方](docs/wiki.md) |
+| 検索を数字で良くする | [検索を数字で良くする](docs/guide.md) · [検索評価とユーザー辞書](docs/evaluation.md) · [エージェントと試行する](docs/agents.md) · [精度を上げる手法の候補](docs/retrieval-techniques.md) |
+| ほかのマシンから使わせる | [提供する入口と、接続を許す相手を決める](docs/serve.md) |
+| ほかの道具と比べる | [Knowledge-Nest が向いている構成](docs/comparison.md) · [ベンチマーク](docs/benchmarks.md) |
 | コマンドや設定を調べる | [CLI](docs/cli.md) · [モジュール](docs/modules.md) · [KnowledgeNestfile の既定値](docs/config.md) · [困ったときは](docs/troubleshooting.md) |
-| 仕組みと用途を知る | [向いている構成](docs/comparison.md) · [データ管理システム](docs/data-management.md) · [ビルドと評価の関係](docs/concepts.md) · [実装構成](docs/architecture.md) · [ベンチマーク](docs/benchmarks.md) · [PDF の抽出](docs/pdf-extraction.md) |
 | Node.js に組み込む | [Node.js API](docs/api.md) |
+| 仕組みを知る | [ビルドと評価の関係](docs/concepts.md) · [データ管理システム](docs/data-management.md) · [実装構成](docs/architecture.md) · [PDF の抽出](docs/pdf-extraction.md) · [設計仕様](docs/knowledge-nest-spec.md) |
 | 開発・運用を確認する | [開発と変更の確認](CONTRIBUTING.md) · [変更履歴](CHANGELOG.md) · [セキュリティ](SECURITY.md) · [受け入れ確認](docs/acceptance.md) |
 | ライセンスと通知を調べる | [本体のライセンス状況](LICENSE) · [第三者の通知](THIRD_PARTY_NOTICES.md) |
-| 仕様を調べる | [Knowledge-Nest 設計仕様](docs/knowledge-nest-spec.md) |
 
 ## 開発
 
@@ -215,4 +231,4 @@ npm run bench -- 1000 300
 | 版の記録と再利用、`list`、`results`、`optimize`、`release` | ○ | — |
 | `serve`（MCP・HTTP）、`ask` | まだ | ○ |
 
-Wiki と PARA は、どちらの形とも別の仕組みで、いつでも使えます。2つの形の詳しい違いは [入門の付録](docs/getting-started.md#付録-2つの設定の形) にあります。
+Wiki と PARA は、どちらの形とも別の仕組みで、いつでも使えます。2つの形の詳しい違いは [検索を数字で良くする](docs/guide.md#10-従来の流れで使うもの) の10章 にあります。

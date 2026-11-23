@@ -68,7 +68,7 @@ HTTP の登録用 URL を出力するには、`mcp` エンドポイントと固�
 
 `serve.access.allowed_hosts` と `serve.access.allowed_origins` で宛先とブラウザの送信元を制限します。`serve.access.allowed_clients` に `192.168.11.0/24` のような範囲を書くと、その範囲とサーバーのマシン自身からの接続だけを受け付けます。ループバックの外で待ち受けるには、`allowed_clients` を家や職場のネットワークの範囲だけにするか、`serve.access.auth.type` を `token` にし、`token_env` に指定した環境変数へトークンを入れます。クライアントは `Authorization: Bearer <token>` を送ります。Wiki/PARA の画面は Basic 認証にも対応し、ユーザー名は `knowledge-nest`、パスワードは同じトークンです。
 
-`serve.limits` の既定は、リクエスト本文 1 MiB、タイムアウト 120 秒、同時要求 8 件です。`--host` と `--port` は起動時だけ上書きできます。ポートが使用中の場合は終了コード 1 を返します。`serve` の設定変更によってビルド ID や検索設定 ID は変わりません。[接続制限の仕様](knowledge-nest-spec.md#275-serve-の設定項目)
+`serve.limits` の既定は、リクエスト本文 1 MiB、タイムアウト 120 秒、同時要求 8 件です。`--host` と `--port` は起動時だけ上書きできます。ポートが使用中の場合は終了コード 1 を返します。`serve` の設定変更によってビルド ID や検索設定 ID は変わりません。[設定の例とコマンド](serve.md) · [接続制限の仕様](knowledge-nest-spec.md#275-serve-の設定項目)
 
 ## 初期化時にモデルを選ぶ
 

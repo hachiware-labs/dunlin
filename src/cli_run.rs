@@ -1291,6 +1291,33 @@ fn project_model_setting(
         })
 }
 
+/// The generator settings of a chat model the project defines, for a module of the build.
+fn chat_generator(
+    project: &Project,
+    name: &ConfigValue,
+    role: &str,
+) -> Result<ConfigValue, CliError> {
+    let spec = project_model_setting(project, None, name)?;
+    if matches!(spec, ConfigValue::Null) {
+        return Err(CliError::new(
+            2,
+            "INVALID_MODEL",
+            &format!("Define the {role} under models."),
+        ));
+    }
+    resolve_api_key(spec.get("apiKeyEnv"), role)
+        .and_then(|key| {
+            generator_settings(
+                string_field(&spec, "provider").unwrap_or_default(),
+                string_field(&spec, "model"),
+                string_field(&spec, "baseUrl"),
+                key,
+                spec.get("maxInputBytes"),
+            )
+        })
+        .map_err(|message| CliError::new(2, "INVALID_MODEL", &message))
+}
+
 /// The reranking steps that use a chat model of `models`. `rerank.cross_encoder` names its
 /// endpoint in its own arguments.
 fn rerank_steps(plan: &[Step]) -> impl Iterator<Item = &Step> {
@@ -2349,6 +2376,17 @@ fn build_project(
             .map_err(embedding_failure)?,
             _ => ConfigValue::Null,
         };
+        let context_model = match stage(&project.plan, "transform")
+            .iter()
+            .find(|step| step.module.name == "chunk.context")
+            .and_then(|step| step.arg("model"))
+            .filter(|name| !matches!(name, ConfigValue::Null))
+        {
+            Some(name) if !dry_run && selected.contains(&"transform") => {
+                chat_generator(project, name, "context model")?
+            }
+            _ => ConfigValue::Null,
+        };
         let mut request = vec![("command".to_owned(), text(command))];
         assign(&mut request, "runId", run_id.as_deref().map(text));
         for (key, option) in [
@@ -2402,6 +2440,7 @@ fn build_project(
                     module_settings(stage(&project.plan, "transform")),
                 ),
                 ("embedder", transform_embedder),
+                ("contextModel", context_model),
             ])),
         );
         assign(

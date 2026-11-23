@@ -21,7 +21,8 @@ const CORPUS_TABLES: &str = "
     CREATE TABLE IF NOT EXISTS chunk_sets (id TEXT PRIMARY KEY, chunks TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS chunkings (key TEXT PRIMARY KEY, chunk_set TEXT NOT NULL) WITHOUT ROWID;
     CREATE TABLE IF NOT EXISTS version_chunkings (version TEXT NOT NULL, settings TEXT NOT NULL,
-        chunk_set TEXT NOT NULL, PRIMARY KEY (version, settings)) WITHOUT ROWID;";
+        chunk_set TEXT NOT NULL, PRIMARY KEY (version, settings)) WITHOUT ROWID;
+    CREATE TABLE IF NOT EXISTS chunk_contexts (id TEXT PRIMARY KEY, text TEXT NOT NULL) WITHOUT ROWID;";
 /// The tables of the layout before step 2e.
 const OLD_TABLES: [&str; 3] = ["loaded_files", "stage_payloads", "document_chunks"];
 

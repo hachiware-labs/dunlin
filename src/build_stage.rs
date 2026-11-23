@@ -102,6 +102,9 @@ pub struct TransformSettings {
     pub modules: ConfigValue,
     #[serde(default)]
     pub embedder: Option<EmbedderSettings>,
+    /// The chat model of `chunk.context`.
+    #[serde(default, rename = "contextModel")]
+    pub context_model: Option<crate::generate::GeneratorSettings>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -573,6 +576,7 @@ pub fn run(
                         force: request.force,
                         modules: request.transform.modules.clone(),
                         embedder: request.transform.embedder.clone(),
+                        context_model: request.transform.context_model.clone(),
                     },
                     host,
                     cancel,

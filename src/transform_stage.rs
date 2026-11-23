@@ -1,5 +1,5 @@
 //! The `transform` stage (spec 28.9 steps 2b and 2e): `text.normalize`, `chunk.length`,
-//! `chunk.structure` and `chunk.semantic`, the chunk cache and the stage record.
+//! `chunk.structure`, `chunk.semantic` and `chunk.context`, the chunk cache and the stage record.
 //!
 //! Chunks are chunk sets in `corpus.sqlite`, looked up by the document and the chunk settings; the
 //! stage record lists the chunk set of each document (spec 28.3).
@@ -33,6 +33,9 @@ pub struct TransformRequest {
     /// The embedding model of `chunk.semantic`.
     #[serde(default)]
     pub embedder: Option<EmbedderSettings>,
+    /// The chat model of `chunk.context`, when it names one.
+    #[serde(default)]
+    pub context_model: Option<crate::generate::GeneratorSettings>,
 }
 
 pub struct TransformOutcome {
@@ -99,15 +102,19 @@ pub fn run(
     };
     let mut unicode = ConfigValue::Null;
     let mut chunker = None;
+    // The arguments of `chunk.context`, which comes after the chunk module.
+    let mut context: Option<ConfigValue> = None;
     for module in modules {
-        if chunker.is_some() {
+        let name = module.get("use").and_then(ConfigValue::as_str);
+        if context.is_some() || (chunker.is_some() && name != Some("chunk.context")) {
             return Err(StageError::plain(
                 "The transform stage has a module after its chunk module.",
             ));
         }
         let args = module.get("with").cloned().unwrap_or(ConfigValue::Null);
         let arg = |name: &str| args.get(name).cloned().unwrap_or(ConfigValue::Null);
-        match module.get("use").and_then(ConfigValue::as_str) {
+        match name {
+            Some("chunk.context") if chunker.is_some() => context = Some(args.clone()),
             Some("text.normalize") => unicode = arg("unicode"),
             Some("chunk.length") => {
                 chunker = Some(Chunker::Length {
@@ -144,6 +151,45 @@ pub fn run(
         ));
     };
     let semantic = matches!(chunker, Chunker::Semantic { .. });
+    let context_model = match (&context, &request.context_model) {
+        (Some(args), None) if args.get("model").and_then(ConfigValue::as_str).is_some() => {
+            return Err(StageError::coded(
+                "INVALID_MODEL",
+                "Define the context model of chunk.context under models.",
+                2,
+            ));
+        }
+        (Some(_), model) => model.as_ref(),
+        (None, _) => None,
+    };
+    let context_settings = context.as_ref().map(|args| {
+        let flag = |name: &str| !matches!(args.get(name), Some(ConfigValue::Bool(false)));
+        let count = |name: &str, default: usize| match args.get(name) {
+            Some(ConfigValue::Number(value)) if *value >= 1.0 => *value as usize,
+            _ => default,
+        };
+        crate::chunk_context::ContextSettings {
+            headings: flag("headings"),
+            document: flag("document"),
+            model: context_model,
+            document_chars: count("document_chars", 8000),
+            max_chars: count("max_chars", 300),
+        }
+    });
+    // What identifies the context in chunk sets, after the chunk settings. None without it, so
+    // that settings without `chunk.context` keep their IDs.
+    let context_key = context_settings.as_ref().map(|settings| {
+        ConfigValue::Array(vec![
+            text("chunk.context-v1"),
+            ConfigValue::Bool(settings.headings),
+            ConfigValue::Bool(settings.document),
+            settings
+                .model
+                .map_or(ConfigValue::Null, crate::chunk_context::model_identity),
+            number(settings.document_chars),
+            number(settings.max_chars),
+        ])
+    });
     let embedder = match (&chunker, &request.embedder) {
         (Chunker::Semantic { .. }, Some(settings)) => Some(settings),
         (Chunker::Semantic { .. }, None) => {
@@ -157,11 +203,16 @@ pub fn run(
     };
     let config_id = digest(
         "cfg",
-        &match embedder {
-            Some(settings) => {
+        &match (embedder, context_model) {
+            (Some(settings), None) => {
                 ConfigValue::Array(vec![request.modules.clone(), settings.identity()])
             }
-            None => request.modules.clone(),
+            (None, None) => request.modules.clone(),
+            (embedder, Some(model)) => ConfigValue::Array(vec![
+                request.modules.clone(),
+                embedder.map_or(ConfigValue::Null, EmbedderSettings::identity),
+                crate::chunk_context::model_identity(model),
+            ]),
         },
     );
     let id = digest(
@@ -197,7 +248,7 @@ pub fn run(
     let entries = source_entries(&connection, &request.source_id)?;
     // Chunk sets are found by corpus version and chunk settings first, so unchanged documents are
     // not read. The rest are read and looked up by content in `chunkings`.
-    let settings = crate::stage_store::chunk_set_id(&match &chunker {
+    let mut chunk_settings = match &chunker {
         Chunker::Length {
             size,
             overlap,
@@ -224,7 +275,9 @@ pub fn run(
             similarity.clone(),
             unicode.clone(),
         ],
-    });
+    };
+    chunk_settings.extend(context_key.clone());
+    let settings = crate::stage_store::chunk_set_id(&chunk_settings);
     let mut ids: Vec<Vec<Option<String>>> = entries
         .iter()
         .map(|(_, documents)| vec![None; documents.len()])
@@ -271,7 +324,7 @@ pub fn run(
         force: request.force,
         replace: request.force && semantic,
     };
-    let chunks = match &chunker {
+    let mut chunks = match &chunker {
         Chunker::Length {
             size,
             overlap,
@@ -298,6 +351,34 @@ pub fn run(
             )?
         }
     };
+    if let (Some(settings), Some(key)) = (&context_settings, &context_key) {
+        for (group, documents) in groups.iter().enumerate() {
+            for (index, document) in documents.iter().enumerate() {
+                cancel.check().map_err(aborted)?;
+                let raw = &mut chunks[group][index];
+                // Placed chunk sets are found by the chunks they came from and the context settings.
+                let found = ConfigValue::Array(vec![
+                    key.clone(),
+                    text(&crate::stage_store::chunk_set_id(raw)),
+                ])
+                .to_js_json();
+                if let Some(placed) = cache.read(&found, &document.content)? {
+                    *raw = placed;
+                    continue;
+                }
+                crate::chunk_context::apply(
+                    raw,
+                    &document.content,
+                    document.format.as_str() == Some("markdown"),
+                    settings,
+                    &corpus,
+                    charge,
+                    cancel,
+                )?;
+                cache.write(&[(found, raw.as_slice(), document.content.as_str())])?;
+            }
+        }
+    }
     let mut saved = Vec::new();
     for (((_, documents), ids), chunked) in entries.iter().zip(ids.iter_mut()).zip(&chunks) {
         let mut chunked = chunked.iter();
@@ -908,6 +989,7 @@ mod tests {
                     {"use":"chunk.length","version":1,"name":"chunk.length","with":{"unit":"characters","size":8,"overlap":0}}]"#,
             ),
             embedder: None,
+            context_model: None,
         };
         let cancel = Cancellation::default();
         let first = run(&request, &Free, &cancel).unwrap();
@@ -981,6 +1063,106 @@ mod tests {
     }
 
     #[test]
+    fn places_chunks_by_their_headings_and_the_model_description() {
+        let content = "# ポンプ\n## 部品\nインペラは2年ごとに交換する。\nシールは毎年点検する。\n";
+        let project = state(content);
+        let (base, bodies) = serve(|body| {
+            let input = body["messages"][1]["content"].as_str().unwrap();
+            let chunk = input
+                .split("<part>")
+                .nth(1)
+                .and_then(|rest| rest.split("</part>").next())
+                .unwrap_or_default();
+            let (subject, topic) = if chunk.contains("交換") {
+                ("ポンプの  部品", "交換周期")
+            } else {
+                ("ポンプ", "部品")
+            };
+            (
+                200,
+                serde_json::json!({
+                    "done": true,
+                    "message": {
+                        "content": serde_json::json!({ "subject": subject, "topic": topic }).to_string()
+                    }
+                })
+                .to_string(),
+            )
+        });
+        let request = TransformRequest {
+            state: project.state.clone(),
+            corpus: project.corpus.clone(),
+            source_id: "src-1".into(),
+            force: false,
+            modules: modules(
+                r#"[{"use":"chunk.length","version":1,"name":"chunk.length","with":{"unit":"characters","size":20,"overlap":0}},
+                    {"use":"chunk.context","version":1,"name":"chunk.context","with":{"headings":true,"document":true,"model":"chat","document_chars":8000,"max_chars":300}}]"#,
+            ),
+            embedder: None,
+            context_model: Some(crate::generate::GeneratorSettings {
+                provider: "ollama".into(),
+                model: "m".into(),
+                url: format!("{base}/api/chat"),
+                api_key: None,
+                max_input_bytes: None,
+                unlimited_output: false,
+            }),
+        };
+        let cancel = Cancellation::default();
+        let first = run(&request, &Free, &cancel).unwrap();
+        let chunks = first_chunks(&project, &first.output);
+        let found: Vec<(String, String)> = chunks
+            .iter()
+            .map(|chunk| {
+                let context = chunk.get("context").unwrap();
+                (
+                    chunk.get("heading").unwrap().as_str().unwrap().to_owned(),
+                    format!(
+                        "{} {}",
+                        context.get("headings").unwrap().to_js_json(),
+                        context
+                            .get("text")
+                            .and_then(ConfigValue::as_str)
+                            .unwrap_or("")
+                    ),
+                )
+            })
+            .collect();
+        // The first chunk starts at the first heading and keeps its own heading; a chunk that
+        // starts inside a section has the headings above it, and takes the innermost one.
+        // White space of the description is collapsed.
+        assert_eq!(
+            found,
+            [
+                ("ポンプ".into(), r#"["ポンプ"] ポンプ: 部品"#.into()),
+                (
+                    "部品".into(),
+                    r#"["ポンプ","部品"] ポンプの 部品: 交換周期"#.into()
+                ),
+            ]
+        );
+        let asked = bodies.lock().unwrap().len();
+        assert_eq!(asked, chunks.len());
+
+        // The same chunks and settings reuse the descriptions without asking the model.
+        let forced = TransformRequest {
+            force: false,
+            ..request
+        };
+        let again = run(&forced, &Free, &cancel).unwrap();
+        assert!(again.reused);
+        let corpus = Connection::open(Path::new(&project.corpus).join("corpus.sqlite")).unwrap();
+        corpus.execute("DELETE FROM version_chunkings", []).unwrap();
+        let state = Connection::open(&project.state).unwrap();
+        state
+            .execute("DELETE FROM stage_outputs WHERE stage = 'transform'", [])
+            .unwrap();
+        let rebuilt = run(&forced, &Free, &cancel).unwrap();
+        assert_eq!(rebuilt.output.get("chunks"), first.output.get("chunks"));
+        assert_eq!(bodies.lock().unwrap().len(), asked);
+    }
+
+    #[test]
     fn joins_similar_passages_with_the_embedding_model() {
         let content = "Alpha one.\nAlpha two.\nBeta three.\n";
         let project = state(content);
@@ -1018,6 +1200,7 @@ mod tests {
                 api_key: None,
                 max_input_bytes: None,
             }),
+            context_model: None,
         };
         let cancel = Cancellation::default();
         let first = run(&request, &Free, &cancel).unwrap();

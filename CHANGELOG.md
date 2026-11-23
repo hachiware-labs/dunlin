@@ -16,6 +16,9 @@
   - 検索モジュールの `weight`: `fusion.rrf` で、その検索の順位を重みを付けて数えます。
   - `index.vector`・`hannoy.index` の `document_prefix` と、`retrieval.vector`・`hannoy.search` の `query_prefix`: 埋め込む文の先頭に `passage: ` や `query: ` のような文字列を付けます。
   - `context.assemble` の `expand_lines`: 当たったチャンクを前後の行まで広げて文脈に入れます。検索結果の範囲は変わりません。
+  - `context.assemble` の `expand_section_chars`: 当たったチャンクを、それがある節の全体に広げて文脈に入れます。節がその文字数を超えるときは広げません。
+- MCP・RAG の `transform` に `chunk.context` を足しました。チャンクモジュールの後に置くと、索引が、文書の名前とチャンクより上の見出しを、検索する本文の先頭に付けます。見出しは Markdown の `#` の行のほか、テキスト・PDF・OCR の `第1章`、`1.2 目的`、`【注意】`、`■ 手順` のような行から読みます。`model` にチャットモデルを書くと、モデルが文書を読んで「何についての部分か」の短い説明を書き、それも付けます。説明は入力ごとに保存し、同じ入力では問い合わせません。検索結果の範囲と本文は変わりません。
+- 評価のレポートに `breakdown` を足しました。ケースの種類ごと（`kind`）と、質問と引用の語の重なりが半分未満か以上か（`overlap`）で、ケースの数、重なりの平均、各指標の平均を出します。各行には `kind` と `overlap` が入ります。`eval` の `modules` に `metric.context_share` を書くと、文脈の文字のうち根拠が占める割合が `evidence_share@context` として出ます。どちらも評価方法の ID を変えません。
 - リリース用の npm パッケージを組み立てる `npm run release:prepare` と、手動実行のワークフロー **Release Knowledge-Nest**、MCP Registry 用の `server.json` を追加しました。
 - Node.js API から、直接開いた索引の資料を抜粋してページを作る `kb.wiki`、同期の結果の `wiki`、MCP の道具 `knowledge.wiki_get` をなくしました。Wiki と PARA は、CLI と同じ実装を `KnowledgeNest.wiki` と `KnowledgeNest.wikiServe` で呼べます。
 - CLI のコマンドを Rust で実行するようにしました。`--json` の出力、エラーの番号、終了コード、書き出す設定ファイルは以前と同じです。HTML の本文の取り出しと Office 文書の変換も Rust で行い、npm の依存から `cheerio`、`yaml`、`zod`、`docling.rs` をなくしました。`nest dictionary add` は候補設定の `user_dictionary` の行だけを書き換え、他の行の書式とコメントをそのまま残します。

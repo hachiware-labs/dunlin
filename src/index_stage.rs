@@ -335,6 +335,58 @@ fn index_exists(path: &Path, cancel: &Cancellation) -> Result<bool, StageError> 
 }
 
 /// The documents of one source group, with their chunks, as `documentsRequest` sends them.
+/// The text the index searches for a chunk: the place `chunk.context` gave it (the document's
+/// name, the headings above it and the model's description) before its own text. The place is
+/// in NFKC form when the chunk's search text is.
+pub(crate) fn placed(chunk: &ConfigValue, name: &str, text: &str) -> String {
+    let preamble = crate::chunk_context::preamble(chunk, name);
+    if preamble.is_empty() {
+        return text.to_owned();
+    }
+    let preamble = if string_field(chunk, "searchText").is_some() {
+        crate::chunk::nfkc(&preamble)
+    } else {
+        preamble
+    };
+    preamble + text
+}
+
+/// The chunks of a document with the place of each in its search text, for the keyword index.
+fn placed_chunks(chunks: Option<&ConfigValue>, document: &ConfigValue) -> Option<ConfigValue> {
+    let list = items(chunks);
+    if !list.iter().any(|chunk| chunk.get("context").is_some()) {
+        return chunks.cloned();
+    }
+    let name = string_field(document, "objectId").unwrap_or_default();
+    let content = string_field(document, "content").unwrap_or_default();
+    Some(ConfigValue::Array(
+        list.iter()
+            .map(|chunk| {
+                let range = field(chunk, "byteRange");
+                let bound = |name: &str| match range.and_then(|range| field(range, name)) {
+                    Some(ConfigValue::Number(value)) if *value > 0.0 => {
+                        (*value as usize).min(content.len())
+                    }
+                    _ => 0,
+                };
+                let text = match string_field(chunk, "searchText") {
+                    Some(text) => text.to_owned(),
+                    None => content
+                        .get(bound("start").min(bound("end"))..bound("end"))
+                        .unwrap_or_default()
+                        .to_owned(),
+                };
+                let mut chunk = chunk.clone();
+                if let ConfigValue::Object(entries) = &mut chunk {
+                    let searched = placed(&ConfigValue::Object(entries.clone()), name, &text);
+                    assign(entries, "searchText", Some(self::text(&searched)));
+                }
+                chunk
+            })
+            .collect(),
+    ))
+}
+
 fn document_inputs(
     documents: &[ConfigValue],
     chunks: Option<&ConfigValue>,
@@ -355,7 +407,7 @@ fn document_inputs(
             ] {
                 assign(&mut input, name, document.get(name).cloned());
             }
-            assign(&mut input, "chunks", chunks.get(i).cloned());
+            assign(&mut input, "chunks", placed_chunks(chunks.get(i), document));
             serde_json::from_str(&ConfigValue::Object(input).to_js_json())
                 .map_err(|_| StageError::native(crate::Error::Invalid("Invalid source documents")))
         })
@@ -1170,8 +1222,13 @@ fn build_vectors(build: &VectorBuild<'_>) -> Result<ConfigValue, StageError> {
                 if js_blank(&text) {
                     continue;
                 }
-                // The prefix is part of what is embedded, so it is part of the cache key too.
-                let text = format!("{}{text}", build.document_prefix);
+                // The prefix and the place are part of what is embedded, so they are part of the
+                // cache key too.
+                let text = format!(
+                    "{}{}",
+                    build.document_prefix,
+                    placed(chunk, object_id, &text)
+                );
                 let key = sha256_hex(
                     ConfigValue::Array(vec![self::text(&identity), self::text(&text)])
                         .to_js_json()
@@ -1655,6 +1712,7 @@ mod tests {
                 )
                 .unwrap(),
                 embedder: None,
+                context_model: None,
             },
             &Host { changed: false },
             &Cancellation::default(),

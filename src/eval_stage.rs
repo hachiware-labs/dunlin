@@ -9,7 +9,10 @@
 #![cfg_attr(test, allow(dead_code))]
 
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+
+use icu_normalizer::ComposingNormalizerBorrowed;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Deserialize;
@@ -561,6 +564,221 @@ fn coverage(
     )
 }
 
+/// The share of a question's character pairs that the quotes of its evidence hold
+/// (docs/retrieval-techniques.md, E3): 1 when the question repeats the quoted words, low for a
+/// paraphrase. Letters and digits are compared after NFKC and lowercasing, so spaces and
+/// punctuation do not count; a question of a single such character compares that character.
+fn overlap(question: &str, quotes: &[&str]) -> f64 {
+    let normalizer = ComposingNormalizerBorrowed::new_nfkc();
+    let letters = |text: &str| -> Vec<char> {
+        normalizer
+            .normalize(text)
+            .chars()
+            .flat_map(char::to_lowercase)
+            .filter(|c| c.is_alphanumeric())
+            .collect()
+    };
+    let asked = letters(question);
+    let size = if asked.len() >= 2 { 2 } else { 1 };
+    let grams = |chars: &[char]| -> HashSet<String> {
+        chars
+            .windows(size)
+            .map(|window| window.iter().collect())
+            .collect()
+    };
+    let wanted = grams(&asked);
+    if wanted.is_empty() {
+        return 0.0;
+    }
+    let quoted: HashSet<String> = quotes
+        .iter()
+        .flat_map(|quote| grams(&letters(quote)))
+        .collect();
+    wanted.intersection(&quoted).count() as f64 / wanted.len() as f64
+}
+
+/// Sorted byte ranges with overlapping and touching ones joined.
+fn joined(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    ranges.retain(|(start, end)| start < end);
+    ranges.sort_unstable();
+    let mut out: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in ranges {
+        match out.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => out.push((start, end)),
+        }
+    }
+    out
+}
+
+/// The characters of `content` between two byte offsets, which may fall inside a character.
+fn chars_between(content: &str, start: usize, end: usize) -> usize {
+    let end = end.min(content.len());
+    if start >= end {
+        return 0;
+    }
+    match content.get(start..end) {
+        Some(text) => text.chars().count(),
+        None => content
+            .char_indices()
+            .filter(|(index, _)| (start..end).contains(index))
+            .count(),
+    }
+}
+
+/// The documents `context_share` read for context from documents no evidence is in, by
+/// `source-id:object-id`: their version and content, or `None` when the build lacks them.
+type Contents = HashMap<String, Option<(String, String)>>;
+
+/// The share of the characters of the context that are evidence of the case
+/// (docs/retrieval-techniques.md, E6). Overlapping excerpts count once. An empty context has no
+/// share. Excerpts of a version the build no longer has are left out.
+fn context_share(
+    matches: &[Match],
+    context: &[ConfigValue],
+    database: &KnowledgeBase,
+    contents: &mut Contents,
+    cancel: &Cancellation,
+) -> Result<f64, StageError> {
+    // The excerpts of each document version: source ID, object ID and version.
+    type Version = (String, String, String);
+    let mut groups: Vec<(Version, Vec<&ConfigValue>)> = Vec::new();
+    for item in context {
+        let source = item.get("source");
+        let field = |name: &str| {
+            source
+                .and_then(|source| string_field(source, name))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let key = (field("sourceId"), field("objectId"), field("version"));
+        match groups.iter_mut().find(|(existing, _)| *existing == key) {
+            Some((_, list)) => list.push(item),
+            None => groups.push((key, vec![item])),
+        }
+    }
+    let (mut total, mut evidence) = (0, 0);
+    for ((source_id, object_id, version), list) in groups {
+        let same = |document: &Document| {
+            document.source_id == source_id
+                && document.object_id == object_id
+                && document.version == version
+        };
+        let content: &str = match matches
+            .iter()
+            .filter_map(|matched| matched.document.as_ref())
+            .find(|document| same(document))
+        {
+            Some(document) => &document.content,
+            None => {
+                let name = format!("{source_id}:{object_id}");
+                if !contents.contains_key(&name) {
+                    let loaded = load_document(database, &name, false, cancel)?;
+                    contents.insert(
+                        name.clone(),
+                        loaded.map(|document| (document.version, document.content)),
+                    );
+                }
+                match contents.get(&name) {
+                    Some(Some((found, content))) if *found == version => content,
+                    _ => continue,
+                }
+            }
+        };
+        let bytes = |(start, end): (f64, f64)| {
+            let clamp = |value: f64| {
+                if value.is_finite() && value > 0.0 {
+                    (value as usize).min(content.len())
+                } else {
+                    0
+                }
+            };
+            (clamp(start), clamp(end))
+        };
+        let shown = joined(
+            list.iter()
+                .map(|item| bytes(original_range(content, item)))
+                .collect(),
+        );
+        let quoted = joined(
+            matches
+                .iter()
+                .filter(|matched| matched.document.as_ref().is_some_and(same))
+                .filter_map(|matched| matched.range)
+                .map(bytes)
+                .collect(),
+        );
+        total += shown
+            .iter()
+            .map(|&(start, end)| chars_between(content, start, end))
+            .sum::<usize>();
+        let (mut i, mut j) = (0, 0);
+        while i < shown.len() && j < quoted.len() {
+            let start = shown[i].0.max(quoted[j].0);
+            let end = shown[i].1.min(quoted[j].1);
+            evidence += chars_between(content, start, end);
+            if shown[i].1 < quoted[j].1 {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+    }
+    Ok(if total == 0 {
+        0.0
+    } else {
+        evidence as f64 / total as f64
+    })
+}
+
+/// The cases of a report in groups (docs/retrieval-techniques.md, E3 and E4): by the kind the
+/// case declares (`none` for a case without one), and by the overlap of its question with its
+/// quotes, below a half (`low`) or not (`high`). Each group gives its number of cases, their
+/// mean overlap and the mean of each score.
+fn breakdown(
+    kinds: &[Option<String>],
+    overlaps: &[f64],
+    names: &[String],
+    score_of: &dyn Fn(usize, &str) -> f64,
+) -> ConfigValue {
+    let group = |members: Vec<usize>| -> Option<ConfigValue> {
+        if members.is_empty() {
+            return None;
+        }
+        let shares: Vec<f64> = members.iter().map(|&index| overlaps[index]).collect();
+        let scores = names
+            .iter()
+            .map(|name| {
+                let values: Vec<f64> = members.iter().map(|&index| score_of(index, name)).collect();
+                (name.clone(), mean(&values))
+            })
+            .collect();
+        Some(object(vec![
+            ("cases", num(members.len() as f64)),
+            ("overlap", mean(&shares)),
+            ("scores", ConfigValue::Object(scores)),
+        ]))
+    };
+    let mut by_kind = Vec::new();
+    for kind in crate::eval_data::KINDS.iter().copied().chain(["none"]) {
+        let members = (0..kinds.len())
+            .filter(|&index| kinds[index].as_deref().unwrap_or("none") == kind)
+            .collect();
+        assign(&mut by_kind, kind, group(members));
+    }
+    let mut by_overlap = Vec::new();
+    for (name, low) in [("low", true), ("high", false)] {
+        let members = (0..overlaps.len())
+            .filter(|&index| (overlaps[index] < 0.5) == low)
+            .collect();
+        assign(&mut by_overlap, name, group(members));
+    }
+    object(vec![
+        ("kind", ConfigValue::Object(by_kind)),
+        ("overlap", ConfigValue::Object(by_overlap)),
+    ])
+}
+
 pub(crate) fn mean(values: &[f64]) -> ConfigValue {
     if values.is_empty() {
         ConfigValue::Null
@@ -651,8 +869,9 @@ pub(crate) fn method_id(settings: &ConfigValue) -> String {
         "include_generated",
         settings.get("includeGenerated").cloned(),
     );
-    // `metric.evidence_rank` adds scores but judges no case differently, so it is not here:
-    // reports with and without it compare on the scores they share.
+    // `metric.evidence_rank` and `metric.context_share` add scores but judge no case
+    // differently, so they are not here: reports with and without them compare on the scores
+    // they share.
     digest("method", &ConfigValue::Object(entries))
 }
 
@@ -765,6 +984,10 @@ pub fn evaluate(
         .map(|value| value as usize)
         .collect();
     let mut stage_rows: Vec<Stages> = Vec::new();
+    let share_context = truthy(settings.get("contextShare"));
+    let mut contents = Contents::new();
+    let mut kinds: Vec<Option<String>> = Vec::new();
+    let mut overlaps: Vec<f64> = Vec::new();
     let mut positions: Vec<(String, ConfigValue)> = Vec::new();
     let mut rows: Vec<ConfigValue> = Vec::new();
     let mut latencies: Vec<f64> = Vec::new();
@@ -894,6 +1117,17 @@ pub fn evaluate(
             primary_name == "evidence_recall@context",
         );
         scores.extend(rank_scores(&held.rank, &rank_at));
+        if share_context {
+            let share = context_share(&matches, &outcome.context, database, &mut contents, cancel)
+                .map_err(fail)?;
+            scores.push(("evidence_share@context".into(), share));
+        }
+        let quotes: Vec<&str> = items(item.get("evidence"))
+            .iter()
+            .filter_map(|evidence| string_field(evidence, "quote"))
+            .collect();
+        let shared = overlap(string_field(item, "question").unwrap_or_default(), &quotes);
+        let kind = string_field(item, "kind").map(str::to_owned);
         let ranked_metric = at
             .iter()
             .find(|value| matches!(value, ConfigValue::Number(at) if *at >= ranked.len() as f64));
@@ -964,7 +1198,11 @@ pub fn evaluate(
         row.push(("context_stop".into(), text(outcome.context_stop)));
         assign(&mut row, "evidence", evidence);
         row.push(("stages".into(), stages_value(&held)));
+        assign(&mut row, "kind", kind.as_deref().map(text));
+        row.push(("overlap".into(), num(shared)));
         stage_rows.push(held);
+        kinds.push(kind);
+        overlaps.push(shared);
         rows.push(ConfigValue::Object(row));
         latencies.push(ms);
         context_chars.push(chars);
@@ -1118,6 +1356,10 @@ pub fn evaluate(
     ));
     report.push(("scores".into(), ConfigValue::Object(scores)));
     report.push(("stages".into(), stages_summary(&stage_rows)));
+    report.push((
+        "breakdown".into(),
+        breakdown(&kinds, &overlaps, &names, &score_of),
+    ));
     report.push(("diagnostic".into(), ConfigValue::Object(diagnostic)));
     report.push((
         "latency_ms".into(),
@@ -1465,5 +1707,39 @@ mod tests {
             primary_recall(&names(&["ndcg@10", "evidence_recall@context"])),
             "evidence_recall@context"
         );
+    }
+
+    #[test]
+    fn measures_how_much_of_a_question_its_quotes_hold() {
+        // Every pair of letters of the question is in the quote; punctuation and width do not count.
+        assert_eq!(
+            overlap("ポンプの交換周期は？", &["ポンプの交換周期は2年である。"]),
+            1.0
+        );
+        assert_eq!(overlap("ＡＢＣ", &["abc"]), 1.0);
+        // A paraphrase shares few pairs.
+        assert!(
+            overlap(
+                "羽根車はいつ取り替える？",
+                &["インペラは2年ごとに交換する。"]
+            ) < 0.2
+        );
+        // Pairs are taken within each quote, not across two of them.
+        assert_eq!(overlap("ab", &["a", "b"]), 0.0);
+        assert_eq!(overlap("x", &["xyz"]), 1.0);
+        assert_eq!(overlap("？", &["何か"]), 0.0);
+    }
+
+    #[test]
+    fn joins_ranges_and_counts_their_characters() {
+        assert_eq!(
+            joined(vec![(5, 9), (0, 3), (3, 4), (8, 12), (7, 7)]),
+            vec![(0, 4), (5, 12)]
+        );
+        let content = "あいうえお";
+        assert_eq!(chars_between(content, 3, 9), 2);
+        // An offset inside a character counts the characters that start in the range.
+        assert_eq!(chars_between(content, 1, 9), 2);
+        assert_eq!(chars_between(content, 9, 100), 2);
     }
 }

@@ -63,6 +63,12 @@ register('chunk.semantic', 'transform', 'chunk', 'corpus', 'chunks', {
   similarity: z.number().min(-1).max(1).default(0.55),
 }, 'Split text at low-similarity boundaries between adjacent passages.',
 (input, args, ctx) => ctx.chunkSemantic(input, args), { external: true, deterministic: false, requires: ['embedding model'] });
+// chunk.context came after the JavaScript implementation; the reference follows the Rust one.
+register('chunk.context', 'transform', 'context', 'chunks', 'chunks', {
+  headings: z.boolean().default(true), document: z.boolean().default(true), model: z.string().min(1).optional(),
+  document_chars: integer(100, 1000000, 8000), max_chars: integer(20, 4000, 300),
+}, "Give each chunk its place in its document, which the index searches before the chunk's text: the document's name, the headings above the chunk (Markdown headings, or numbered and marked lines of other text), and optionally a short description a chat model writes from the document. Search results keep the chunk's own range and text.",
+(input) => input);
 register('index.keyword', 'index', 'index', 'chunks', 'index', {
   tokenizer: choice(['lindera', 'trigram', 'word'], 'lindera'),
   user_dictionary: z.string().trim().min(1).nullable().optional(),
@@ -118,7 +124,8 @@ register('context.assemble', 'search', 'context', 'candidates', 'context', {
   truncate_last: z.boolean().default(true),
   include_headings: z.boolean().default(true),
   expand_lines: z.number().int().min(0).max(1000).optional(),
-}, 'Assemble source excerpts within the character budget, optionally widening each by the lines around it.',
+  expand_section_chars: z.number().int().min(1).max(1000000).optional(),
+}, 'Assemble source excerpts within the character budget, optionally widening each to the section it is in when the section has at most expand_section_chars characters, or else by expand_lines lines around it.',
 (input, args, ctx) => ctx.assemble(input, args));
 register('answer.generate', 'ask', 'answer', 'context', 'response', {
   model: z.string().min(1).default('answerer'), cite: z.boolean().default(true),

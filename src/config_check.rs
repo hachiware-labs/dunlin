@@ -1023,6 +1023,20 @@ fn module_checks(
             );
         }
     }
+    if name == "chunk.context"
+        && let Some(reference) = planned.text("model").filter(|text| !text.is_empty())
+    {
+        let chosen = model(Some(reference));
+        if field(chosen, "kind").as_deref() != Some("chat") || !truthy(chosen, "provider") {
+            report.issue(
+                "REQUIREMENT_MISSING",
+                at(path!["with", "model"]),
+                "A named chat model",
+                "Define the context model under models.",
+                Details::module(name),
+            );
+        }
+    }
     if name == "chunk.semantic" {
         let reference = planned.text("model").filter(|text| !text.is_empty());
         let chosen = model(reference);
@@ -1811,7 +1825,7 @@ fn validate_evaluation(config: &ConfigValue, report: &mut Report) -> Option<Conf
             report.issue(
                 "MODULE_UNKNOWN",
                 item_path,
-                "metric.evidence_recall, metric.latency or metric.evidence_rank",
+                "metric.evidence_recall, metric.latency, metric.evidence_rank or metric.context_share",
                 "Use a supported evaluation module.",
                 Details {
                     received: name.cloned(),
@@ -1847,6 +1861,7 @@ fn validate_evaluation(config: &ConfigValue, report: &mut Report) -> Option<Conf
         let issues = match name_text {
             "metric.evidence_recall" => recall_issues(args),
             "metric.evidence_rank" => rank_issues(args),
+            "metric.context_share" => no_arg_issues(args),
             _ => latency_issues(args),
         };
         if issues.is_empty() {
@@ -1867,6 +1882,8 @@ fn validate_evaluation(config: &ConfigValue, report: &mut Report) -> Option<Conf
                     .cloned()
                     .unwrap_or(ConfigValue::Array(vec![ConfigValue::Number(10.0)]));
                 output.push(("rank".into(), ConfigValue::Object(vec![("at".into(), at)])));
+            } else if name_text == "metric.context_share" {
+                output.push(("contextShare".into(), ConfigValue::Bool(true)));
             } else {
                 output.push((
                     "percentiles".into(),
@@ -1986,11 +2003,25 @@ fn recall_issues(args: Option<&ConfigValue>) -> Vec<Issue> {
 }
 
 /// The evaluation modules. The first two are required.
-const EVAL_MODULES: [&str; 3] = [
+const EVAL_MODULES: [&str; 4] = [
     "metric.evidence_recall",
     "metric.latency",
     "metric.evidence_rank",
+    "metric.context_share",
 ];
+
+/// `metric.context_share`, which takes no arguments: `with` is left out, empty or null.
+fn no_arg_issues(args: Option<&ConfigValue>) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    match args {
+        None | Some(ConfigValue::Null) => {}
+        Some(args) if is_mapping(Some(args)) => {
+            unknown_keys(args, &[], Vec::new(), &mut issues);
+        }
+        Some(_) => issues.push(issue("invalid_type", Vec::new())),
+    }
+    issues
+}
 
 /// `metric.evidence_rank`: `at`, the numbers of first candidates that MRR and nDCG look at. It
 /// may be left out, which means `[10]`.

@@ -40,6 +40,8 @@ mod adoption;
 #[cfg(any(feature = "node", test))]
 mod build_stage;
 #[cfg(any(feature = "node", test))]
+mod chunk_context;
+#[cfg(any(feature = "node", test))]
 mod cli_args;
 #[cfg(all(feature = "node", not(test)))]
 mod cli_dictionary;

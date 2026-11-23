@@ -356,6 +356,26 @@ fn build() -> Vec<ModuleInfo> {
         )
         .external(&["embedding model"]),
         Module::new(
+            "chunk.context",
+            ("transform", "context", "chunks", "chunks"),
+            vec![
+                arg(
+                    "headings",
+                    Kind::Bool,
+                    Presence::Default(Default::Bool(true)),
+                ),
+                arg(
+                    "document",
+                    Kind::Bool,
+                    Presence::Default(Default::Bool(true)),
+                ),
+                model(Presence::Optional),
+                int("document_chars", 100, 1_000_000, 8000),
+                int("max_chars", 20, 4000, 300),
+            ],
+            "Give each chunk its place in its document, which the index searches before the chunk's text: the document's name, the headings above the chunk (Markdown headings, or numbered and marked lines of other text), and optionally a short description a chat model writes from the document. Search results keep the chunk's own range and text.",
+        ),
+        Module::new(
             "index.keyword",
             ("index", "index", "chunks", "index"),
             vec![
@@ -489,8 +509,16 @@ fn build() -> Vec<ModuleInfo> {
                     Kind::Int { min: 0, max: 1000 },
                     Presence::Optional,
                 ),
+                arg(
+                    "expand_section_chars",
+                    Kind::Int {
+                        min: 1,
+                        max: 1_000_000,
+                    },
+                    Presence::Optional,
+                ),
             ],
-            "Assemble source excerpts within the character budget, optionally widening each by the lines around it.",
+            "Assemble source excerpts within the character budget, optionally widening each to the section it is in when the section has at most expand_section_chars characters, or else by expand_lines lines around it.",
         ),
         Module::new(
             "answer.generate",
@@ -807,7 +835,7 @@ mod tests {
     #[test]
     fn describes_modules_in_registration_order() {
         let names: Vec<_> = modules().iter().map(|module| module.name).collect();
-        assert_eq!(names.len(), 23);
+        assert_eq!(names.len(), 24);
         assert_eq!(names[0], "source.filesystem");
         let text = serde_json::to_string(module("hannoy.index").unwrap()).unwrap();
         assert!(

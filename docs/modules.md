@@ -123,6 +123,18 @@ PDF の文字層とページ位置を抽出します。
 | `sentence_chars` | 整数 | `250` | 1〜16384 |
 | `similarity` | 数値 | `0.55` | -1〜1 |
 
+### chunk.context
+
+チャンクモジュールの後に置き、各チャンクに文書の中での位置を持たせます。索引は、文書の名前と、チャンクの最初の行より上にある見出し（`文書 > 見出し > 見出し` の1行）を、検索する本文の先頭に付けます。見出しは Markdown の `#` の行、ほかの形式（PDF、OCR、テキスト）では `第1章`、`1.2 目的`、`【注意】`、`■ 手順` のような番号や記号の行から読みます。`model` にチャットモデルを書くと、モデルが文書を読んで「何についての部分か」（`ボイラー: 水位の維持` のような短い説明）を書き、それも先頭に付けます。説明は入力ごとに保存し、同じ入力では再び問い合わせません。検索結果の範囲と本文は変えません。
+
+| 引数 | 型 | 既定値 | 範囲・候補 |
+| --- | --- | --- | --- |
+| `headings` | 真偽値 | `true` | — |
+| `document` | 真偽値 | `true` | — |
+| `model` | 文字列 | 省略可 | — |
+| `document_chars` | 整数 | `8000` | 100〜1000000 |
+| `max_chars` | 整数 | `300` | 20〜4000 |
+
 ## index
 
 ### index.keyword
@@ -242,7 +254,7 @@ hannoy の HNSW 索引から候補を取得します。
 
 ### context.assemble
 
-文字数の予算内で出典の抜粋を組み立てます。`expand_lines` を書くと、各候補を前後の行まで広げて文脈に入れます（検索結果の範囲は変えません）。
+文字数の予算内で出典の抜粋を組み立てます。`expand_section_chars` を書くと、各候補を、それがある節の全体（上の見出しから、同じか上の階層の次の見出しの前まで）に広げます。節がその文字数を超えるときは広げません。`expand_lines` を書くと、節に広げなかった候補を前後の行まで広げます。どちらも文脈だけを広げ、検索結果の範囲は変えません。
 
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
@@ -253,6 +265,7 @@ hannoy の HNSW 索引から候補を取得します。
 | `truncate_last` | 真偽値 | `true` | — |
 | `include_headings` | 真偽値 | `true` | — |
 | `expand_lines` | 整数 | 省略可 | 0〜1000 |
+| `expand_section_chars` | 整数 | 省略可 | 1〜1000000 |
 
 ## ask
 
@@ -275,6 +288,7 @@ hannoy の HNSW 索引から候補を取得します。
 | `metric.evidence_recall` | `at` は `context` または1〜100の整数の配列。`short_evidence_chars` は正の整数、`min_coverage` は0〜1、`unresolved` は `count_as_missed` | `[context, 10]`、`40`、`0.8`、`count_as_missed` |
 | `metric.latency` | `percentiles` は1〜100の整数の配列 | `[50, 95, 99]` |
 | `metric.evidence_rank`（省略可） | `at` は1〜100の整数の配列。省くと `[10]`。根拠ごとの順位から `mrr@k` と `ndcg@k` を出す | 作られない |
+| `metric.context_share`（省略可） | 引数なし。文脈の文字のうち、根拠が占める割合を `evidence_share@context` として出す | 作られない |
 
 `index.vector` と `hannoy.index` の `document_prefix`、`retrieval.vector` と `hannoy.search` の `query_prefix` は、埋め込む文の先頭に付ける文字列です（`passage: ` と `query: ` など）。検索モジュールの `weight` は `fusion.rrf` での重みです。どれも省くと、以前と同じ設定IDのままです。
 

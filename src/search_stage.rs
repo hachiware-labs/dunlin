@@ -1165,18 +1165,50 @@ fn merged(hits: &[Hit]) -> Vec<Hit> {
     groups
 }
 
-/// `expand_lines` of `context.assemble`: each candidate grows by `lines` lines before and after
-/// it, within its document, so that a small chunk that matched brings the text around it into
-/// the context. Search results keep the ranges they matched with; only the context grows. A
-/// candidate whose document has changed since the index was built is left as it is.
+/// The lines a candidate grows to with `expand_section_chars`: the section it starts in, from
+/// its heading to the line before the next heading of the same level or a higher one after the
+/// candidate's last line (lines `start` to `end`, from one). Before the first heading, the
+/// section is the text up to it. `None` when the section has more than `limit` characters.
+fn section_lines(
+    headings: &[(usize, (usize, String))],
+    starts: &[usize],
+    content: &str,
+    (start, end): (usize, usize),
+    limit: usize,
+) -> Option<(usize, usize)> {
+    let opening = headings.iter().rev().find(|(line, _)| *line <= start);
+    let (first, level) = opening.map_or((1, 0), |(line, (level, _))| (*line, *level));
+    let last = headings
+        .iter()
+        .find(|(line, (other, _))| *line > end && (level == 0 || *other <= level))
+        .map_or(starts.len(), |(line, _)| line - 1)
+        .max(end);
+    let from = starts[first - 1];
+    let to = starts.get(last).copied().unwrap_or(content.len());
+    (content.get(from..to)?.chars().count() <= limit).then_some((first, last))
+}
+
+/// `expand_lines` and `expand_section_chars` of `context.assemble`: each candidate grows to the
+/// section it is in, when the section has at most `section_chars` characters, or else by `lines`
+/// lines before and after it, within its document, so that a small chunk that matched brings the
+/// text around it into the context. Search results keep the ranges they matched with; only the
+/// context grows. A candidate whose document has changed since the index was built is left as
+/// it is.
 fn expand(
     database: &KnowledgeBase,
     hits: &[Hit],
     lines: usize,
+    section_chars: Option<usize>,
     cancel: &Cancellation,
 ) -> Result<Vec<Hit>, StageError> {
-    // Each document once: its version, the byte offset where each line starts, and its length.
-    type Lines = (String, Vec<usize>, usize);
+    // Each document once: its version, the byte offset where each line starts, its content and
+    // its headings (read only for sections).
+    struct Lines {
+        version: String,
+        starts: Vec<usize>,
+        content: String,
+        headings: Vec<(usize, (usize, String))>,
+    }
     let mut documents: Vec<(String, Option<Lines>)> = Vec::new();
     let mut expanded = Vec::with_capacity(hits.len());
     for hit in hits {
@@ -1206,21 +1238,27 @@ fn expand(
                             .map(|(index, _)| index + 1)
                             .filter(|&index| index < document.content.len()),
                     );
-                    (
-                        document.evidence.source.version,
+                    let headings = if section_chars.is_some() {
+                        crate::chunk_context::document_headings(&document.content)
+                    } else {
+                        Vec::new()
+                    };
+                    Lines {
+                        version: document.evidence.source.version,
                         starts,
-                        document.content.len(),
-                    )
+                        content: document.content,
+                        headings,
+                    }
                 });
             documents.push((key.clone(), loaded));
         }
-        let Some((_, Some((version, starts, length)))) =
-            documents.iter().find(|(existing, _)| *existing == key)
+        let Some((_, Some(document))) = documents.iter().find(|(existing, _)| *existing == key)
         else {
             expanded.push(hit.clone());
             continue;
         };
-        if *version != part("version") {
+        let (starts, length) = (&document.starts, document.content.len());
+        if document.version != part("version") {
             expanded.push(hit.clone());
             continue;
         }
@@ -1234,10 +1272,23 @@ fn expand(
         }
         let (start, end) = (start as usize, end as usize);
         let last = starts.len();
-        let new_start = start.saturating_sub(lines).max(1);
-        let new_end = (end + lines).min(last);
+        if end > last {
+            expanded.push(hit.clone());
+            continue;
+        }
+        let section = section_chars.and_then(|limit| {
+            section_lines(
+                &document.headings,
+                starts,
+                &document.content,
+                (start, end),
+                limit,
+            )
+        });
+        let (new_start, new_end) =
+            section.unwrap_or((start.saturating_sub(lines).max(1), (end + lines).min(last)));
         let line_start = |line: usize| starts[line - 1];
-        let line_end = |line: usize| starts.get(line).copied().unwrap_or(*length);
+        let line_end = |line: usize| starts.get(line).copied().unwrap_or(length);
         let mut evidence = hit.evidence.clone();
         set_number(&mut evidence, &["range", "startLine"], new_start as f64);
         set_number(&mut evidence, &["range", "endLine"], new_end as f64);
@@ -1298,11 +1349,21 @@ fn assemble(
     } else {
         "exhausted"
     };
-    let expanded = match field(args, "expand_lines") {
-        Some(ConfigValue::Number(lines)) if *lines >= 1.0 => {
-            expand(database, &found.hits, *lines as usize, cancel)?
-        }
-        _ => found.hits.clone(),
+    let count = |name: &str| match field(args, name) {
+        Some(ConfigValue::Number(value)) if *value >= 1.0 => Some(*value as usize),
+        _ => None,
+    };
+    let (lines, section_chars) = (count("expand_lines"), count("expand_section_chars"));
+    let expanded = if lines.is_some() || section_chars.is_some() {
+        expand(
+            database,
+            &found.hits,
+            lines.unwrap_or(0),
+            section_chars,
+            cancel,
+        )?
+    } else {
+        found.hits.clone()
     };
     let candidates = if flag("merge_overlaps") {
         merged(&expanded)
@@ -1886,6 +1947,45 @@ mod tests {
             Some("INVALID_MODEL_OUTPUT")
         );
         assert!(cross_encoder_order(&cohere, true, 3).is_err());
+    }
+
+    #[test]
+    fn finds_the_section_of_a_candidate() {
+        let content = "# A\nintro\n## B\nb1\nb2\n### C\nc1\n## D\nd1\n";
+        let starts: Vec<usize> = std::iter::once(0)
+            .chain(
+                content
+                    .match_indices('\n')
+                    .map(|(index, _)| index + 1)
+                    .filter(|&index| index < content.len()),
+            )
+            .collect();
+        let headings = crate::chunk_context::document_headings(content);
+        let section = |lines, limit| section_lines(&headings, &starts, content, lines, limit);
+        // From the heading above to the next heading of the same level or a higher one.
+        assert_eq!(section((4, 4), 1000), Some((3, 7)));
+        assert_eq!(section((7, 7), 1000), Some((6, 7)));
+        assert_eq!(section((5, 7), 1000), Some((3, 7)));
+        // The top section holds the whole document.
+        assert_eq!(section((2, 2), 1000), Some((1, 9)));
+        // A section longer than the limit is not taken.
+        assert_eq!(section((4, 4), 10), None);
+        // Before the first heading, the text up to it.
+        let content = "pre\n# A\nx\n";
+        let starts = vec![0, 4, 8];
+        let headings = crate::chunk_context::document_headings(content);
+        assert_eq!(
+            section_lines(&headings, &starts, content, (1, 1), 100),
+            Some((1, 1))
+        );
+        // Plain text: numbered headings.
+        let content = "1. 概要\n本文\n2. 手順\n止める\n";
+        let starts = vec![0, 10, 17, 27];
+        let headings = crate::chunk_context::document_headings(content);
+        assert_eq!(
+            section_lines(&headings, &starts, content, (4, 4), 100),
+            Some((3, 4))
+        );
     }
 
     #[test]

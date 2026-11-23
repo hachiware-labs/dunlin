@@ -44,7 +44,7 @@ function writer(config, name) {
   try {
     return createGenerator(model.provider, resolveConfigValue(model.model, 'models.' + name + '.model'),
       resolveConfigValue(model.base_url, 'models.' + name + '.base_url'), resolveApiKey(model.api_key_env, 'models.' + name),
-      { maxInputBytes: model.max_input_bytes, maxOutputTokens: 32768 });
+      { maxInputBytes: model.max_input_bytes, maxOutputTokens: null });
   } catch {
     throw new WikiError(2, 'INVALID_MODEL', 'Check the provider, model, URL and environment references for models.' + name + '.');
   }

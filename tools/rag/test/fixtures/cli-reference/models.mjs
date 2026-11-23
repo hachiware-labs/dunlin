@@ -25,7 +25,7 @@ export function createGenerator(provider, model, baseUrl, apiKey, { maxInputByte
       const url = endpoint(baseUrl ?? process.env.OPENAI_BASE_URL ?? openaiBase, 'responses');
       return async (instructions, input, schema, signal) => {
         const result = await post(provider, url, key, {
-          model, instructions, input, store: false, max_output_tokens: maxOutputTokens ?? 2048,
+          model, instructions, input, store: false, ...(maxOutputTokens !== null && { max_output_tokens: maxOutputTokens ?? 2048 }),
           text: { format: { type: 'json_schema', name: 'grounded_answer', strict: true, schema } },
         }, signal, maxInputBytes);
         if (result.status !== 'completed') throw new Error(`OpenAI response status: ${result.status ?? 'unknown'}`);
@@ -40,7 +40,7 @@ export function createGenerator(provider, model, baseUrl, apiKey, { maxInputByte
       return async (instructions, input, schema, signal) => {
         const result = await post(provider, url, apiKey, {
           model, messages: chatMessages(instructions, input), format: schema, stream: false,
-          think: false, options: { temperature: 0, num_predict: maxOutputTokens ?? 1024 },
+          think: false, options: { temperature: 0, ...(maxOutputTokens !== null && { num_predict: maxOutputTokens ?? 1024 }) },
         }, signal, maxInputBytes);
         if (!result.done || result.done_reason === 'length') throw new Error('Ollama response was incomplete');
         return includeUsage ? { text: result.message?.content,
@@ -52,7 +52,7 @@ export function createGenerator(provider, model, baseUrl, apiKey, { maxInputByte
       const key = apiKey ?? process.env.STRATA_API_KEY;
       return async (instructions, input, schema, signal) => {
         const result = await post(provider, url, key, {
-          model, messages: chatMessages(instructions, input), stream: false, max_tokens: maxOutputTokens ?? 1024,
+          model, messages: chatMessages(instructions, input), stream: false, ...(maxOutputTokens !== null && { max_tokens: maxOutputTokens ?? 1024 }),
           temperature: 0, reasoning_effort: 'none',
           response_format: { type: 'json_schema', json_schema: { name: 'grounded_answer', strict: true, schema } },
         }, signal, maxInputBytes);

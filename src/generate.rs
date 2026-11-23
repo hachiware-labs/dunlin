@@ -25,9 +25,10 @@ pub struct GeneratorSettings {
     pub api_key: Option<String>,
     #[serde(default)]
     pub max_input_bytes: Option<f64>,
-    /// The most tokens the model may write, when not the provider's default of this module.
+    /// Whether the request leaves the length of the answer to the model, without the limit
+    /// that answers and reranking send (1024 tokens, 2048 with OpenAI).
     #[serde(default)]
-    pub max_output_tokens: Option<f64>,
+    pub unlimited_output: bool,
 }
 
 /// The output text, when the provider returned a string, and the provider's token counts.
@@ -132,6 +133,16 @@ pub(crate) fn without_lone_surrogates(raw: &str) -> String {
     out
 }
 
+/// An object of the entries that have a value, in their order.
+fn object_of(entries: Vec<(&str, Option<ConfigValue>)>) -> ConfigValue {
+    object(
+        entries
+            .into_iter()
+            .filter_map(|(name, value)| value.map(|value| (name, value)))
+            .collect(),
+    )
+}
+
 /// Sends one generation request: `createGenerator(...)(instructions, input, schema)`.
 pub fn generate(
     settings: &GeneratorSettings,
@@ -143,19 +154,18 @@ pub fn generate(
 ) -> Result<Generated, EmbedError> {
     let model = text(&settings.model);
     let schema = json(schema);
+    // The limit of an answer, unless the length is left to the model.
+    let limit = |tokens: f64| (!settings.unlimited_output).then(|| number(tokens));
     let body = match settings.provider.as_str() {
-        "openai" => object(vec![
-            ("model", model),
-            ("instructions", text(instructions)),
-            ("input", text(input)),
-            ("store", ConfigValue::Bool(false)),
-            (
-                "max_output_tokens",
-                number(settings.max_output_tokens.unwrap_or(2048.0)),
-            ),
+        "openai" => object_of(vec![
+            ("model", Some(model)),
+            ("instructions", Some(text(instructions))),
+            ("input", Some(text(input))),
+            ("store", Some(ConfigValue::Bool(false))),
+            ("max_output_tokens", limit(2048.0)),
             (
                 "text",
-                object(vec![(
+                Some(object(vec![(
                     "format",
                     object(vec![
                         ("type", text("json_schema")),
@@ -163,7 +173,7 @@ pub fn generate(
                         ("strict", ConfigValue::Bool(true)),
                         ("schema", schema),
                     ]),
-                )]),
+                )])),
             ),
         ]),
         "ollama" => object(vec![
@@ -174,28 +184,22 @@ pub fn generate(
             ("think", ConfigValue::Bool(false)),
             (
                 "options",
-                object(vec![
-                    ("temperature", number(0.0)),
-                    (
-                        "num_predict",
-                        number(settings.max_output_tokens.unwrap_or(1024.0)),
-                    ),
+                object_of(vec![
+                    ("temperature", Some(number(0.0))),
+                    ("num_predict", limit(1024.0)),
                 ]),
             ),
         ]),
-        "strata" => object(vec![
-            ("model", model),
-            ("messages", chat_messages(instructions, input)),
-            ("stream", ConfigValue::Bool(false)),
-            (
-                "max_tokens",
-                number(settings.max_output_tokens.unwrap_or(1024.0)),
-            ),
-            ("temperature", number(0.0)),
-            ("reasoning_effort", text("none")),
+        "strata" => object_of(vec![
+            ("model", Some(model)),
+            ("messages", Some(chat_messages(instructions, input))),
+            ("stream", Some(ConfigValue::Bool(false))),
+            ("max_tokens", limit(1024.0)),
+            ("temperature", Some(number(0.0))),
+            ("reasoning_effort", Some(text("none"))),
             (
                 "response_format",
-                object(vec![
+                Some(object(vec![
                     ("type", text("json_schema")),
                     (
                         "json_schema",
@@ -205,7 +209,7 @@ pub fn generate(
                             ("schema", schema),
                         ]),
                     ),
-                ]),
+                ])),
             ),
         ]),
         _ => {
@@ -220,12 +224,11 @@ pub fn generate(
         max_input_bytes: settings.max_input_bytes,
         label: settings.provider.clone(),
     };
-    // A model that may write several pages is given the time to write them.
-    let agent = match settings.max_output_tokens {
-        Some(tokens) if tokens > 2048.0 => {
-            crate::embed::model_agent_for(std::time::Duration::from_secs(600))
-        }
-        _ => model_agent(),
+    // A model that writes as much as it needs is given the time to write it.
+    let agent = if settings.unlimited_output {
+        crate::embed::model_agent_for(std::time::Duration::from_secs(30 * 60))
+    } else {
+        model_agent()
     };
     let result = post_json(&agent, &endpoint, &body.to_js_json(), charge, cancel)?;
     let string = |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_owned);
@@ -741,7 +744,7 @@ mod tests {
                 url: format!("{base}/api/chat"),
                 api_key: None,
                 max_input_bytes: None,
-                max_output_tokens: None,
+                unlimited_output: false,
             },
         };
         let response = answer(&request, &Free, &Cancellation::default()).unwrap();

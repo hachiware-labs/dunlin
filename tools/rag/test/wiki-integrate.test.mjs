@@ -101,8 +101,8 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   assert.deepEqual(sent(0).pages, []);
   // The model is told the name of each source, to name its summary page after it.
   assert.deepEqual(sent(0).sources.map(({ id, name }) => [id, name]), [[1, 'guide.md']]);
-  // The model may write several pages with their quotes.
-  assert.equal(requests[0].options.num_predict, 32768);
+  // The model writes as much as it needs: no limit is sent.
+  assert.deepEqual(requests[0].options, { temperature: 0 });
   assert.equal(sent(0).rules, rules);
 
   // A source that adds to a page. The model is given the list of pages, not what they say, and
@@ -198,6 +198,19 @@ test('works new sources into the pages of a Wiki and keeps its log and its check
   const moved = state();
   assert.equal(moved.prepare('SELECT count(*) AS n FROM wiki_pages').get().n, 0);
   moved.close();
+  // A file of the earlier form, with the page as Base64 at its end, is written in this one when
+  // the page moves, also by a work that then fails.
+  const legacy = { ...record(html), id: 'concepts/legacy', title: '古い形のファイル' };
+  await writeFile(join(base, 'wiki', 'concepts', 'legacy.html'),
+    '<!doctype html>\n<main><h1>古い形のファイル</h1></main>\n</html>\n<!-- knowledge-nest:publication ' + Buffer.from(JSON.stringify(legacy)).toString('base64url') + ' -->\n');
+  const older = state();
+  older.prepare('INSERT INTO wiki_pages VALUES (?, ?)').run(legacy.id, JSON.stringify(legacy));
+  older.close();
+  await assert.rejects(nest('--project', 'kb', 'ingest', join(root, 'missing.md'), '--json'));
+  assert.equal(record(await readFile(join(base, 'wiki', 'concepts', 'legacy.html'), 'utf8')).title, '古い形のファイル');
+  const emptied = state();
+  assert.equal(emptied.prepare('SELECT count(*) AS n FROM wiki_pages').get().n, 0);
+  emptied.close();
 
   // The contents name the kinds of pages and the three operations.
   const contents = await readFile(join(base, 'wiki', 'index.html'), 'utf8');

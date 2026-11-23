@@ -41,7 +41,7 @@ Paste what the last command prints into the MCP settings of Claude Desktop or Cl
 
 - **Rather than letting the agent read the folder itself.** PDF, Word, Excel and scanned documents are searchable by their Japanese words too. Only the passages that answer come back, with document and line, within a set number of characters, so thousands of documents do not fill the agent's context.
 - **Rather than a vector-only search server.** Japanese keyword search, strong where you need the exact word (part numbers, clause numbers, technical terms), runs without an embedding model. Add vector search, which handles rephrasing, for a hybrid.
-- **Check by numbers whether it finds the answers.** Register questions with the quotes that answer them, and measure the share of evidence search finds. Compare a changed setting side by side and keep the better one.
+- **Measured, and optimized.** Register questions with the quotes that answer them (an AI can draft the questions too), and measure the share of evidence search finds. Try candidate settings, such as chunk sizes or the number of results, all at once, rank them, and switch serving only to the one you checked. With search you build yourself, you would set up this evaluation and tuning separately. [Measure and optimize search](#measure-and-optimize-search-mcp-and-rag)
 
 **When your own app or chatbot should get answers with sources**, `nest init rag` adds an AI model that answers on top of the same search. `nest ask "question"` and HTTP return answers with sources. Unlike building it with LangChain and the like, there is no code to write. The HTTP API takes the OpenAI SDK as it is, so an existing app only changes where it connects. A question with no evidence in the documents is declined rather than answered. [RAG guide](docs/start-rag.en.md)
 
@@ -152,9 +152,9 @@ RAG searches the documents for fragments at each question and builds an answer o
 
 Text an LLM writes can contain plausible errors. Knowledge-Nest covers this weakness by checking against sources. PARA shares with the Wiki the checks against sources, originals that are never changed, undoable jobs, and serving on the web and over MCP. [Using Wiki and PARA](docs/wiki.md) (Japanese)
 
-## Improve search by numbers (new commands, in development)
+## Measure and optimize search (MCP and RAG)
 
-We are building a way to keep search data as versions, and to measure and compare many candidate settings at once.
+"Would smaller chunks find more?" is decided by numbers, not by a hunch. Pairs of a question and the quote that answers it measure the share of evidence search finds (recall). Write only what to vary, and candidate settings are made and measured in turn. Candidates that share their first steps reuse what was made, so trying many stays fast.
 
 ```sh
 nest eval-data import cases.json   # bring in pairs of a question and the quote that answers it
@@ -174,7 +174,18 @@ Trial  Recall  To base  What
 
 Rebuilding, evaluating, and optimizing never change the index being served. It switches only when you check and `release` (to switch on every build, use `nest build --release`).
 
-For now this supports text and Markdown with keyword search, and `serve` does not yet serve its indexes. The steps and the details are in [Improve search by numbers](docs/guide.en.md).
+There are tools for reading the misses too. An evaluation shows where evidence was lost (in search, in fusion, or over the context budget) and how each kind of question did. `nest eval-data generate` has an AI draft candidate questions, which you check before use.
+
+`optimize` and `release` belong to a new mechanism in development: for now they support text and Markdown with keyword search, and `serve` does not yet serve their indexes. Settings with vector search or reranking are compared one at a time with `nest eval` and `nest report compare`. The steps and the details are in [Improve search by numbers](docs/guide.en.md) and [Evaluation and dictionary](docs/evaluation.md) (Japanese).
+
+## Rearrange it, and add what is missing (MCP and RAG)
+
+MCP and RAG are built from modules listed by stage (loading, chunking, index, search, answer) in a configuration file, `KnowledgeNestfile.yaml`. Rearrange them by changing the list and its arguments, without programming.
+
+- **Rearrange.** Adding vector search and a reranker to keyword search, or chunking along headings, takes a few lines of the configuration. `nest modules list` shows the modules available, and `nest validate` catches mistakes before anything runs. [Modules](docs/modules.md) (Japanese)
+- **Formats it cannot read go through your own converter.** Name a conversion command in `loader.command`, and its output is taken in as the text of formats not read by default, such as drawings or in-house formats.
+- **Models can be swapped.** Embedding and answer models come from a local Ollama or an API such as OpenAI's. A reranker connects to any server with `/v1/rerank` or `/rerank` (llama.cpp, vLLM, Infinity, Text Embeddings Inference).
+- **Want a new module? Go ahead.** A module is added by defining its role, input, output and arguments in the registry in `src/registry.rs`. Knowledge-Nest is MIT licensed, the steps are in [Contributing](CONTRIBUTING.md), and pull requests are welcome.
 
 ## Install
 

@@ -106,6 +106,8 @@ mod trial;
 #[cfg(any(feature = "node", test))]
 mod vector;
 #[cfg(any(feature = "node", test))]
+mod wiki_browser;
+#[cfg(any(feature = "node", test))]
 mod wiki_commands;
 #[cfg(any(feature = "node", test))]
 mod wiki_fetch;

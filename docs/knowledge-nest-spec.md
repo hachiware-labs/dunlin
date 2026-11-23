@@ -1487,6 +1487,7 @@ nest ingress --dry-run https://example.com/manual/maintenance.html
 | `http`（標準） | HTTP の GET を1回送る。スクリプトは動かさない | 静的な HTML、PDF、Office、Markdown | なし |
 | `browser` | 利用者のマシンにある Chrome か Edge を、画面を出さずに起動してページを開く。読み込みが落ち着いてから、描画後の HTML を取る | スクリプトで本文を描くページ | Chrome か Edge。どちらもなければ `nest add browser`（25.4） |
 
+- **実装した形（Wiki/PARA）**: 方式は `loader.auto` の `fetch`（`browser` か `http`）で選び、省くと `browser`。使うブラウザは `browser`（`auto`、`chrome`、`edge`、パス）で、省くと `auto`。`auto` でブラウザが見つからないときは `http` で取り、`FETCH_WARNING` の警告を出す。`--fetch` でその場だけ変えられる。使った方式（ブラウザとその版、または `http`）は作業の結果の `fetched` に残す。CDP は WebSocket で話す（`tungstenite`）。`fetch.web` を別のモジュールにすることと、17.6節の検査は、まだ入れていない。
 - **方式は設定とコマンドで選ぶ**: 標準は設定の `fetch.web` の `method` で、その場だけ変えるときは `--fetch` で選ぶ。どちらの方式で取ったかを版の記録に残す。同じアドレスでも、方式が違えば中身が違い得るためである。
 - **`browser` で保存するもの**: 描画後の DOM を HTML として保存する。それが取得した時点の見た目の写しになる。応答が PDF などのファイルなら、ブラウザで描画せず `http` と同じに扱う。
 - **読み込みを待つ条件**: 通信が 500 ミリ秒途切れるか、30 秒経つまで待つ。待ち切れなくても、その時点の DOM を保存し、警告を返す。

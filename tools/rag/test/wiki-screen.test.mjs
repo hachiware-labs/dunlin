@@ -107,6 +107,9 @@ test('shows pages and sources as a tree and adds sources by web address', { time
   config.models.writer.model = 'testing';
   config.models.writer.base_url = writer;
   config.serve.port = 0;
+  // The pages of the test site are downloaded, whether the machine has a browser or not.
+  assert.equal(config.ingress.modules[0].use, 'loader.auto');
+  config.ingress.modules[0].with.fetch = 'http';
   await writeFile(configPath, stringify(config));
   const nest = async (...args) => JSON.parse((await runNode(process.execPath, [cli, '--project', 'kb', ...args, '--json'], { cwd: root, env, encoding: 'utf8' })).stdout);
 

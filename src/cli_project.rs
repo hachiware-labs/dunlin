@@ -447,7 +447,7 @@ fn wiki_args(name: &str, value: &ConfigValue) -> Option<ConfigValue> {
         return None;
     };
     let fields: &[&str] = match name {
-        "loader.auto" => &["unsupported", "ocr"],
+        "loader.auto" => &["unsupported", "ocr", "fetch", "browser"],
         "index.keyword" => &["tokenizer", "short_query"],
         "wiki.write" | "para.write" => &["model", "rules", "max_pages_per_job", "update"],
         "citation.verify" => &["on_failure"],
@@ -472,13 +472,18 @@ fn wiki_args(name: &str, value: &ConfigValue) -> Option<ConfigValue> {
     let mut parsed = Vec::new();
     for &field in fields {
         // How an ingest changes the pages that exist: optional, with a default by the model.
-        if field == "update" && get(field).is_none() {
+        // How web pages are taken, and in which browser: optional, a browser of the machine.
+        if ["update", "fetch", "browser"].contains(&field) && get(field).is_none() {
             continue;
         }
         let value = get(field)?;
         let valid = match (name, field) {
             ("loader.auto", "unsupported") => matches!(value.as_str(), Some("error" | "skip")),
             ("loader.auto", "ocr") => matches!(value.as_str(), Some("none" | "loader.ocr")),
+            ("loader.auto", "fetch") => matches!(value.as_str(), Some("browser" | "http")),
+            ("loader.auto", "browser") => value
+                .as_str()
+                .is_some_and(|browser| !browser.trim().is_empty()),
             ("index.keyword", "tokenizer") => value.as_str() == Some("trigram"),
             ("index.keyword", "short_query") => value.as_str() == Some("bigram"),
             (_, "model" | "rules") => value.as_str().is_some(),

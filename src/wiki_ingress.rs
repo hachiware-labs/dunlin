@@ -663,6 +663,16 @@ pub(crate) fn ingress(
     let writing = plan.get(2).cloned().unwrap_or_default();
     let dry_run = truthy(project.value("dry-run"));
     let source_only = truthy(project.value("source-only"));
+    if project
+        .value_str("fetch")
+        .is_some_and(|method| !["browser", "http"].contains(&method))
+    {
+        return Err(coded(
+            2,
+            "INVALID_ARGUMENT",
+            "Use --fetch browser or --fetch http.",
+        ));
+    }
     if !dry_run && !source_only {
         if js_trim(str_of(&request.about, "purpose")).is_empty() {
             return Err(coded(
@@ -690,6 +700,8 @@ pub(crate) fn ingress(
     // The folder that the files of a folder given as input are in: its name, as `manuals`.
     let mut folder_of: HashMap<String, String> = HashMap::new();
     let mut addresses = 0;
+    // How each web address was taken: the browser and its version, or http.
+    let mut taken_with: Vec<ConfigValue> = Vec::new();
     for input in request.args.iter().flatten() {
         if crate::wiki_fetch::is_web_address(input) {
             if dry_run {
@@ -697,7 +709,27 @@ pub(crate) fn ingress(
                 addresses += 1;
                 continue;
             }
-            let download = crate::wiki_fetch::fetch(input, &request.root, &request.artifacts)?;
+            // Pages open in the Chrome or Edge of the machine unless the settings or the
+            // command say to download them.
+            let how = crate::wiki_fetch::Method {
+                method: project
+                    .value_str("fetch")
+                    .or_else(|| string_field(&loader, "fetch"))
+                    .unwrap_or("browser"),
+                browser: string_field(&loader, "browser").unwrap_or("auto"),
+            };
+            let download =
+                crate::wiki_fetch::fetch(input, &request.root, &request.artifacts, &how)?;
+            if let Some(warning) = &download.warning {
+                warnings.push(object(vec![
+                    ("code", text("FETCH_WARNING")),
+                    ("message", text(&format!("{}: {warning}", download.url))),
+                ]));
+            }
+            taken_with.push(object(vec![
+                ("url", text(&download.url)),
+                ("with", text(&download.with)),
+            ]));
             fetched.insert(download.file.clone(), download.url.clone());
             add(&mut files, download.file, download.url);
             continue;
@@ -977,16 +1009,17 @@ pub(crate) fn ingress(
         }
     }
     let finished = |connection: &Connection, documents: usize, skipped: &[ConfigValue]| {
-        remember(
-            connection,
-            object(vec![
-                ("id", text(request.run_id.as_deref().unwrap_or_default())),
-                ("action", text(&request.command)),
-                ("sources", ConfigValue::Number(documents as f64)),
-                ("pages", ConfigValue::Array(Vec::new())),
-                ("skipped", ConfigValue::Array(skipped.to_vec())),
-            ]),
-        )
+        let mut entries = vec![
+            ("id", text(request.run_id.as_deref().unwrap_or_default())),
+            ("action", text(&request.command)),
+            ("sources", ConfigValue::Number(documents as f64)),
+            ("pages", ConfigValue::Array(Vec::new())),
+            ("skipped", ConfigValue::Array(skipped.to_vec())),
+        ];
+        if !taken_with.is_empty() {
+            entries.push(("fetched", ConfigValue::Array(taken_with.clone())));
+        }
+        remember(connection, object(entries))
     };
     if source_only {
         return finished(connection, documents.len(), &skipped);
@@ -1412,6 +1445,9 @@ pub(crate) fn ingress(
         ),
         ("pages_needing_revision", ConfigValue::Array(needs_revision)),
     ];
+    if !taken_with.is_empty() {
+        extra.push(("fetched", ConfigValue::Array(taken_with.clone())));
+    }
     if !no_material.is_empty() {
         extra.push((
             "no_material",

@@ -91,7 +91,7 @@ pub const COMMANDS: [(&str, &str); 37] = [
     ),
     (
         "ingress",
-        "nest ingress <path...> | nest ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]",
+        "nest ingress <path or URL...> | nest ingress --pending [--project <directory>] [--fetch browser|http] [--dry-run] [--source-only] [--json]",
     ),
     (
         "query",
@@ -560,6 +560,7 @@ fn options(command: &str) -> Vec<(&'static str, Kind)> {
         options.push(("dry-run", Boolean));
         options.push(("source-only", Boolean));
         options.push(("pending", Boolean));
+        options.push(("fetch", String));
     }
     if ["query", "verify"].contains(&command) {
         options.push(("page", String));

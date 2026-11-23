@@ -66,6 +66,8 @@ ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 yaml-rust2 = { version = "0.13.0", default-features = false }
+# The DevTools protocol of the Chrome or Edge that Wiki and PARA open web pages in (spec 14.5).
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 
 # Whether the process that queued Wiki work still runs, as process.kill(pid, 0) tells.
 [target.'cfg(windows)'.dependencies]

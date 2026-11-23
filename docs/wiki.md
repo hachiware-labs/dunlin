@@ -153,7 +153,28 @@ PARA の `nest lint` は、決まりにない取り組み（`UNKNOWN_PROJECT`）
 2. 右に出る作業の欄で、取得・読み取り・執筆・保存の進捗を確認します。別の画面へ移動した場合は **作業の履歴** から開き直せます。
 3. 完了後、変更されたページを開き、本文と出典を見比べます。出典の資料名を押すと、その原本の本文が右に出ます。
 
-URL は http と https に対応し、HTML、PDF、Markdown、テキスト、Office 文書を取り込めます。Shift_JIS や EUC-JP のページは UTF-8 に直して保存します。取得した内容は `raw/<ホスト名>/<パス>` に原本として保存され（例：`raw/example.com/manuals/pump.html`）、ページの出典は元の URL を指します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。CLI でも `nest ingress https://example.com/page` のように URL を渡せます。
+URL は http と https に対応し、HTML、PDF、Markdown、テキスト、Office 文書を取り込めます。
+
+Web のページは、このマシンの Chrome か Edge で開いて取ります。ブラウザは画面を出さずに、取り込みのたびに新しい一時プロファイルで起動します（ふだん使うプロファイルのクッキーやログインには触れません）。ページを開き、読み込みが終わって通信が 0.5 秒途切れるまで（長くても 30 秒）待ち、そのとき表示されている HTML を原本にします。スクリプトで本文を描くページも、表示されたとおりに取り込めます。PDF や Markdown のようにページでないものは、ブラウザで描かずにそのままダウンロードします。どの取り方で取ったか（ブラウザとその版、または `http`）は、作業の結果の `fetched` に残ります。
+
+| 指定 | 動き |
+|---|---|
+| 既定（`loader.auto` の `fetch: browser`、`browser: auto`） | Chrome、Edge、Chromium の順に、OS の標準の場所を探して使う。どれもなければ、HTTP で1回ダウンロードし、`FETCH_WARNING` の警告を出す |
+| `browser: chrome`、`browser: edge`、実行ファイルのパス | そのブラウザだけを使う。見つからなければ `BROWSER_NOT_FOUND` で止まる |
+| `fetch: http`、または `nest ingress --fetch http <URL>` | ブラウザを使わず、HTTP で1回ダウンロードする。スクリプトは動かない |
+
+```yaml
+ingress:
+  modules:
+    - use: loader.auto
+      with:
+        unsupported: error
+        ocr: none
+        fetch: browser   # browser か http
+        browser: auto    # auto、chrome、edge、または実行ファイルのパス
+```
+
+ログインが必要なページは、まだ取り込めません（一時プロファイルにはログインの状態がないため）。Shift_JIS や EUC-JP のページは UTF-8 に直して保存します。取得した内容は `raw/<ホスト名>/<パス>` に原本として保存され（例：`raw/example.com/manuals/pump.html`）、ページの出典は元の URL を指します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。CLI でも `nest ingress https://example.com/page` のように URL を渡せます。
 
 `serve` の画面を他の人にも開く場合（`serve.host` を `127.0.0.1` 以外にする場合）は、`serve.access.auth` で認証を付けてください。家や職場の LAN の中だけに開くなら、`serve.access.allowed_clients` に `192.168.11.0/24` のような範囲を書くと、範囲の外からの接続を断ります。この場合は認証なしでも起動できますが、範囲の中の端末はだれでも読み書きでき、画面からこのマシンのファイルをパスで取り込めます。設定の例は [ガイド](guide.md) の `serve` の節にあります。この PC のすべてのプロジェクトにまとめて設定するなら、`nest config set serve --host 0.0.0.0 --allowed-hosts localhost,127.0.0.1,192.168.11.16 --allowed-clients 192.168.11.0/24` のようにコマンドで書けます。画面から渡した URL は、`serve` を動かしているマシンから取得されます。
 

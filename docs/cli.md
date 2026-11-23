@@ -48,7 +48,7 @@ nest results [<name>] [--project <directory>] [--json]
 ## Wiki・PARA の操作
 
 ```text
-nest ingress <path...> | nest ingress --pending [--project <directory>] [--dry-run] [--source-only] [--json]
+nest ingress <path or URL...> | nest ingress --pending [--project <directory>] [--fetch browser|http] [--dry-run] [--source-only] [--json]
 nest query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]
 nest verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]
 nest issue <id> <open|resolved|dismissed> [--project <directory>] [--json]

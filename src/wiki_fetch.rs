@@ -19,6 +19,18 @@ const LIMIT: u64 = 16 * 1024 * 1024;
 pub(crate) struct Fetched {
     pub file: String,
     pub url: String,
+    /// How it was taken: the browser and its version, as `Chrome/131.0.6778.86`, or `http`.
+    pub with: String,
+    /// What the user should know about how it was taken.
+    pub warning: Option<String>,
+}
+
+/// How web pages are taken: `browser` opens them in the Chrome or Edge of the machine and keeps
+/// them as drawn, `http` downloads them as the server sends them.
+pub(crate) struct Method<'a> {
+    pub method: &'a str,
+    /// `auto`, `chrome`, `edge` or the path of a browser.
+    pub browser: &'a str,
 }
 
 /// The folder of raw sources: the project's `raw/`, when it has one.
@@ -112,8 +124,71 @@ pub(crate) fn normalize(input: &str) -> Result<url::Url, StageError> {
 }
 
 /// Downloads `input` and keeps it with the raw sources, in a folder of its host and path.
-pub(crate) fn fetch(input: &str, root: &str, artifacts: &str) -> Result<Fetched, StageError> {
+pub(crate) fn fetch(
+    input: &str,
+    root: &str,
+    artifacts: &str,
+    how: &Method<'_>,
+) -> Result<Fetched, StageError> {
     let url = normalize(input)?;
+    if how.method != "browser" {
+        return download(url, root, artifacts, None);
+    }
+    let auto = matches!(how.browser.trim(), "" | "auto");
+    let Some(browser) = crate::wiki_browser::find(how.browser) else {
+        if auto {
+            return download(
+                url,
+                root,
+                artifacts,
+                Some("No Chrome or Edge was found, so the page was downloaded without running its scripts.".to_owned()),
+            );
+        }
+        return Err(coded(
+            3,
+            "BROWSER_NOT_FOUND",
+            format!(
+                "The browser {} was not found. Install Chrome or Edge, or set the browser of loader.auto to auto.",
+                how.browser
+            ),
+        ));
+    };
+    let opened = crate::wiki_browser::open(&browser, url.as_str())
+        .map_err(|message| coded(1, "FETCH_FAILED", format!("{url}: {message}")))?;
+    let crate::wiki_browser::Opened::Page(page) = opened else {
+        // A PDF or another file is taken as the server sends it.
+        return download(url, root, artifacts, None);
+    };
+    let landed = url::Url::parse(&page.url)
+        .ok()
+        .filter(|landed| ["http", "https"].contains(&landed.scheme()))
+        .unwrap_or_else(|| url.clone());
+    let name = file_name(&landed, "text/html");
+    let file = keep_source(
+        root,
+        artifacts,
+        &raw_folders(&landed),
+        &name,
+        page.html.as_bytes(),
+    )?;
+    Ok(Fetched {
+        file,
+        url: url.to_string(),
+        with: page.version,
+        warning: (!page.settled).then(|| {
+            "The page did not finish loading within 30 seconds; it was kept as it was drawn by then."
+                .to_owned()
+        }),
+    })
+}
+
+/// Downloads a page or a file once over HTTP, as the server sends it.
+fn download(
+    url: url::Url,
+    root: &str,
+    artifacts: &str,
+    warning: Option<String>,
+) -> Result<Fetched, StageError> {
     let failed = |message: String| coded(1, "FETCH_FAILED", format!("{url}: {message}"));
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(60)))
@@ -165,6 +240,8 @@ pub(crate) fn fetch(input: &str, root: &str, artifacts: &str) -> Result<Fetched,
     Ok(Fetched {
         file,
         url: url.to_string(),
+        with: "http".to_owned(),
+        warning,
     })
 }
 

@@ -31,61 +31,91 @@ Folder of documents ──→ Knowledge-Nest ──┼─ RAG    answers with so
 
 If unsure, start with MCP: it needs no model. See [Install](#install); a step-by-step walkthrough is in [Getting started](docs/getting-started.en.md), and how the four forms differ is in [How the four forms differ](docs/forms.en.md).
 
-## And each one stands on its own
+## And each one is far less work
 
-It does not just make them all. Compare each form with other libraries and tools of the same kind, and there is still a reason to choose Knowledge-Nest. The comparison, including when another way suits better, is in [Where Knowledge-Nest fits](docs/comparison.md) (Japanese).
+It does not just make them all. For every form, Knowledge-Nest takes on the chores that building the same thing with other libraries leaves to you. The comparison, including when another way suits better, is in [Where Knowledge-Nest fits](docs/comparison.md) (Japanese).
 
 ### MCP: search that agents query
 
-Compared with: filesystem MCP servers (the agent reads files directly) and MCP servers of vector databases (Chroma, Qdrant and others)
+**With other MCP servers** (filesystem or vector database MCP servers), you do this yourself:
 
-| With other MCP servers | With Knowledge-Nest |
-|---|---|
-| Reading files directly, PDF and Office are hard to handle, and large documents fill the agent's context | PDF, Office and scanned documents become text, and only the passages that answer come back, with document and line |
-| Vector search needs an embedding model, and can miss exact part numbers or technical terms | Japanese keyword search runs at once with no embedding model; add vectors for a hybrid |
-| Loading, chunking and keeping documents up to date are yours to build | Hand over a folder: it loads, chunks, and updates only the documents that changed |
-| Whether search finds the answers is a matter of feel | Measure recall, try candidate settings at once, and optimize |
+1. Find a tool that turns PDF and Office into text an agent can read
+2. Chunk the documents, pick an embedding model, and load a vector database
+3. Load them again every time the documents change
+4. Feel your way when part numbers or technical terms are missed
 
-[MCP guide](docs/start-mcp.en.md)
+**With Knowledge-Nest**
+
+```sh
+nest init mcp ./kb --source ./manuals
+cd kb
+nest build
+nest serve --print-config   # paste what it prints into the agent's settings
+```
+
+It reads PDF, Office and scanned documents, and searches them by Japanese words with no embedding model. After you edit the documents, `nest build` replaces only the ones that changed. Measure how well it finds answers by recall, and optimize by trying candidate settings at once. [MCP guide](docs/start-mcp.en.md)
 
 ### RAG: an API that answers with sources
 
-Compared with: RAG frameworks such as LangChain and LlamaIndex, and no-code RAG products where you register documents on a screen
+**With other libraries** (LangChain, LlamaIndex and the like), you do this yourself:
 
-| With other RAG | With Knowledge-Nest |
-|---|---|
-| Loading, chunking, indexing, search and generation are written in code, and you stand up the API yourself | A configuration file and commands bring up an API the OpenAI SDK calls as it is |
-| What happens with no evidence, and how sources are cited, are yours to build | No evidence, no answer; sources point to the version of the document and the range in the original |
-| Evaluating answers means combining a separate evaluation library | Drafting questions, measuring, comparing candidates and optimizing are all in the same tool |
-| No-code products have you register documents on their server | Documents and index stay in a folder on your machine |
+1. Pick parts for loading, chunking, embedding, a vector database, search and generation, and wire them in code
+2. Work out how answers cite sources, and how to decline when there is no evidence
+3. Stand up an API server for your apps, and add authentication
+4. Combine a separate evaluation library to measure how good the answers are
 
-[RAG guide](docs/start-rag.en.md)
+**With Knowledge-Nest**
+
+```sh
+nest config set llm --provider ollama --model qwen3:4b   # once
+nest init rag ./rag --source ./manuals
+cd rag
+nest build
+nest serve   # an API the OpenAI SDK calls as it is
+```
+
+Answers cite the version of the document and the range in the original, and a question with no evidence is declined. Authentication and limits on who connects are a few lines of settings. Drafting questions, measuring and optimizing are all in the same tool. [RAG guide](docs/start-rag.en.md)
 
 ### Wiki: knowledge pages everyone uses
 
-Compared with: scripts implementing Karpathy's LLM-Wiki, the AI features of notes apps (Notion, Obsidian and others), and chats that answer questions about documents
+**With other tools** (LLM-Wiki scripts, notes app AI and the like), you do this yourself:
 
-| With other tools | With Knowledge-Nest |
-|---|---|
-| A chat about documents loses its answer when it ends | What was read piles up as pages with sources, and a revised document gets only its own pages rewritten |
-| Text a notes app's AI wrote does not show what came from the documents | A program checks at every ingest that numbers, dates and quotations are in the sources, and points out contradictions and terms with no page |
-| LLM-Wiki scripts center on ingesting and writing out | Checks, undo by job, a contents page and a log, categories, a browser screen, MCP, and ingesting pages behind a sign-in and X all come with it |
-| Field knowledge not in any document blends into the text | It is kept as one of the sources, with who said it |
+1. Build the way an AI reads documents and writes pages, and the rules for writing them
+2. Read every page the AI wrote and check it against the documents
+3. Find which pages to fix every time a document is revised
+4. Provide a screen for people and a way in for agents, separately
 
-It is Karpathy's LLM-Wiki idea, with checks against sources added. [Wiki guide](docs/start-wiki.en.md)
+**With Knowledge-Nest**
+
+```sh
+nest init wiki ./wiki --purpose "Collect the maintenance procedures and parts information"   # model set as for RAG
+cd wiki
+nest ingest ../manuals
+nest serve   # read in a browser; agents look it up over MCP
+```
+
+A program checks that numbers, dates and quotations are in the sources, and points out contradictions between pages and terms with no page. A revised document gets only its own pages rewritten. Each change the AI makes can be undone. It is Karpathy's LLM-Wiki idea, with checks against sources added. [Wiki guide](docs/start-wiki.en.md)
 
 ### PARA: notes that organize your own work
 
-Compared with: running PARA in Notion or Obsidian, with templates or by hand
+**Running PARA in a notes app** (Notion, Obsidian and the like), you do this yourself:
 
-| With PARA in a notes app | With Knowledge-Nest |
-|---|---|
-| Each new document needs you to decide which project it serves | The AI reads it, writes a note, and puts it in the project that will use it |
-| Filing ends at putting it in a folder | The note says how this document serves this project |
-| Left to an AI, folders tend to multiply | Only the projects and areas you listed in `rules.md` can be used |
-| A finished project's notes and documents are put away by hand | `nest archive` moves notes, document copies and links to Archives at once, `nest undo` brings them back, and projects past their deadline are pointed out |
+1. Read each new document, decide which project it serves, and file it
+2. Write a note on how to use it, and keep the original beside it
+3. When a project ends, move its notes, documents and links to Archives by hand
+4. Keep watch for projects past their deadline
 
-Agents answer from the notes of your current projects over MCP too. [PARA guide](docs/start-para.en.md)
+**With Knowledge-Nest**
+
+```sh
+nest init para ./para --purpose "Organize documents and notes for my equipment maintenance work"
+cd para
+# list your current projects and areas in rules.md
+nest ingest ../inbox                      # the AI writes how each serves a project, and files it there
+nest archive Projects/pump-replacement    # when it ends, notes, documents and links go away at once
+```
+
+Notes go only to the projects and areas you listed, so no folders appear on their own. `nest undo` brings an archived project back, and `nest lint` points out projects past their deadline. [PARA guide](docs/start-para.en.md)
 
 ## Rearrange it, and add to it (MCP and RAG)
 

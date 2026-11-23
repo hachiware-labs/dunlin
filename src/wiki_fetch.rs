@@ -242,8 +242,9 @@ pub(crate) fn fetch(
     })
 }
 
-/// How many pages that posts refer to are read in one ingest.
-const FOLLOW_LIMIT: usize = 200;
+/// How many pages that posts refer to are opened in one ingest; the rest wait for the next. A
+/// quoted post is in the data of the post that quotes it, and does not count.
+const FOLLOW_LIMIT: usize = 30;
 
 /// The browser and the profile of nest to read pages in, when they are ready.
 fn ready(

@@ -447,7 +447,7 @@ fn wiki_args(name: &str, value: &ConfigValue) -> Option<ConfigValue> {
         return None;
     };
     let fields: &[&str] = match name {
-        "loader.auto" => &["unsupported", "ocr", "fetch", "browser", "scroll"],
+        "loader.auto" => &["unsupported", "ocr", "fetch", "browser", "scroll", "follow"],
         "index.keyword" => &["tokenizer", "short_query"],
         "wiki.write" | "para.write" => &["model", "rules", "max_pages_per_job", "update"],
         "citation.verify" => &["on_failure"],
@@ -472,8 +472,9 @@ fn wiki_args(name: &str, value: &ConfigValue) -> Option<ConfigValue> {
     let mut parsed = Vec::new();
     for &field in fields {
         // How an ingest changes the pages that exist: optional, with a default by the model.
-        // How web pages are taken, in which browser, and how far they are scrolled: optional.
-        if ["update", "fetch", "browser", "scroll"].contains(&field) && get(field).is_none() {
+        // How web pages are taken, in which browser, how far they are scrolled, and whether
+        // the pages that posts of X refer to are taken too: optional.
+        if ["update", "fetch", "browser", "scroll", "follow"].contains(&field) && get(field).is_none() {
             continue;
         }
         let value = get(field)?;
@@ -486,6 +487,7 @@ fn wiki_args(name: &str, value: &ConfigValue) -> Option<ConfigValue> {
                 .is_some_and(|browser| !browser.trim().is_empty()),
             ("loader.auto", "scroll") => matches!(value, ConfigValue::Number(n)
                 if n.fract() == 0.0 && (0.0..=500.0).contains(n)),
+            ("loader.auto", "follow") => matches!(value, ConfigValue::Bool(_)),
             ("index.keyword", "tokenizer") => value.as_str() == Some("trigram"),
             ("index.keyword", "short_query") => value.as_str() == Some("bigram"),
             (_, "model" | "rules") => value.as_str().is_some(),

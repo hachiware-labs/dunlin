@@ -36,7 +36,47 @@ function browserInstalled() {
 test('takes in a page as the browser draws it', { timeout: 120_000, skip: !browserInstalled() && 'no Chrome or Edge' }, async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'knowledge-nest-browser-')));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
+  // A stand-in for X: its pages draw posts from data they load from /i/api/graphql/.
+  const tweet = (id, user, text, urls = [], extra = {}) => ({
+    __typename: 'Tweet', rest_id: id,
+    core: { user_results: { result: { core: { screen_name: user, name: user.toUpperCase() } } } },
+    legacy: { full_text: text, created_at: 'Sun Nov 22 22:50:15 +0000 2026', favorite_count: Number(id), entities: { urls } },
+    ...extra,
+  });
+  const timeline = (tweets) => ({ data: { bookmark_timeline_v2: { timeline: { instructions: [{ entries: tweets.map((result) => ({ content: { itemContent: { tweet_results: { result } } } })) }] } } } });
+  const data = {
+    '/i/api/graphql/q1/Bookmarks': () => timeline([
+      tweet('1', 'alice', '記事です https://t.co/a1', [{ url: 'https://t.co/a1', expanded_url: `${base}/article/one` }], {
+        quoted_status_result: { result: tweet('2', 'bob', '引用された投稿') },
+      }),
+      tweet('3', 'carol', '同じ記事 https://t.co/a2 と会員ページ https://t.co/m', [
+        { url: 'https://t.co/a2', expanded_url: `${base}/article/one` },
+        { url: 'https://t.co/m', expanded_url: `${base}/members` },
+      ]),
+    ]),
+    '/i/api/graphql/q2/Bookmarks': () => timeline([
+      tweet('4', 'dave', 'もう一つ https://t.co/b', [{ url: 'https://t.co/b', expanded_url: `${base}/article/two` }]),
+    ]),
+  };
+  const xPage = (query) => '<!doctype html><html><head><title>ブックマーク / X</title></head><body><div id="app">読み込み中</div><script>'
+    + `fetch('${query}').then((r) => r.json()).then(() => { document.getElementById('app').textContent = '投稿'; });`
+    + '</script></body></html>';
   const server = createServer((request, response) => {
+    if (data[request.url]) {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify(data[request.url]()));
+      return;
+    }
+    if (request.url === '/x/bookmarks' || request.url === '/x/more') {
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end(xPage(request.url === '/x/bookmarks' ? '/i/api/graphql/q1/Bookmarks' : '/i/api/graphql/q2/Bookmarks'));
+      return;
+    }
+    if (request.url.startsWith('/article/')) {
+      response.setHeader('content-type', 'text/html; charset=utf-8');
+      response.end(`<!doctype html><html><head><title>参照先 ${request.url}</title></head><body><p>参照先の本文 ${request.url}</p></body></html>`);
+      return;
+    }
     if (request.url === '/members') {
       response.writeHead(302, { location: '/account/login?next=/members' });
       response.end();
@@ -120,6 +160,35 @@ test('takes in a page as the browser draws it', { timeout: 120_000, skip: !brows
   assert.match(JSON.stringify(short.warnings), /raise --scroll/u);
   const invalid = await failing('ingest', `${base}/feed`, '--source-only', '--scroll', 'many');
   assert.deepEqual(invalid.errors.map(({ code }) => code), ['INVALID_ARGUMENT']);
+
+  // A page of X is taken as its posts, one source each, with the page a post links to and the
+  // post it quotes, once each; a page it cannot read is told of, and the posts stay.
+  const posts = await run('ingest', `${base}/x/bookmarks`, '--source-only');
+  assert.equal(posts.status, 'succeeded', JSON.stringify(posts.errors));
+  assert.deepEqual(posts.data.fetched.map(({ url, posts: count }) => [url, count]), [[`${base}/x/bookmarks`, 2]]);
+  assert.deepEqual(posts.data.followed.map(({ url, from }) => [url, from]), [
+    ['https://x.com/bob/status/2', 'https://x.com/alice/status/1'],
+    [`${base}/article/one`, 'https://x.com/alice/status/1'],
+  ]);
+  assert.match(JSON.stringify(posts.warnings), /members, which https:\/\/x\.com\/carol\/status\/3 refers to, was not read: it led to/u);
+  const xRaw = join(root, 'kb', 'raw', 'x.com');
+  const alice = await readFile(join(xRaw, 'alice', 'status', '1.html'), 'utf8');
+  assert.match(alice, /<title>ALICE \(@alice\): 記事です /u);
+  assert.match(alice, new RegExp(`<a href="${base}/article/one">`, 'u'));
+  assert.match(alice, /<blockquote cite="https:\/\/x\.com\/bob\/status\/2">/u);
+  assert.match(await readFile(join(xRaw, 'bob', 'status', '2.html'), 'utf8'), /引用された投稿/u);
+  assert.match(await readFile(join(xRaw, 'carol', 'status', '3.html'), 'utf8'), /会員ページ/u);
+  assert.match(await readFile(join(raw, 'article', 'one.html'), 'utf8'), /参照先の本文/u);
+  // Taken again, the posts and pages that are sources already are not read again.
+  const again = await run('ingest', `${base}/x/bookmarks`, '--source-only');
+  assert.equal(again.status, 'succeeded', JSON.stringify(again.errors));
+  assert.equal(again.data.followed, undefined);
+  // With --no-follow, the posts alone; the pages they refer to come when they are taken with it.
+  const alone = await run('ingest', `${base}/x/more`, '--source-only', '--no-follow');
+  assert.equal(alone.data.followed, undefined);
+  assert.equal(existsSync(join(raw, 'article', 'two.html')), false);
+  const followedLater = await run('ingest', `${base}/x/more`, '--source-only');
+  assert.deepEqual(followedLater.data.followed.map(({ url }) => url), [`${base}/article/two`]);
 
   // A page that sends the browser to sign in is not read.
   const signedOut = await failing('ingest', `${base}/members`, '--source-only');

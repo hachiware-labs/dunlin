@@ -721,6 +721,21 @@ pub(crate) fn ingress(
     let mut addresses = 0;
     // How each web address was taken: the browser and its version, or http.
     let mut taken_with: Vec<ConfigValue> = Vec::new();
+    // The pages and posts read because a post of X refers to them, with the post.
+    let mut followed: Vec<ConfigValue> = Vec::new();
+    // Posts of X take the pages they link to and the posts they quote unless told not to.
+    let follow = !truthy(project.value("no-follow"))
+        && !matches!(loader.get("follow"), Some(ConfigValue::Bool(false)));
+    // An address that is a source already: it has the source ID that the address gives below.
+    let known = |address: &str| {
+        let id = format!(
+            "source-{}",
+            &sha256_hex(format!("url:{address}").as_bytes())[..24]
+        );
+        connection
+            .query_row("SELECT 1 FROM wiki_sources WHERE id = ?1", [id], |_| Ok(()))
+            .is_ok()
+    };
     for input in request.args.iter().flatten() {
         if crate::wiki_fetch::is_web_address(input) {
             if dry_run {
@@ -739,10 +754,11 @@ pub(crate) fn ingress(
                 cwd: &request.cwd,
                 home: &request.home,
                 scroll,
+                follow,
             };
             let download =
-                crate::wiki_fetch::fetch(input, &request.root, &request.artifacts, &how)?;
-            if let Some(warning) = &download.warning {
+                crate::wiki_fetch::fetch(input, &request.root, &request.artifacts, &how, &known)?;
+            for warning in &download.warnings {
                 warnings.push(object(vec![
                     ("code", text("FETCH_WARNING")),
                     ("message", text(&format!("{}: {warning}", download.url))),
@@ -752,6 +768,9 @@ pub(crate) fn ingress(
                 ("url", text(&download.url)),
                 ("with", text(&download.with)),
             ];
+            if let Some(posts) = download.posts {
+                taken.push(("posts", ConfigValue::Number(posts as f64)));
+            }
             if let Some(scrolled) = &download.scrolled {
                 taken.push((
                     "scrolled",
@@ -762,8 +781,17 @@ pub(crate) fn ingress(
                 ));
             }
             taken_with.push(object(taken));
-            fetched.insert(download.file.clone(), download.url.clone());
-            add(&mut files, download.file, download.url);
+            for kept in download.sources {
+                if let Some(from) = &kept.from {
+                    followed.push(object(vec![
+                        ("url", text(&kept.url)),
+                        ("from", text(from)),
+                        ("with", text(&kept.with)),
+                    ]));
+                }
+                fetched.insert(kept.file.clone(), kept.url.clone());
+                add(&mut files, kept.file, kept.url);
+            }
             continue;
         }
         let home = input
@@ -1050,6 +1078,9 @@ pub(crate) fn ingress(
         ];
         if !taken_with.is_empty() {
             entries.push(("fetched", ConfigValue::Array(taken_with.clone())));
+        }
+        if !followed.is_empty() {
+            entries.push(("followed", ConfigValue::Array(followed.clone())));
         }
         remember(connection, object(entries))
     };
@@ -1479,6 +1510,9 @@ pub(crate) fn ingress(
     ];
     if !taken_with.is_empty() {
         extra.push(("fetched", ConfigValue::Array(taken_with.clone())));
+    }
+    if !followed.is_empty() {
+        extra.push(("followed", ConfigValue::Array(followed.clone())));
     }
     if !no_material.is_empty() {
         extra.push((

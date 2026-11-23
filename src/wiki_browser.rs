@@ -210,6 +210,8 @@ pub(crate) struct Rendered {
     pub version: String,
     /// How the page was scrolled for more, when it was.
     pub scrolled: Option<Scrolled>,
+    /// The data of X the page loaded (`/i/api/graphql/`), which holds its posts.
+    pub data: Vec<Value>,
 }
 
 /// What scrolling a page for more did.
@@ -373,62 +375,150 @@ impl Session {
             .to_owned())
     }
 
-    /// Waits until the requests the page makes are done and it has been quiet for a moment, or
-    /// until `limit` has passed.
-    fn wait_quiet(&mut self, limit: Duration) -> Result<(), String> {
+    /// Takes an event of the network into a watch: the requests in flight, and the data of X
+    /// that the page loads.
+    fn watch(&mut self, watch: &mut Watch, event: &Value) -> Result<(), String> {
+        let params = event.get("params").cloned().unwrap_or(Value::Null);
+        let id = params
+            .get("requestId")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let method = event
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        match method {
+            "Network.requestWillBeSent" => {
+                watch.pending.insert(id);
+            }
+            "Network.responseReceived" => {
+                let address = params
+                    .get("response")
+                    .and_then(|response| response.get("url"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if address.contains(DATA) {
+                    watch.requests.insert(id);
+                }
+            }
+            "Network.loadingFinished" | "Network.loadingFailed" => {
+                watch.pending.remove(&id);
+                if watch.pending.is_empty() {
+                    watch.quiet_since = Instant::now();
+                }
+                if watch.requests.remove(&id) && method == "Network.loadingFinished" {
+                    // A body the browser no longer has is left out.
+                    let body = self
+                        .call("Network.getResponseBody", json!({ "requestId": id }))
+                        .unwrap_or(Value::Null);
+                    let encoded = body.get("base64Encoded").and_then(Value::as_bool);
+                    if let (Some(text), Some(false) | None) =
+                        (body.get("body").and_then(Value::as_str), encoded)
+                    {
+                        if text.contains("\"__typename\":\"Tweet\"") {
+                            watch.posts += 1;
+                            watch.posts_at = Some(Instant::now());
+                        }
+                        if let Ok(value) = serde_json::from_str(text) {
+                            watch.data.push(value);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Waits until the requests of the page are done and it has been quiet for a moment, or the
+    /// posts it loaded came a moment ago, or `limit` has passed.
+    fn wait_quiet(&mut self, limit: Duration, watch: &mut Watch) -> Result<(), String> {
         let started = Instant::now();
-        let mut pending: HashSet<String> = HashSet::new();
-        let mut quiet_since = Instant::now();
         while started.elapsed() < limit {
-            if pending.is_empty() && quiet_since.elapsed() >= QUIET {
+            // Quiet counts from this wait on: what a scroll starts may come a moment later.
+            if watch.pending.is_empty() && watch.quiet_since.max(started).elapsed() >= QUIET {
+                break;
+            }
+            if watch
+                .posts_at
+                .is_some_and(|at| at >= started && at.elapsed() >= QUIET)
+            {
                 break;
             }
             let Some(event) = self.event()? else {
                 continue;
             };
-            let id = event
-                .get("params")
-                .and_then(|params| params.get("requestId"))
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            match event
-                .get("method")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-            {
-                "Network.requestWillBeSent" => {
-                    pending.insert(id);
-                }
-                "Network.loadingFinished" | "Network.loadingFailed" => {
-                    pending.remove(&id);
-                    if pending.is_empty() {
-                        quiet_since = Instant::now();
-                    }
-                }
-                _ => {}
+            self.watch(watch, &event)?;
+        }
+        Ok(())
+    }
+
+    /// Drops the events of the page read before.
+    fn forget(&mut self) -> Result<(), String> {
+        self.events.clear();
+        for _ in 0..100 {
+            if self.receive()?.is_none() {
+                break;
             }
         }
         Ok(())
     }
 }
 
+/// The addresses of the data that X loads for its pages, which holds its posts.
+const DATA: &str = "/i/api/graphql/";
+
+/// How long after its posts come a page of X counts as drawn: it never stops loading.
+const POSTS_SETTLE: Duration = Duration::from_millis(1500);
+
+/// What the network of a page does while it is read.
+struct Watch {
+    /// The requests in flight.
+    pending: HashSet<String>,
+    quiet_since: Instant,
+    /// The requests for data of X whose bodies are taken when they finish.
+    requests: HashSet<String>,
+    /// The data of X, as it came.
+    data: Vec<Value>,
+    /// How many bodies held posts, and when the last came.
+    posts: usize,
+    posts_at: Option<Instant>,
+}
+
+impl Watch {
+    fn new() -> Self {
+        Self {
+            pending: HashSet::new(),
+            quiet_since: Instant::now(),
+            requests: HashSet::new(),
+            data: Vec::new(),
+            posts: 0,
+            posts_at: None,
+        }
+    }
+}
+
 /// Scrolls the page down up to `limit` times, keeping the items it shows, and stops early when
 /// three scrolls in a row bring nothing new. Returns what it did and the kept items as a page,
 /// or none when the page shows fewer than two items.
-fn scroll_for_more(session: &mut Session, limit: u32) -> Result<(Scrolled, Option<String>), String> {
-    let mut state = session.evaluate(COLLECT)?;
+fn scroll_for_more(
+    session: &mut Session,
+    limit: u32,
+    watch: &mut Watch,
+) -> Result<(Scrolled, Option<String>), String> {
+    let mut state = (session.evaluate(COLLECT)?, watch.posts);
     let mut steps = 0;
     let mut still = 0;
     while steps < limit && still < 3 {
         session.evaluate(SCROLL)?;
         steps += 1;
-        session.wait_quiet(STEP)?;
-        let next = session.evaluate(COLLECT)?;
+        session.wait_quiet(STEP, watch)?;
+        let next = (session.evaluate(COLLECT)?, watch.posts);
         still = if next == state { still + 1 } else { 0 };
         state = next;
     }
-    let items = serde_json::from_str::<Value>(&state)
+    let items = serde_json::from_str::<Value>(&state.0)
         .ok()
         .and_then(|state| state.get("items").and_then(Value::as_u64))
         .unwrap_or(0) as usize;
@@ -522,47 +612,68 @@ fn devtools_json(port: u16, path: &str) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|error| format!("DevTools: {error}"))
 }
 
-/// Opens an address in the browser and gives the page as it drew it, once the page has loaded
-/// and the network has been quiet for a moment, or when the time runs out; with `scroll`, after
-/// scrolling it for more up to that many times. A file that is not a page is left for an
-/// ordinary download.
-pub(crate) fn open(
-    browser: &Browser,
-    profile: &Path,
-    address: &str,
-    scroll: u32,
-) -> Result<Opened, String> {
-    let (mut running, port) = start(browser, profile)?;
-    let version = devtools_json(port, "/json/version")?
-        .get("Browser")
-        .and_then(Value::as_str)
-        .unwrap_or(browser.name)
-        .to_owned();
-    let pages = devtools_json(port, "/json/list")?;
-    let socket_url = pages
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|target| target.get("type").and_then(Value::as_str) == Some("page"))
-        .and_then(|target| target.get("webSocketDebuggerUrl"))
-        .and_then(Value::as_str)
-        .ok_or("DevTools: the browser has no page")?
-        .to_owned();
-    let stream = TcpStream::connect(("127.0.0.1", port)).map_err(|error| error.to_string())?;
-    stream
-        .set_read_timeout(Some(Duration::from_millis(100)))
-        .map_err(|error| error.to_string())?;
-    let (socket, _) = tungstenite::client(socket_url.as_str(), stream)
-        .map_err(|error| format!("DevTools: {error}"))?;
-    let mut session = Session {
-        socket,
-        next: 0,
-        events: VecDeque::new(),
-    };
-    let read = read(&mut session, address, version, scroll);
-    // Closed as a person closes it, the browser leaves its profile in order.
-    running.closing = session.send("Browser.close", json!({})).is_ok();
-    read
+/// The browser started without a window in a profile, with the page that addresses are read
+/// in, one after another. It is closed as a person closes it when it is dropped.
+pub(crate) struct Tab {
+    session: Session,
+    /// The browser and its version, as `Chrome/131.0.6778.86`.
+    pub version: String,
+    running: Running,
+}
+
+impl Tab {
+    pub(crate) fn start(browser: &Browser, profile: &Path) -> Result<Self, String> {
+        let (running, port) = start(browser, profile)?;
+        let version = devtools_json(port, "/json/version")?
+            .get("Browser")
+            .and_then(Value::as_str)
+            .unwrap_or(browser.name)
+            .to_owned();
+        let pages = devtools_json(port, "/json/list")?;
+        let socket_url = pages
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|target| target.get("type").and_then(Value::as_str) == Some("page"))
+            .and_then(|target| target.get("webSocketDebuggerUrl"))
+            .and_then(Value::as_str)
+            .ok_or("DevTools: the browser has no page")?
+            .to_owned();
+        let stream =
+            TcpStream::connect(("127.0.0.1", port)).map_err(|error| error.to_string())?;
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .map_err(|error| error.to_string())?;
+        let (socket, _) = tungstenite::client(socket_url.as_str(), stream)
+            .map_err(|error| format!("DevTools: {error}"))?;
+        let mut session = Session {
+            socket,
+            next: 0,
+            events: VecDeque::new(),
+        };
+        session.call("Page.enable", json!({}))?;
+        session.call("Network.enable", json!({}))?;
+        Ok(Self {
+            session,
+            version,
+            running,
+        })
+    }
+
+    /// Opens an address and gives the page as it drew it, once the page has loaded and the
+    /// network has been quiet for a moment, or when the time runs out; with `scroll`, after
+    /// scrolling it for more up to that many times. A file that is not a page is left for an
+    /// ordinary download.
+    pub(crate) fn read(&mut self, address: &str, scroll: u32) -> Result<Opened, String> {
+        read(&mut self.session, address, self.version.clone(), scroll)
+    }
+}
+
+impl Drop for Tab {
+    fn drop(&mut self) {
+        // Closed as a person closes it, the browser leaves its profile in order.
+        self.running.closing = self.session.send("Browser.close", json!({})).is_ok();
+    }
 }
 
 /// Opens an address in the page of a session and gives what it drew.
@@ -572,8 +683,7 @@ fn read(
     version: String,
     scroll: u32,
 ) -> Result<Opened, String> {
-    session.call("Page.enable", json!({}))?;
-    session.call("Network.enable", json!({}))?;
+    session.forget()?;
     let navigated = session.call("Page.navigate", json!({ "url": address }))?;
     if let Some(error) = navigated
         .get("errorText")
@@ -589,18 +699,21 @@ fn read(
         .to_owned();
     let started = Instant::now();
     let mut loaded = false;
-    let mut pending: HashSet<String> = HashSet::new();
-    let mut quiet_since = Instant::now();
+    let mut watch = Watch::new();
     let settled = loop {
         if started.elapsed() >= SETTLE {
             break false;
         }
-        if loaded && pending.is_empty() && quiet_since.elapsed() >= QUIET {
+        if loaded && watch.pending.is_empty() && watch.quiet_since.elapsed() >= QUIET {
+            break true;
+        }
+        if loaded && watch.posts_at.is_some_and(|at| at.elapsed() >= POSTS_SETTLE) {
             break true;
         }
         let Some(event) = session.event()? else {
             continue;
         };
+        session.watch(&mut watch, &event)?;
         let params = event.get("params").cloned().unwrap_or(Value::Null);
         let text = |name: &str| {
             params
@@ -616,16 +729,7 @@ fn read(
         {
             "Page.loadEventFired" => {
                 loaded = true;
-                quiet_since = Instant::now();
-            }
-            "Network.requestWillBeSent" => {
-                pending.insert(text("requestId"));
-            }
-            "Network.loadingFinished" | "Network.loadingFailed" => {
-                pending.remove(&text("requestId"));
-                if pending.is_empty() {
-                    quiet_since = Instant::now();
-                }
+                watch.quiet_since = Instant::now();
             }
             "Network.responseReceived"
                 if text("type") == "Document" && text("frameId") == frame =>
@@ -650,7 +754,7 @@ fn read(
     // A page scrolled for more is kept as the items it showed; a page with fewer than two items
     // is kept as it is drawn at the end.
     let (scrolled, kept) = if scroll > 0 {
-        let (scrolled, kept) = scroll_for_more(session, scroll)?;
+        let (scrolled, kept) = scroll_for_more(session, scroll, &mut watch)?;
         (Some(scrolled), kept)
     } else {
         (None, None)
@@ -669,6 +773,7 @@ fn read(
         settled,
         version,
         scrolled,
+        data: watch.data,
     }))
 }
 

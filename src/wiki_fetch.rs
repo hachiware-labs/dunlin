@@ -4,7 +4,9 @@
 //! the project has a `raw/` folder, else beside uploaded files (`artifacts/uploads/<sha256>/`).
 //! Its name has the extension that tells the loader its format, and it is then read like any
 //! other file. Each address is one source: fetching it again saves a new version of the source.
+//! A page of X is kept as its posts instead, and the pages they refer to (`wiki_x`).
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use crate::node_path;
@@ -15,16 +17,30 @@ use crate::wiki_project::{coded, fs_error};
 /// The largest download: the limit of files the loader converts (PDF, Office, HTML).
 const LIMIT: u64 = 16 * 1024 * 1024;
 
-/// A downloaded source: the saved file and the address it stands for.
-pub(crate) struct Fetched {
+/// A source taken from the web: the saved file and the address it stands for.
+pub(crate) struct Kept {
     pub file: String,
     pub url: String,
     /// How it was taken: the browser and its version, as `Chrome/131.0.6778.86`, or `http`.
     pub with: String,
-    /// What the user should know about how it was taken.
-    pub warning: Option<String>,
+    /// The post that refers to it, when it was read as one.
+    pub from: Option<String>,
+}
+
+/// What taking an address in gave.
+pub(crate) struct Taken {
+    pub url: String,
+    /// How the address was taken: the browser and its version, or `http`.
+    pub with: String,
     /// How the page was scrolled for more, when it was.
     pub scrolled: Option<crate::wiki_browser::Scrolled>,
+    /// How many posts the page listed, when it is a page of X.
+    pub posts: Option<usize>,
+    /// The sources it gave: the page, or the posts of X and the pages they refer to, without
+    /// those that are sources already.
+    pub sources: Vec<Kept>,
+    /// What the user should know about how they were taken.
+    pub warnings: Vec<String>,
 }
 
 /// How web pages are taken: `browser` opens them in the Chrome or Edge of the machine, in the
@@ -38,6 +54,8 @@ pub(crate) struct Method<'a> {
     pub home: &'a str,
     /// How many times a page is scrolled for more: 0 for none.
     pub scroll: u32,
+    /// Whether the posts of X are taken with the pages they link to and the posts they quote.
+    pub follow: bool,
 }
 
 /// The folder of raw sources: the project's `raw/`, when it has one.
@@ -130,17 +148,108 @@ pub(crate) fn normalize(input: &str) -> Result<url::Url, StageError> {
     Ok(url)
 }
 
-/// Downloads `input` and keeps it with the raw sources, in a folder of its host and path.
+/// Takes `input` in: downloads it, or reads it in the browser, and keeps what it gave with the
+/// raw sources, in a folder of its host and path. A page of X is kept as its posts, one page
+/// each; with `follow`, the pages they link to and the posts they quote are kept too, once each
+/// and one step away. `known` tells the addresses that are sources already, which are not read
+/// again.
 pub(crate) fn fetch(
     input: &str,
     root: &str,
     artifacts: &str,
     how: &Method<'_>,
-) -> Result<Fetched, StageError> {
+    known: &dyn Fn(&str) -> bool,
+) -> Result<Taken, StageError> {
     let url = normalize(input)?;
     if how.method != "browser" {
-        return download(url, root, artifacts, None);
+        let kept = download(url.clone(), root, artifacts)?;
+        return Ok(Taken {
+            url: url.to_string(),
+            with: kept.with.clone(),
+            scrolled: None,
+            posts: None,
+            sources: vec![kept],
+            warnings: Vec::new(),
+        });
     }
+    let (browser, profile) = ready(how, &url)?;
+    let failed = |message: String| coded(1, "FETCH_FAILED", format!("{url}: {message}"));
+    let tab = crate::wiki_browser::Tab::start(&browser, &profile).map_err(failed)?;
+    let mut reader = Reader {
+        with: tab.version.clone(),
+        tab,
+        root,
+        artifacts,
+        known,
+        seen: HashSet::new(),
+        posts_seen: HashSet::new(),
+        followed: 0,
+        left: 0,
+        sources: Vec::new(),
+        warnings: Vec::new(),
+    };
+    let opened = reader.tab.read(url.as_str(), how.scroll).map_err(failed)?;
+    let crate::wiki_browser::Opened::Page(page) = opened else {
+        // A PDF or another file is taken as the server sends it.
+        let kept = download(url.clone(), root, artifacts)?;
+        return Ok(Taken {
+            url: url.to_string(),
+            with: kept.with.clone(),
+            scrolled: None,
+            posts: None,
+            sources: vec![kept],
+            warnings: Vec::new(),
+        });
+    };
+    let landed = landed(&url, &page);
+    if signed_out(&url, &landed) {
+        return Err(coded(
+            3,
+            "BROWSER_SIGNED_OUT",
+            format!(
+                "{url} led to {landed}, a page to sign in, so it was not read. Run nest browser {url}, sign in, close the browser, and run this again."
+            ),
+        ));
+    }
+    reader.warnings.extend(warning(&page));
+    reader.seen.insert(url.to_string());
+    let posts = match x_posts(&url, &landed, &page) {
+        Some(posts) => {
+            for post in &posts {
+                reader.keep_post(post, None, how.follow)?;
+            }
+            Some(posts.len())
+        }
+        None => {
+            let kept = keep_page(root, artifacts, &url, &landed, &page, None)?;
+            reader.sources.push(kept);
+            None
+        }
+    };
+    if reader.left > 0 {
+        reader.warnings.push(format!(
+            "{} more pages that the posts refer to were left, as no more than {FOLLOW_LIMIT} are read at a time; take this in again to read them.",
+            reader.left
+        ));
+    }
+    Ok(Taken {
+        url: url.to_string(),
+        with: reader.with.clone(),
+        scrolled: page.scrolled,
+        posts,
+        sources: std::mem::take(&mut reader.sources),
+        warnings: std::mem::take(&mut reader.warnings),
+    })
+}
+
+/// How many pages that posts refer to are read in one ingest.
+const FOLLOW_LIMIT: usize = 200;
+
+/// The browser and the profile of nest to read pages in, when they are ready.
+fn ready(
+    how: &Method<'_>,
+    url: &url::Url,
+) -> Result<(crate::wiki_browser::Browser, std::path::PathBuf), StageError> {
     // Pages are read only in the profile of nest, where the user has signed in; without it they
     // are not read at all, so that a page never comes in as a stranger sees it.
     let browsers = crate::wiki_browser::installed(how.browser);
@@ -180,40 +289,173 @@ pub(crate) fn fetch(
             ),
         ));
     }
-    let opened = crate::wiki_browser::open(&browser, &profile, url.as_str(), how.scroll)
-        .map_err(|message| coded(1, "FETCH_FAILED", format!("{url}: {message}")))?;
-    let crate::wiki_browser::Opened::Page(page) = opened else {
-        // A PDF or another file is taken as the server sends it.
-        return download(url, root, artifacts, None);
-    };
-    let landed = url::Url::parse(&page.url)
+    Ok((browser, profile))
+}
+
+/// The address a page ended at, after redirects.
+fn landed(url: &url::Url, page: &crate::wiki_browser::Rendered) -> url::Url {
+    url::Url::parse(&page.url)
         .ok()
         .filter(|landed| ["http", "https"].contains(&landed.scheme()))
-        .unwrap_or_else(|| url.clone());
-    if signed_out(&url, &landed) {
-        return Err(coded(
-            3,
-            "BROWSER_SIGNED_OUT",
-            format!(
-                "{url} led to {landed}, a page to sign in, so it was not read. Run nest browser {url}, sign in, close the browser, and run this again."
-            ),
-        ));
+        .unwrap_or_else(|| url.clone())
+}
+
+/// The posts of a page of X, from the data it loaded: those it lists, or the post it is the page
+/// of. None for another page, or a page of X without posts, as a long article is: it is kept as
+/// it is drawn.
+fn x_posts(
+    url: &url::Url,
+    landed: &url::Url,
+    page: &crate::wiki_browser::Rendered,
+) -> Option<Vec<crate::wiki_x::Post>> {
+    if page.data.is_empty() || landed.path().contains("/article/") {
+        return None;
     }
-    let name = file_name(&landed, "text/html");
+    let only = crate::wiki_x::status(landed).or_else(|| crate::wiki_x::status(url));
+    let posts = crate::wiki_x::posts(&page.data, only.as_deref());
+    (!posts.is_empty()).then_some(posts)
+}
+
+/// A page as it was drawn, kept with the raw sources.
+fn keep_page(
+    root: &str,
+    artifacts: &str,
+    url: &url::Url,
+    landed: &url::Url,
+    page: &crate::wiki_browser::Rendered,
+    from: Option<String>,
+) -> Result<Kept, StageError> {
+    let name = file_name(landed, "text/html");
     let file = keep_source(
         root,
         artifacts,
-        &raw_folders(&landed),
+        &raw_folders(landed),
         &name,
         page.html.as_bytes(),
     )?;
-    Ok(Fetched {
+    Ok(Kept {
         file,
         url: url.to_string(),
-        warning: warning(&page),
-        with: page.version,
-        scrolled: page.scrolled,
+        with: page.version.clone(),
+        from,
     })
+}
+
+/// Reads the pages of one ingest in one browser, and keeps what they gave.
+struct Reader<'a> {
+    tab: crate::wiki_browser::Tab,
+    with: String,
+    root: &'a str,
+    artifacts: &'a str,
+    known: &'a dyn Fn(&str) -> bool,
+    /// The addresses taken in this ingest, or found to be sources already.
+    seen: HashSet<String>,
+    /// The posts taken in this ingest, by ID.
+    posts_seen: HashSet<String>,
+    /// How many pages that posts refer to were read, and how many were left for the limit.
+    followed: usize,
+    left: usize,
+    sources: Vec<Kept>,
+    warnings: Vec<String>,
+}
+
+impl Reader<'_> {
+    /// Keeps a post as a page of its own, unless it is a source already; with `follow`, then
+    /// the post it quotes and the pages it links to.
+    fn keep_post(
+        &mut self,
+        post: &crate::wiki_x::Post,
+        from: Option<&str>,
+        follow: bool,
+    ) -> Result<(), StageError> {
+        let address = post.url();
+        if !self.posts_seen.insert(post.id.clone()) {
+            return Ok(());
+        }
+        self.seen.insert(address.clone());
+        if !(self.known)(&address) {
+            let file = keep_source(
+                self.root,
+                self.artifacts,
+                &["x.com".to_owned(), sanitize(&post.user), "status".to_owned()],
+                &format!("{}.html", post.id),
+                crate::wiki_x::render(post).as_bytes(),
+            )?;
+            self.sources.push(Kept {
+                file,
+                url: address.clone(),
+                with: self.with.clone(),
+                from: from.map(str::to_owned),
+            });
+        }
+        if follow {
+            if let Some(quoted) = &post.quoted {
+                self.keep_post(quoted, Some(&address), false)?;
+            }
+            for link in &post.links {
+                self.follow(link, &address);
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads a page that a post refers to, once, unless it is a source already. What fails is
+    /// told as a warning: the post is kept all the same.
+    fn follow(&mut self, link: &str, from: &str) {
+        let Ok(target) = normalize(link) else {
+            return;
+        };
+        if crate::wiki_x::status(&target).is_some_and(|id| self.posts_seen.contains(&id)) {
+            return;
+        }
+        let key = target.to_string();
+        if self.seen.contains(&key) || (self.known)(&key) {
+            return;
+        }
+        self.seen.insert(key);
+        if self.followed >= FOLLOW_LIMIT {
+            self.left += 1;
+            return;
+        }
+        self.followed += 1;
+        if let Err(message) = self.read_referred(&target, from) {
+            self.warnings
+                .push(format!("{target}, which {from} refers to, was not read: {message}"));
+        }
+    }
+
+    fn read_referred(&mut self, target: &url::Url, from: &str) -> Result<(), String> {
+        let opened = self.tab.read(target.as_str(), 0)?;
+        let crate::wiki_browser::Opened::Page(page) = opened else {
+            let mut kept = download(target.clone(), self.root, self.artifacts)
+                .map_err(|error| error.message)?;
+            kept.from = Some(from.to_owned());
+            self.sources.push(kept);
+            return Ok(());
+        };
+        let landed = landed(target, &page);
+        if signed_out(target, &landed) {
+            return Err(format!("it led to {landed}, a page to sign in"));
+        }
+        if let Some(posts) = x_posts(target, &landed, &page) {
+            for post in &posts {
+                self.keep_post(post, Some(from), false)
+                    .map_err(|error| error.message)?;
+            }
+            return Ok(());
+        }
+        let kept = keep_page(
+            self.root,
+            self.artifacts,
+            target,
+            &landed,
+            &page,
+            Some(from.to_owned()),
+        )
+        .map_err(|error| error.message)?;
+        self.sources.push(kept);
+        Ok(())
+    }
 }
 
 /// What the user should know about how a page was drawn: that it did not finish loading, and
@@ -255,12 +497,7 @@ fn signed_out(asked: &url::Url, landed: &url::Url) -> bool {
 }
 
 /// Downloads a page or a file once over HTTP, as the server sends it.
-fn download(
-    url: url::Url,
-    root: &str,
-    artifacts: &str,
-    warning: Option<String>,
-) -> Result<Fetched, StageError> {
+fn download(url: url::Url, root: &str, artifacts: &str) -> Result<Kept, StageError> {
     let failed = |message: String| coded(1, "FETCH_FAILED", format!("{url}: {message}"));
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(60)))
@@ -309,12 +546,11 @@ fn download(
         bytes
     };
     let file = keep_source(root, artifacts, &raw_folders(&landed), &name, &bytes)?;
-    Ok(Fetched {
+    Ok(Kept {
         file,
         url: url.to_string(),
         with: "http".to_owned(),
-        warning,
-        scrolled: None,
+        from: None,
     })
 }
 

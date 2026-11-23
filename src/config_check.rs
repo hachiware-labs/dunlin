@@ -980,6 +980,35 @@ fn module_checks(
             );
         }
     }
+    if name == "rerank.cross_encoder" {
+        if let Some(url) = planned.text("url")
+            && !(url.starts_with("http://") || url.starts_with("https://"))
+        {
+            report.issue(
+                "ARG_RANGE",
+                at(path!["with", "url"]),
+                "An http or https URL of the rerank endpoint",
+                "Write the full URL, such as http://localhost:8080/v1/rerank.",
+                Details::module(name),
+            );
+        }
+        let retrievals = role_count
+            .iter()
+            .find(|(role, _)| *role == "retrieval")
+            .map_or(0, |(_, n)| *n);
+        let fusion = role_count
+            .iter()
+            .any(|(role, n)| *role == "fusion" && *n > 0);
+        if retrievals > 1 && !fusion {
+            report.issue(
+                "ARG_CONFLICT",
+                at(path!["use"]),
+                "Fusion before reranking",
+                "Place fusion.rrf before rerank.cross_encoder.",
+                Details::module(name),
+            );
+        }
+    }
     if name == "answer.generate"
         && let Some(reference) = planned.text("model").filter(|text| !text.is_empty())
     {
@@ -1777,12 +1806,12 @@ fn validate_evaluation(config: &ConfigValue, report: &mut Report) -> Option<Conf
         let name = item.get("use");
         let name_text = name
             .and_then(ConfigValue::as_str)
-            .filter(|name| ["metric.evidence_recall", "metric.latency"].contains(name));
+            .filter(|name| EVAL_MODULES.contains(name));
         let Some(name_text) = name_text else {
             report.issue(
                 "MODULE_UNKNOWN",
                 item_path,
-                "metric.evidence_recall or metric.latency",
+                "metric.evidence_recall, metric.latency or metric.evidence_rank",
                 "Use a supported evaluation module.",
                 Details {
                     received: name.cloned(),
@@ -1815,10 +1844,10 @@ fn validate_evaluation(config: &ConfigValue, report: &mut Report) -> Option<Conf
             }
         }
         let args = item.get("with");
-        let issues = if name_text == "metric.evidence_recall" {
-            recall_issues(args)
-        } else {
-            latency_issues(args)
+        let issues = match name_text {
+            "metric.evidence_recall" => recall_issues(args),
+            "metric.evidence_rank" => rank_issues(args),
+            _ => latency_issues(args),
         };
         if issues.is_empty() {
             let args = args.cloned().unwrap_or(ConfigValue::Null);
@@ -1832,6 +1861,12 @@ fn validate_evaluation(config: &ConfigValue, report: &mut Report) -> Option<Conf
                     })
                     .collect();
                 output.push(("recall".into(), ConfigValue::Object(ordered)));
+            } else if name_text == "metric.evidence_rank" {
+                let at = args
+                    .get("at")
+                    .cloned()
+                    .unwrap_or(ConfigValue::Array(vec![ConfigValue::Number(10.0)]));
+                output.push(("rank".into(), ConfigValue::Object(vec![("at".into(), at)])));
             } else {
                 output.push((
                     "percentiles".into(),
@@ -1947,6 +1982,34 @@ fn recall_issues(args: Option<&ConfigValue>) -> Vec<Issue> {
         Vec::new(),
         &mut issues,
     );
+    issues
+}
+
+/// The evaluation modules. The first two are required.
+const EVAL_MODULES: [&str; 3] = [
+    "metric.evidence_recall",
+    "metric.latency",
+    "metric.evidence_rank",
+];
+
+/// `metric.evidence_rank`: `at`, the numbers of first candidates that MRR and nDCG look at. It
+/// may be left out, which means `[10]`.
+fn rank_issues(args: Option<&ConfigValue>) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    let args = match args {
+        None | Some(ConfigValue::Null) => return issues,
+        Some(args) if is_mapping(Some(args)) => args,
+        Some(_) => return vec![issue("invalid_type", Vec::new())],
+    };
+    if args.get("at").is_some() {
+        number_list_issues(
+            args.get("at"),
+            path!["at"],
+            |value, path, issues| integer_issues(Some(value), 1.0, 100.0, path, issues),
+            &mut issues,
+        );
+    }
+    unknown_keys(args, &["at"], Vec::new(), &mut issues);
     issues
 }
 

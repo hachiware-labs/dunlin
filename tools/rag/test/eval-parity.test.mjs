@@ -110,10 +110,11 @@ async function projects(t) {
   return { root, run, reference, db, actual };
 }
 
-/** A report without the values that change on every run. */
+/** A report without the values that change on every run, nor the stages, which came after the
+ * JavaScript evaluation. */
 function stable(report) {
-  const { id, latency_ms: latency, rows, ...rest } = report;
-  return { ...rest, latency_ms: Object.keys(latency), rows: rows.map(({ latency_ms: ms, ...row }) => row) };
+  const { id, latency_ms: latency, rows, stages: _, ...rest } = report;
+  return { ...rest, latency_ms: Object.keys(latency), rows: rows.map(({ latency_ms: ms, stages: __, ...row }) => row) };
 }
 
 const rows = (db, table) => db.prepare(`SELECT id, data FROM ${table} ORDER BY id`).all().map(({ id, data }) => ({ id, data }));

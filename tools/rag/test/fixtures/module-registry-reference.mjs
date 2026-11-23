@@ -68,12 +68,16 @@ register('index.keyword', 'index', 'index', 'chunks', 'index', {
   user_dictionary: z.string().trim().min(1).nullable().optional(),
   short_query: z.enum(['bigram', 'none']).optional(),
 }, 'Build the BM25 keyword index.', (input, args, ctx) => ctx.index(input, args));
+// The arguments below that have no default came after the zod registry; they are written here as
+// the Rust registry reads them.
+const prefix = z.string().min(1).optional();
+const weight = z.number().min(0).max(100).optional();
 register('index.vector', 'index', 'index', 'chunks', 'index', {
-  model: z.string().min(1),
+  model: z.string().min(1), document_prefix: prefix,
 }, 'Build an exact vector index from the configured chunks.', (input, args, ctx) => ctx.indexVector(input, args),
 { external: true, deterministic: false, requires: ['embedding model'] });
 register('hannoy.index', 'index', 'index', 'chunks', 'index', {
-  model: z.string().min(1), ef_construction: integer(32, 10000, 100),
+  model: z.string().min(1), ef_construction: integer(32, 10000, 100), document_prefix: prefix,
 }, 'Build an incremental HNSW index using the installed hannoy tool.',
 (input, args, ctx) => ctx.indexVector(input, args, 'hannoy'),
 { tool: 'hannoy', external: true, deterministic: false, requires: ['hannoy tool', 'embedding model'] });
@@ -82,24 +86,30 @@ register('query.normalize', 'search', 'preprocess', 'query', 'query', {
 }, 'Normalize the query.', (input, args) => ({ ...input,
   query: args.unicode === 'nfkc' ? input.query.trim().normalize('NFKC') : input.query.trim() }));
 register('retrieval.keyword', 'search', 'retrieval', 'query', 'candidates', {
-  top_k: integer(1, 100, 10),
+  top_k: integer(1, 100, 10), weight,
 }, 'Retrieve ranked keyword matches.', (input, args, ctx) => ctx.retrieve(input, args), { requires: ['index.keyword'] });
 register('retrieval.vector', 'search', 'retrieval', 'query', 'candidates', {
-  model: z.string().min(1), top_k: integer(1, 100, 10),
+  model: z.string().min(1), top_k: integer(1, 100, 10), weight, query_prefix: prefix,
 }, 'Rank chunks by cosine similarity to the query embedding.', (input, args, ctx) => ctx.retrieveVector(input, args),
 { external: true, deterministic: false, requires: ['index.vector', 'embedding model'] });
 register('hannoy.search', 'search', 'retrieval', 'query', 'candidates', {
-  model: z.string().min(1), top_k: integer(1, 100, 10), ef_search: integer(1, 100000, 100),
+  model: z.string().min(1), top_k: integer(1, 100, 10), ef_search: integer(1, 100000, 100), weight, query_prefix: prefix,
 }, 'Retrieve candidates from the hannoy HNSW index.',
 (input, args, ctx) => ctx.retrieveVector(input, args, 'hannoy'),
 { tool: 'hannoy', external: true, deterministic: false, requires: ['hannoy.index', 'embedding model'] });
 register('fusion.rrf', 'search', 'fusion', 'candidates', 'candidates', {
   k: integer(1, 1000, 60),
-}, 'Combine ranked candidate lists using reciprocal rank fusion.', (input, args, ctx) => ctx.fuse(input, args));
+}, 'Combine ranked candidate lists using reciprocal rank fusion, weighting each list by the weight of its retrieval module.',
+(input, args, ctx) => ctx.fuse(input, args));
 register('rerank.model', 'search', 'rerank', 'candidates', 'candidates', {
   model: z.string().min(1), candidates: integer(1, 32, 10),
 }, 'Reorder the top candidates with a chat model while keeping their original ranges.',
 (input, args, ctx) => ctx.rerank(input, args), { external: true, deterministic: false, requires: ['chat model'] });
+register('rerank.cross_encoder', 'search', 'rerank', 'candidates', 'candidates', {
+  url: z.string().min(1), model: z.string().min(1).optional(), format: choice(['cohere', 'tei'], 'cohere'),
+  api_key_env: z.string().min(1).optional(), candidates: integer(1, 100, 20), max_chars: integer(1, 100000, 2000),
+}, 'Reorder the top candidates with a reranking model behind a rerank endpoint (Cohere or Jina /v1/rerank, or TEI /rerank) while keeping their original ranges.',
+(input, args, ctx) => ctx.rerank(input, args), { external: true, deterministic: false, requires: ['rerank endpoint'] });
 register('context.assemble', 'search', 'context', 'candidates', 'context', {
   budget_chars: integer(1, 1000000, 4000),
   retrieval: choice(['fill_budget', 'top_k'], 'fill_budget'),
@@ -107,7 +117,9 @@ register('context.assemble', 'search', 'context', 'candidates', 'context', {
   merge_overlaps: z.boolean().default(true),
   truncate_last: z.boolean().default(true),
   include_headings: z.boolean().default(true),
-}, 'Assemble source excerpts within the character budget.', (input, args, ctx) => ctx.assemble(input, args));
+  expand_lines: z.number().int().min(0).max(1000).optional(),
+}, 'Assemble source excerpts within the character budget, optionally widening each by the lines around it.',
+(input, args, ctx) => ctx.assemble(input, args));
 register('answer.generate', 'ask', 'answer', 'context', 'response', {
   model: z.string().min(1).default('answerer'), cite: z.boolean().default(true),
   on_no_evidence: choice(['decline'], 'decline'),

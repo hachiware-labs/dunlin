@@ -115,6 +115,10 @@ test('reads reports, statuses and misses like the former JavaScript code', { tim
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
 
   const same = (actual, expected, label) => assert.equal(JSON.stringify(actual), JSON.stringify(expected), label);
+  const withoutSign = (scores) => scores && Object.fromEntries(Object.entries(scores)
+    .map(([name, { sign_test_p: _, ...score }]) => [name, score]));
+  const withoutSignTest = (data) => ({ ...data, scores: withoutSign(data.scores),
+    ...(data.common_case_scores ? { common_case_scores: withoutSign(data.common_case_scores) } : {}) });
   const failsLike = async (result, call, label) => {
     let expected;
     try {
@@ -135,10 +139,13 @@ test('reads reports, statuses and misses like the former JavaScript code', { tim
     const refs = args.slice(1).filter((value) => value !== '--split' && value !== split);
     const result = await run('report', ...args);
     assert.equal(result.status, 'succeeded', args.join(' ') + JSON.stringify(result.errors));
-    same(result.data, referenceReports(db, args[0], refs, split), args.join(' '));
+    same(args[0] === 'compare' ? withoutSignTest(result.data) : result.data, referenceReports(db, args[0], refs, split), args.join(' '));
   }
   const compared = (await run('report', 'compare', 'a', 'b')).data;
   assert.ok(compared.comparable && Object.values(compared.scores).every(({ interval_95: interval }) => interval?.length === 2));
+  // The sign test came after the JavaScript implementation: a p-value, or null when no case differs.
+  assert.ok(Object.values(compared.scores).every(({ wins, losses, sign_test_p: p }) =>
+    wins + losses === 0 ? p === null : p > 0 && p <= 1));
   assert.ok((await run('report', 'list')).data[0].columns.length > 1);
   await failsLike(await run('report', 'show', 'missing'), () => referenceReports(db, 'show', ['missing']), 'show missing');
   await failsLike(await run('report', 'compare', 'a', 'missing'), () => referenceReports(db, 'compare', ['a', 'missing']), 'compare missing');

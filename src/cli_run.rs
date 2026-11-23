@@ -1256,8 +1256,11 @@ fn project_model_setting(
         })
 }
 
+/// The reranking steps that use a chat model of `models`. `rerank.cross_encoder` names its
+/// endpoint in its own arguments.
 fn rerank_steps(plan: &[Step]) -> impl Iterator<Item = &Step> {
-    plan.iter().filter(|step| step.module.role == "rerank")
+    plan.iter()
+        .filter(|step| step.module.name == "rerank.model")
 }
 
 fn model_arg(step: &Step) -> ConfigValue {

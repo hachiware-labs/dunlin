@@ -10,6 +10,12 @@
 - `dictionary suggest` と `dictionary add` を追加しました。調整用の評価から辞書候補と確認用の質問を出し、候補設定で試せます。
 - `eval-data generate` が評価ケースのない文書から順に読み、`--count` で指定した件数まで候補を作るようにしました。引用を検証できない候補だけを除き、理由ごとの件数を表示します。`eval-data review` は `--case` を繰り返して複数件を確認できます。
 - `eval-data generate` が作る候補に、質問の種類（`lexical`、`paraphrase`、`identifier`）を付けるようにしました。`--kind` で種類を1つに絞れ、結果の `kinds` に種類ごとの件数が出ます。1つの質問が3つまでの引用を持てるようにし、引用は300文字までにしました。長い文書は先頭からではなく、ケースの引用が少ない部分から、文書の中に散らばる順に読みます。モデルへの指示と返させる形が変わったので、`generation.prompt_version` は3です。
+- 評価に順位と段階の指標を足しました。`eval` の `modules` に `metric.evidence_rank` を書くと、`scores` に `mrr@k` と `ndcg@k` が出ます。レポートの `stages` には、検索モジュールごと、検索全体、文脈に渡った候補、文脈のそれぞれが覆った根拠の割合と、見つからなかった根拠の理由（`not_retrieved`、`dropped_by_fusion`、`ranked_low`、`over_budget`、`truncated`、`unresolved`）ごとの数が毎回出ます。`report compare` の各指標には、符号検定の p 値 `sign_test_p` が付きます。`metric.evidence_rank` は評価方法の ID を変えないので、以前のレポートとも比べられます。
+- MCP・RAG の検索に、次のモジュールと引数を足しました。どれも省くと、以前と同じ設定 ID です。
+  - `rerank.cross_encoder`: リランカーで上位候補を並べ替えます。Cohere・Jina 形式の `/v1/rerank`（llama.cpp、vLLM、Infinity も同じ）と、Text Embeddings Inference の `/rerank` に送れます。
+  - 検索モジュールの `weight`: `fusion.rrf` で、その検索の順位を重みを付けて数えます。
+  - `index.vector`・`hannoy.index` の `document_prefix` と、`retrieval.vector`・`hannoy.search` の `query_prefix`: 埋め込む文の先頭に `passage: ` や `query: ` のような文字列を付けます。
+  - `context.assemble` の `expand_lines`: 当たったチャンクを前後の行まで広げて文脈に入れます。検索結果の範囲は変わりません。
 - リリース用の npm パッケージを組み立てる `npm run release:prepare` と、手動実行のワークフロー **Release Knowledge-Nest**、MCP Registry 用の `server.json` を追加しました。
 - Node.js API から、直接開いた索引の資料を抜粋してページを作る `kb.wiki`、同期の結果の `wiki`、MCP の道具 `knowledge.wiki_get` をなくしました。Wiki と PARA は、CLI と同じ実装を `KnowledgeNest.wiki` と `KnowledgeNest.wikiServe` で呼べます。
 - CLI のコマンドを Rust で実行するようにしました。`--json` の出力、エラーの番号、終了コード、書き出す設定ファイルは以前と同じです。HTML の本文の取り出しと Office 文書の変換も Rust で行い、npm の依存から `cheerio`、`yaml`、`zod`、`docling.rs` をなくしました。`nest dictionary add` は候補設定の `user_dictionary` の行だけを書き換え、他の行の書式とコメントをそのまま残します。

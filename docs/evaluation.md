@@ -62,6 +62,53 @@ nest eval-data review <dataset> --case <id> --case <id> --state reviewed --revie
 
 `<dataset>` は `generate` が表示した評価データの ID です。採用しない候補は `--state rejected` にします。まとめて編集したい場合は `eval-data export` で書き出し、`eval-data import` で戻せます。
 
+## 順位と、根拠を失った段階を読む
+
+回収（`evidence_recall`）は、根拠が入ったかどうかだけを見ます。上位10件の中の並べ替えや、根拠をどこで失ったかは、次の2つで分かります。
+
+**順位の指標。** `eval` の `modules` に `metric.evidence_rank` を足すと、`scores` に `mrr@k` と `ndcg@k` が加わります。`at` に見る件数を並べます。省くと `[10]` です。
+
+```yaml
+eval:
+  split: dev
+  modules:
+    - use: metric.evidence_recall
+      with: { at: [context, 1, 3, 10], short_evidence_chars: 40, min_coverage: 0.8, unresolved: count_as_missed }
+    - use: metric.latency
+      with: { percentiles: [50, 95, 99] }
+    - use: metric.evidence_rank
+      with: { at: [10] }
+```
+
+- 根拠の順位は、文脈の組み立てに渡した候補の中で、その根拠を覆うのに要る先頭からの件数です。融合と並べ替えの後の順です。
+- `mrr@k` は、根拠ごとの順位の逆数（`k` 件より後や見つからないときは0）の平均です。`ndcg@k` は、すべての根拠が先頭にある並びを1とした値です。根拠を複数持つケースでは、根拠を同じ重さで数えます。
+- `metric.evidence_rank` は判定を変えないので、評価方法の ID（`method_id`）は変わりません。足す前のレポートとも、共通の指標で比べられます。小さい `k` での回収は、`metric.evidence_recall` の `at` に `1` や `3` を足して測ります。
+
+**段階ごとの回収。** レポートの `stages` に、毎回出ます。
+
+| 項目 | 意味 |
+| --- | --- |
+| `stages.recall` の `retrieval.keyword` など | その検索モジュールが返した候補が覆った根拠の割合。同じモジュールを2回使うと `#2` が付きます |
+| `stages.recall.retrieved` | どれかの検索が返した候補が覆った割合 |
+| `stages.recall.candidates` | 融合と並べ替えの後、文脈の組み立てに渡った候補が覆った割合 |
+| `stages.recall.context` | 文脈が覆った割合 |
+| `stages.lost` | 主な回収で見つからなかった根拠の数を、理由ごとに数えたもの |
+
+`stages.lost` の理由で、次に打つ手が分かれます。
+
+| 理由 | 起きたこと | 打つ手の例 |
+| --- | --- | --- |
+| `not_retrieved` | どの検索の候補にも入らなかった | 辞書、ベクトル検索の併用、`top_k` を増やす、チャンクの切り方 |
+| `dropped_by_fusion` | 検索の候補にはあったが、融合で候補の上限から外れた | 融合の `weight`、`max_candidates` |
+| `ranked_low` | 候補にはあったが、上位 k 件（主な回収が `@k` のとき）や文脈の対象に入る順位まで上がらなかった | リランカー、融合の `weight` |
+| `over_budget` | 候補にはあったが、文脈の予算がその順位に届く前に尽きた | リランカー、融合の `weight`、`budget_chars` を増やす |
+| `truncated` | 文脈に一部だけ入った | `budget_chars`、`expand_lines`、チャンクを小さくする |
+| `unresolved` | 引用を文書の中で特定できなかった | 評価データの引用を直す |
+
+各行の `stages` には、根拠ごとの候補の中の順位（`rank`）と、失った理由（`lost`）が根拠の順に入ります。
+
+**比較の確からしさ。** `report compare` の `scores` の各指標には、質問の組でのブートストラップによる95%区間（`interval_95`。グループが5つ以上のとき）と、符号検定の p 値（`sign_test_p`）が付きます。符号検定は、良くなった質問と悪くなった質問の数（`wins` と `losses`）だけを使い、同じ値の質問は数えません。値が小さいほど、差が偶然とは考えにくいことを示します。差のある質問が1つもなければ `null` です。
+
 ## 辞書候補を選ぶ
 
 ```sh

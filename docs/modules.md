@@ -144,6 +144,7 @@ BM25 のキーワード索引を作ります。
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
 | `model` | 文字列 | 必須 | — |
+| `document_prefix` | 文字列 | 省略可 | — |
 
 ### hannoy.index
 
@@ -155,6 +156,7 @@ BM25 のキーワード索引を作ります。
 | --- | --- | --- | --- |
 | `model` | 文字列 | 必須 | — |
 | `ef_construction` | 整数 | `100` | 32〜10000 |
+| `document_prefix` | 文字列 | 省略可 | — |
 
 ## search
 
@@ -175,6 +177,7 @@ BM25 のキーワード索引を作ります。
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
 | `top_k` | 整数 | `10` | 1〜100 |
+| `weight` | 数値 | 省略可 | 0〜100 |
 
 ### retrieval.vector
 
@@ -186,6 +189,8 @@ BM25 のキーワード索引を作ります。
 | --- | --- | --- | --- |
 | `model` | 文字列 | 必須 | — |
 | `top_k` | 整数 | `10` | 1〜100 |
+| `weight` | 数値 | 省略可 | 0〜100 |
+| `query_prefix` | 文字列 | 省略可 | — |
 
 ### hannoy.search
 
@@ -198,10 +203,12 @@ hannoy の HNSW 索引から候補を取得します。
 | `model` | 文字列 | 必須 | — |
 | `top_k` | 整数 | `10` | 1〜100 |
 | `ef_search` | 整数 | `100` | 1〜100000 |
+| `weight` | 数値 | 省略可 | 0〜100 |
+| `query_prefix` | 文字列 | 省略可 | — |
 
 ### fusion.rrf
 
-複数の順位付き候補を Reciprocal Rank Fusion で統合します。
+複数の順位付き候補を Reciprocal Rank Fusion で統合します。各検索の順位は、その検索モジュールの `weight`（省くと1）の重みで数えます。
 
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
@@ -218,9 +225,24 @@ hannoy の HNSW 索引から候補を取得します。
 | `model` | 文字列 | 必須 | — |
 | `candidates` | 整数 | `10` | 1〜32 |
 
+### rerank.cross_encoder
+
+リランカー（cross-encoder）で上位候補を並べ替えます。`format: cohere` は Cohere・Jina 形式の `/v1/rerank`（llama.cpp、vLLM、Infinity も同じ形式）、`tei` は Text Embeddings Inference の `/rerank` に送ります。キーは `api_key_env` に書いた環境変数から読みます。原文上の範囲は変えません。
+
+必要な構成は `rerank endpoint` です。
+
+| 引数 | 型 | 既定値 | 範囲・候補 |
+| --- | --- | --- | --- |
+| `url` | 文字列 | 必須 | — |
+| `model` | 文字列 | 省略可 | — |
+| `format` | 列挙 | `"cohere"` | `cohere`、`tei` |
+| `api_key_env` | 文字列 | 省略可 | — |
+| `candidates` | 整数 | `20` | 1〜100 |
+| `max_chars` | 整数 | `2000` | 1〜100000 |
+
 ### context.assemble
 
-文字数の予算内で出典の抜粋を組み立てます。
+文字数の予算内で出典の抜粋を組み立てます。`expand_lines` を書くと、各候補を前後の行まで広げて文脈に入れます（検索結果の範囲は変えません）。
 
 | 引数 | 型 | 既定値 | 範囲・候補 |
 | --- | --- | --- | --- |
@@ -230,6 +252,7 @@ hannoy の HNSW 索引から候補を取得します。
 | `merge_overlaps` | 真偽値 | `true` | — |
 | `truncate_last` | 真偽値 | `true` | — |
 | `include_headings` | 真偽値 | `true` | — |
+| `expand_lines` | 整数 | 省略可 | 0〜1000 |
 
 ## ask
 
@@ -251,6 +274,9 @@ hannoy の HNSW 索引から候補を取得します。
 | --- | --- | --- |
 | `metric.evidence_recall` | `at` は `context` または1〜100の整数の配列。`short_evidence_chars` は正の整数、`min_coverage` は0〜1、`unresolved` は `count_as_missed` | `[context, 10]`、`40`、`0.8`、`count_as_missed` |
 | `metric.latency` | `percentiles` は1〜100の整数の配列 | `[50, 95, 99]` |
+| `metric.evidence_rank`（省略可） | `at` は1〜100の整数の配列。省くと `[10]`。根拠ごとの順位から `mrr@k` と `ndcg@k` を出す | 作られない |
+
+`index.vector` と `hannoy.index` の `document_prefix`、`retrieval.vector` と `hannoy.search` の `query_prefix` は、埋め込む文の先頭に付ける文字列です（`passage: ` と `query: ` など）。検索モジュールの `weight` は `fusion.rrf` での重みです。どれも省くと、以前と同じ設定IDのままです。
 
 ## Wiki・PARA のモジュール
 

@@ -843,6 +843,9 @@ pub fn run(
                                 force: request.force,
                                 backend,
                                 ef_construction,
+                                document_prefix: args
+                                    .and_then(|args| string_field(args, "document_prefix"))
+                                    .unwrap_or_default(),
                                 baseline: if compatible {
                                     prior_index.as_deref()
                                 } else {
@@ -1100,6 +1103,9 @@ struct VectorBuild<'a> {
     force: bool,
     backend: Backend,
     ef_construction: Option<&'a ConfigValue>,
+    /// What is put before each chunk's text when it is embedded, such as `passage: ` for models
+    /// that tell documents from queries that way. Empty for none.
+    document_prefix: &'a str,
     /// The previous build directory, when its hannoy graph may be updated in place.
     baseline: Option<&'a Path>,
     host: &'a dyn IndexHost,
@@ -1164,6 +1170,8 @@ fn build_vectors(build: &VectorBuild<'_>) -> Result<ConfigValue, StageError> {
                 if js_blank(&text) {
                     continue;
                 }
+                // The prefix is part of what is embedded, so it is part of the cache key too.
+                let text = format!("{}{text}", build.document_prefix);
                 let key = sha256_hex(
                     ConfigValue::Array(vec![self::text(&identity), self::text(&text)])
                         .to_js_json()

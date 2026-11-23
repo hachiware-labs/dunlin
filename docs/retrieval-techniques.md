@@ -18,6 +18,21 @@
 - `context.assemble`（予算内での組み立て、重なりの統合）
 - 指標は `metric.evidence_recall` と `metric.latency`
 
+2026年11月23日に、次を足した（MCP・RAG の段階の実装。新しい保管の `src/assess.rs` は、回収と MRR のままである）。
+
+| 項目 | 入れたもの | 状態 |
+| --- | --- | --- |
+| E1 | `metric.evidence_rank`（`mrr@k`、`ndcg@k`）。小さい k での回収は、今ある `at` で測る | 済み |
+| E2 | レポートの `stages`。検索モジュールごと、検索全体、候補、文脈の回収と、根拠を失った理由 | 済み |
+| E5 | `report compare` の `sign_test_p`。ブートストラップの区間（`interval_95`）は以前からあった | 済み |
+| 1 | `rerank.cross_encoder`。Cohere・Jina 形式と TEI 形式のリランクの口に送る | 済み |
+| 4 | 検索モジュールの `weight`。`fusion.rrf` が順位をその重みで数える | 済み |
+| 5 | `index.vector`・`hannoy.index` の `document_prefix`、`retrieval.vector`・`hannoy.search` の `query_prefix` | 済み |
+| 6 | `context.assemble` の `expand_lines`。候補を前後の行まで広げて文脈に入れる。節の全体を返す形は、まだない | 一部 |
+| 2、3 | チャンクの文脈は `transform` の側で、新しい保管にだけある（[data-management.md](data-management.md) 9.7節）。MCP・RAG の段階には、まだない | 未着手 |
+
+足した引数は、どれも省くと以前と同じ設定IDになる。読み方は [evaluation.md](evaluation.md) の「順位と、根拠を失った段階を読む」にある。
+
 ## 2 優先度 高
 
 今の構造にそのまま載り、効果の報告が大きいもの。
@@ -110,9 +125,9 @@
 ### 5.5 進める順
 
 1. G1 から G4 を生成に入れる（済み）。G5 は、評価データの形を決めてから入れる。
-2. E1 と E2 を足す。保存済みのデータの集計で済む。
+2. E1 と E2 を足す（済み）。
 3. 新しい生成で評価データを作り、基準を測り直す（E3、E4）。以前のレポートとは比べられなくなる。
-4. E5 を足してから、2章の手法を1つずつ試す。
+4. E5 を足してから（済み）、2章の手法を1つずつ試す。
 5. E6 から E10 は、対応する手法を入れるときに足す。
 
 ## 6 出典

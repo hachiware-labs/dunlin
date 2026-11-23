@@ -138,6 +138,23 @@ fn model(presence: Presence) -> Arg {
     arg("model", STRING, presence)
 }
 
+/// Text put before what an embedding model embeds, for models that tell queries from documents
+/// that way (`query: ` and `passage: `, for example). Left out, nothing is put before it.
+const fn prefix(name: &'static str) -> Arg {
+    arg(name, STRING, Presence::Optional)
+}
+
+/// How much a retrieval module's ranks count in `fusion.rrf`. Left out, they count once, and the
+/// search keeps the ID it had before the argument existed.
+const WEIGHT: Arg = arg(
+    "weight",
+    Kind::Num {
+        min: 0.0,
+        max: 100.0,
+    },
+    Presence::Optional,
+);
+
 struct Module {
     name: &'static str,
     stage: &'static str,
@@ -362,7 +379,7 @@ fn build() -> Vec<ModuleInfo> {
         Module::new(
             "index.vector",
             ("index", "index", "chunks", "index"),
-            vec![model(Presence::Required)],
+            vec![model(Presence::Required), prefix("document_prefix")],
             "Build an exact vector index from the configured chunks.",
         )
         .external(&["embedding model"]),
@@ -372,6 +389,7 @@ fn build() -> Vec<ModuleInfo> {
             vec![
                 model(Presence::Required),
                 int("ef_construction", 32, 10000, 100),
+                prefix("document_prefix"),
             ],
             "Build an incremental HNSW index using the installed hannoy tool.",
         )
@@ -386,14 +404,19 @@ fn build() -> Vec<ModuleInfo> {
         Module::new(
             "retrieval.keyword",
             ("search", "retrieval", "query", "candidates"),
-            vec![int("top_k", 1, 100, 10)],
+            vec![int("top_k", 1, 100, 10), WEIGHT],
             "Retrieve ranked keyword matches.",
         )
         .requires(&["index.keyword"]),
         Module::new(
             "retrieval.vector",
             ("search", "retrieval", "query", "candidates"),
-            vec![model(Presence::Required), int("top_k", 1, 100, 10)],
+            vec![
+                model(Presence::Required),
+                int("top_k", 1, 100, 10),
+                WEIGHT,
+                prefix("query_prefix"),
+            ],
             "Rank chunks by cosine similarity to the query embedding.",
         )
         .external(&["index.vector", "embedding model"]),
@@ -404,6 +427,8 @@ fn build() -> Vec<ModuleInfo> {
                 model(Presence::Required),
                 int("top_k", 1, 100, 10),
                 int("ef_search", 1, 100_000, 100),
+                WEIGHT,
+                prefix("query_prefix"),
             ],
             "Retrieve candidates from the hannoy HNSW index.",
         )
@@ -413,7 +438,7 @@ fn build() -> Vec<ModuleInfo> {
             "fusion.rrf",
             ("search", "fusion", "candidates", "candidates"),
             vec![int("k", 1, 1000, 60)],
-            "Combine ranked candidate lists using reciprocal rank fusion.",
+            "Combine ranked candidate lists using reciprocal rank fusion, weighting each list by the weight of its retrieval module.",
         ),
         Module::new(
             "rerank.model",
@@ -422,6 +447,20 @@ fn build() -> Vec<ModuleInfo> {
             "Reorder the top candidates with a chat model while keeping their original ranges.",
         )
         .external(&["chat model"]),
+        Module::new(
+            "rerank.cross_encoder",
+            ("search", "rerank", "candidates", "candidates"),
+            vec![
+                arg("url", STRING, Presence::Required),
+                model(Presence::Optional),
+                choice("format", &["cohere", "tei"], "cohere"),
+                arg("api_key_env", STRING, Presence::Optional),
+                int("candidates", 1, 100, 20),
+                int("max_chars", 1, 100_000, 2000),
+            ],
+            "Reorder the top candidates with a reranking model behind a rerank endpoint (Cohere or Jina /v1/rerank, or TEI /rerank) while keeping their original ranges.",
+        )
+        .external(&["rerank endpoint"]),
         Module::new(
             "context.assemble",
             ("search", "context", "candidates", "context"),
@@ -444,8 +483,14 @@ fn build() -> Vec<ModuleInfo> {
                     Kind::Bool,
                     Presence::Default(Default::Bool(true)),
                 ),
+                // Left out, the context is what it was before the argument existed.
+                arg(
+                    "expand_lines",
+                    Kind::Int { min: 0, max: 1000 },
+                    Presence::Optional,
+                ),
             ],
-            "Assemble source excerpts within the character budget.",
+            "Assemble source excerpts within the character budget, optionally widening each by the lines around it.",
         ),
         Module::new(
             "answer.generate",
@@ -762,7 +807,7 @@ mod tests {
     #[test]
     fn describes_modules_in_registration_order() {
         let names: Vec<_> = modules().iter().map(|module| module.name).collect();
-        assert_eq!(names.len(), 22);
+        assert_eq!(names.len(), 23);
         assert_eq!(names[0], "source.filesystem");
         let text = serde_json::to_string(module("hannoy.index").unwrap()).unwrap();
         assert!(

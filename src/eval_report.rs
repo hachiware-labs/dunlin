@@ -352,6 +352,27 @@ fn confidence_interval(groups: &[Vec<f64>]) -> Option<(f64, f64)> {
     Some((draws[25], draws[974]))
 }
 
+/// The two-sided p-value of the sign test: how likely as uneven a split of `wins` and `losses`
+/// is when either report is as likely to do better on a case. Ties are left out. `None` when
+/// no case differs.
+fn sign_test(wins: usize, losses: usize) -> Option<f64> {
+    let n = wins + losses;
+    if n == 0 {
+        return None;
+    }
+    // ln C(n, i) - n ln 2, summed up to the smaller side, in logarithms so that large n do not
+    // underflow.
+    let mut log_choose = 0.0;
+    let mut tail = 0.0;
+    for i in 0..=wins.min(losses) {
+        if i > 0 {
+            log_choose += ((n - i + 1) as f64).ln() - (i as f64).ln();
+        }
+        tail += (log_choose - n as f64 * std::f64::consts::LN_2).exp();
+    }
+    Some((2.0 * tail).min(1.0))
+}
+
 fn compare(connection: &Connection, refs: &[String]) -> Result<ConfigValue, StageError> {
     let a = report_by_ref(connection, refs.first().map_or("undefined", String::as_str))?;
     let b = report_by_ref(connection, refs.get(1).map_or("undefined", String::as_str))?;
@@ -450,6 +471,10 @@ fn compare(connection: &Connection, refs: &[String]) -> Result<ConfigValue, Stag
                         interval.map_or(ConfigValue::Null, |(low, high)| {
                             ConfigValue::Bool(low <= 0.0 && high >= 0.0)
                         }),
+                    ),
+                    (
+                        "sign_test_p",
+                        sign_test(wins, losses).map_or(ConfigValue::Null, num),
                     ),
                 ]),
             )
@@ -807,6 +832,20 @@ fn read<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tests_signs_exactly() {
+        assert_eq!(sign_test(0, 0), None);
+        // 1 of 1: twice a half, capped at one.
+        assert_eq!(sign_test(1, 0), Some(1.0));
+        // 8 against 2: 2 * (1 + 10 + 45) / 1024.
+        assert!((sign_test(8, 2).unwrap() - 112.0 / 1024.0).abs() < 1e-12);
+        assert_eq!(sign_test(2, 8), sign_test(8, 2));
+        // Large counts neither underflow nor exceed one.
+        let p = sign_test(1500, 1400).unwrap();
+        assert!(p > 0.0 && p < 1.0, "{p}");
+        assert!(sign_test(3000, 0).unwrap() < 1e-300);
+    }
 
     #[test]
     fn draws_the_bootstrap_of_the_javascript_implementation() {

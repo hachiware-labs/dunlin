@@ -296,6 +296,252 @@ fn covered(
     document: &Document,
     recall: &ConfigValue,
 ) -> bool {
+    coverage(
+        target,
+        results,
+        document,
+        number(recall.get("short_evidence_chars")),
+        number(recall.get("min_coverage")),
+    )
+}
+
+/// Whether search results hold any of an evidence range, even too little of it to count.
+fn touched(target: (f64, f64), results: &[&ConfigValue], document: &Document) -> bool {
+    coverage(target, results, document, 0.0, f64::MIN_POSITIVE)
+}
+
+/// The place of the evidence among `results`, from one: the fewest first results that cover it.
+/// `None` when all of them together do not.
+fn rank_in(
+    target: (f64, f64),
+    results: &[&ConfigValue],
+    document: &Document,
+    recall: &ConfigValue,
+) -> Option<usize> {
+    if results.is_empty() || !covered(target, results, document, recall) {
+        return None;
+    }
+    // More results never cover less, so the fewest that cover it can be halved down to.
+    let (mut low, mut high) = (1, results.len());
+    while low < high {
+        let middle = (low + high) / 2;
+        if covered(target, &results[..middle], document, recall) {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    Some(low)
+}
+
+/// `mrr@k` and `ndcg@k` of a case from the rank of each of its evidence items. Each item counts
+/// alike, as in the recall: the reciprocal ranks are averaged over the items, and the ideal
+/// order of nDCG puts every item first. A rank beyond `k`, or none, counts as a miss.
+fn rank_scores(ranks: &[Option<usize>], at: &[usize]) -> Vec<(String, f64)> {
+    let gain = |rank: usize| 1.0 / (rank as f64 + 1.0).log2();
+    let mut scores = Vec::new();
+    for &k in at {
+        let within: Vec<usize> = ranks
+            .iter()
+            .filter_map(|rank| rank.filter(|rank| *rank <= k))
+            .collect();
+        let reciprocal = within.iter().map(|rank| 1.0 / *rank as f64).sum::<f64>();
+        let ideal = (1..=ranks.len().min(k)).map(gain).sum::<f64>();
+        let found = within.iter().map(|rank| gain(*rank)).sum::<f64>();
+        let count = ranks.len().max(1) as f64;
+        scores.push((format!("mrr@{k}"), reciprocal / count));
+        scores.push((
+            format!("ndcg@{k}"),
+            if ideal > 0.0 {
+                (found / ideal).min(1.0)
+            } else {
+                0.0
+            },
+        ));
+    }
+    scores
+}
+
+/// Where each evidence item of a case was kept and lost (docs/retrieval-techniques.md, E2).
+struct Stages {
+    /// The share of the items each stage held: each retrieval module, all of them together
+    /// (`retrieved`), the candidates the context was assembled from, and the context.
+    recall: Vec<(String, f64)>,
+    /// The place of each item among the candidates, from one.
+    rank: Vec<Option<usize>>,
+    /// Why each item the primary recall missed was missed; `None` for an item it found.
+    lost: Vec<Option<&'static str>>,
+}
+
+fn stages(
+    matches: &[Match],
+    outcome: &crate::search_stage::SearchOutcome,
+    recall: &ConfigValue,
+    primary: Option<&[bool]>,
+    primary_is_context: bool,
+) -> Stages {
+    let retrieved: Vec<(&str, Vec<&ConfigValue>)> = outcome
+        .retrieved
+        .iter()
+        .map(|(name, found)| (name.as_str(), found.iter().collect()))
+        .collect();
+    let union: Vec<&ConfigValue> = outcome
+        .retrieved
+        .iter()
+        .flat_map(|(_, found)| found)
+        .collect();
+    let candidates: Vec<&ConfigValue> = outcome.candidates.iter().collect();
+    let context: Vec<&ConfigValue> = outcome.context.iter().collect();
+    let budget_ran_out = matches!(outcome.context_stop, "budget" | "no_truncation");
+    let held = |list: &[&ConfigValue]| -> Vec<bool> {
+        matches
+            .iter()
+            .map(|matched| match (matched.range, &matched.document) {
+                (Some(range), Some(document)) => covered(range, list, document, recall),
+                _ => false,
+            })
+            .collect()
+    };
+    let share = |flags: &[bool]| {
+        flags.iter().filter(|flag| **flag).count() as f64 / flags.len().max(1) as f64
+    };
+    let mut shares = Vec::new();
+    for (name, list) in &retrieved {
+        shares.push(((*name).to_owned(), share(&held(list))));
+    }
+    let in_union = held(&union);
+    let in_candidates = held(&candidates);
+    shares.push(("retrieved".into(), share(&in_union)));
+    shares.push(("candidates".into(), share(&in_candidates)));
+    shares.push(("context".into(), share(&held(&context))));
+    let rank = matches
+        .iter()
+        .map(|matched| match (matched.range, &matched.document) {
+            (Some(range), Some(document)) => rank_in(range, &candidates, document, recall),
+            _ => None,
+        })
+        .collect();
+    let lost = matches
+        .iter()
+        .enumerate()
+        .map(|(index, matched)| {
+            if primary.is_some_and(|flags| flags[index]) {
+                return None;
+            }
+            let (Some(range), Some(document)) = (matched.range, &matched.document) else {
+                return Some("unresolved");
+            };
+            Some(if !in_union[index] {
+                "not_retrieved"
+            } else if !in_candidates[index] {
+                "dropped_by_fusion"
+            } else if !primary_is_context {
+                "ranked_low"
+            } else if touched(range, &context, document) {
+                "truncated"
+            } else if budget_ran_out {
+                // The context takes the candidates in order; the budget ended before this one.
+                "over_budget"
+            } else {
+                "ranked_low"
+            })
+        })
+        .collect();
+    Stages {
+        recall: shares,
+        rank,
+        lost,
+    }
+}
+
+/// The `stages` of a report row.
+fn stages_value(held: &Stages) -> ConfigValue {
+    object(vec![
+        (
+            "recall",
+            ConfigValue::Object(
+                held.recall
+                    .iter()
+                    .map(|(name, share)| (name.clone(), num(*share)))
+                    .collect(),
+            ),
+        ),
+        (
+            "rank",
+            ConfigValue::Array(
+                held.rank
+                    .iter()
+                    .map(|rank| rank.map_or(ConfigValue::Null, |rank| num(rank as f64)))
+                    .collect(),
+            ),
+        ),
+        (
+            "lost",
+            ConfigValue::Array(
+                held.lost
+                    .iter()
+                    .map(|lost| lost.map_or(ConfigValue::Null, text))
+                    .collect(),
+            ),
+        ),
+    ])
+}
+
+/// The `stages` of a report: the mean share each stage held, and how many evidence items were
+/// lost for each reason.
+fn stages_summary(rows: &[Stages]) -> ConfigValue {
+    let mut names: Vec<&str> = Vec::new();
+    for row in rows {
+        for (name, _) in &row.recall {
+            if !names.contains(&name.as_str()) {
+                names.push(name);
+            }
+        }
+    }
+    let recall = names
+        .iter()
+        .map(|name| {
+            let shares: Vec<f64> = rows
+                .iter()
+                .filter_map(|row| {
+                    row.recall
+                        .iter()
+                        .find(|(existing, _)| existing == name)
+                        .map(|(_, share)| *share)
+                })
+                .collect();
+            ((*name).to_owned(), mean(&shares))
+        })
+        .collect();
+    let mut lost: Vec<(String, ConfigValue)> = Vec::new();
+    for reason in [
+        "unresolved",
+        "not_retrieved",
+        "dropped_by_fusion",
+        "ranked_low",
+        "over_budget",
+        "truncated",
+    ] {
+        let count = rows
+            .iter()
+            .flat_map(|row| &row.lost)
+            .filter(|lost| **lost == Some(reason))
+            .count();
+        lost.push((reason.into(), num(count as f64)));
+    }
+    object(vec![
+        ("recall", ConfigValue::Object(recall)),
+        ("lost", ConfigValue::Object(lost)),
+    ])
+}
+
+fn coverage(
+    target: (f64, f64),
+    results: &[&ConfigValue],
+    document: &Document,
+    short_evidence_chars: f64,
+    min_coverage: f64,
+) -> bool {
     let ranges = results
         .iter()
         .filter(|item| {
@@ -310,8 +556,8 @@ fn covered(
         target,
         ranges,
         &document.content,
-        number(recall.get("short_evidence_chars")),
-        number(recall.get("min_coverage")),
+        short_evidence_chars,
+        min_coverage,
     )
 }
 
@@ -347,13 +593,11 @@ pub(crate) fn primary_recall(names: &[String]) -> String {
     if names.iter().any(|name| name == "evidence_recall@context") {
         return "evidence_recall@context".into();
     }
+    // Other scores, such as `mrr@10`, do not decide it.
     let largest = names
         .iter()
-        .map(|name| {
-            name["evidence_recall@".len()..]
-                .parse::<f64>()
-                .unwrap_or(f64::NAN)
-        })
+        .filter_map(|name| name.strip_prefix("evidence_recall@"))
+        .map(|at| at.parse::<f64>().unwrap_or(f64::NAN))
         .fold(f64::NEG_INFINITY, |a, b| {
             if a.is_nan() || b.is_nan() {
                 f64::NAN
@@ -407,6 +651,8 @@ pub(crate) fn method_id(settings: &ConfigValue) -> String {
         "include_generated",
         settings.get("includeGenerated").cloned(),
     );
+    // `metric.evidence_rank` adds scores but judges no case differently, so it is not here:
+    // reports with and without it compare on the scores they share.
     digest("method", &ConfigValue::Object(entries))
 }
 
@@ -512,6 +758,13 @@ pub fn evaluate(
         }
     }
     let at = items(recall.get("at")).to_vec();
+    let rank_at: Vec<usize> = items(settings.get("rank").and_then(|rank| rank.get("at")))
+        .iter()
+        .map(|value| number(Some(value)))
+        .filter(|value| value.is_finite() && *value >= 1.0)
+        .map(|value| value as usize)
+        .collect();
+    let mut stage_rows: Vec<Stages> = Vec::new();
     let mut positions: Vec<(String, ConfigValue)> = Vec::new();
     let mut rows: Vec<ConfigValue> = Vec::new();
     let mut latencies: Vec<f64> = Vec::new();
@@ -620,7 +873,7 @@ pub fn evaluate(
                 None => recovered.push((name, flags)),
             }
         }
-        let scores: Vec<(String, f64)> = recovered
+        let mut scores: Vec<(String, f64)> = recovered
             .iter()
             .map(|(name, flags)| {
                 let total = flags.iter().filter(|flag| **flag).count() as f64;
@@ -633,6 +886,14 @@ pub fn evaluate(
             .iter()
             .find(|(name, _)| *name == primary_name)
             .map(|(_, flags)| flags.clone());
+        let held = stages(
+            &matches,
+            &outcome,
+            &recall,
+            primary.as_deref(),
+            primary_name == "evidence_recall@context",
+        );
+        scores.extend(rank_scores(&held.rank, &rank_at));
         let ranked_metric = at
             .iter()
             .find(|value| matches!(value, ConfigValue::Number(at) if *at >= ranked.len() as f64));
@@ -702,6 +963,8 @@ pub fn evaluate(
         row.push(("context_chars".into(), chars.clone()));
         row.push(("context_stop".into(), text(outcome.context_stop)));
         assign(&mut row, "evidence", evidence);
+        row.push(("stages".into(), stages_value(&held)));
+        stage_rows.push(held);
         rows.push(ConfigValue::Object(row));
         latencies.push(ms);
         context_chars.push(chars);
@@ -854,6 +1117,7 @@ pub fn evaluate(
         ]),
     ));
     report.push(("scores".into(), ConfigValue::Object(scores)));
+    report.push(("stages".into(), stages_summary(&stage_rows)));
     report.push(("diagnostic".into(), ConfigValue::Object(diagnostic)));
     report.push((
         "latency_ms".into(),
@@ -1152,5 +1416,54 @@ mod tests {
         ]);
         let names: Vec<&str> = ordered.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(names, ["50", "95", "99.9"]);
+    }
+
+    fn score(scores: &[(String, f64)], name: &str) -> f64 {
+        scores
+            .iter()
+            .find(|(existing, _)| existing == name)
+            .unwrap()
+            .1
+    }
+
+    #[test]
+    fn scores_ranks_of_each_evidence_item() {
+        // One item, second: MRR a half, nDCG 1 / log2(3).
+        let scores = rank_scores(&[Some(2)], &[1, 10]);
+        assert_eq!(score(&scores, "mrr@1"), 0.0);
+        assert_eq!(score(&scores, "ndcg@1"), 0.0);
+        assert_eq!(score(&scores, "mrr@10"), 0.5);
+        assert!((score(&scores, "ndcg@10") - 1.0 / 3f64.log2()).abs() < 1e-12);
+
+        // Two items, first and missing: each counts half.
+        let scores = rank_scores(&[Some(1), None], &[10]);
+        assert_eq!(score(&scores, "mrr@10"), 0.5);
+        assert!((score(&scores, "ndcg@10") - 1.0 / (1.0 + 1.0 / 3f64.log2())).abs() < 1e-12);
+
+        // Two items in one first chunk are as good as it gets.
+        let scores = rank_scores(&[Some(1), Some(1)], &[10]);
+        assert_eq!(score(&scores, "ndcg@10"), 1.0);
+        assert_eq!(score(&scores, "mrr@10"), 1.0);
+    }
+
+    #[test]
+    fn decides_the_primary_recall_among_other_scores() {
+        let names = |list: &[&str]| {
+            list.iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            primary_recall(&names(&[
+                "mrr@10",
+                "evidence_recall@3",
+                "evidence_recall@10"
+            ])),
+            "evidence_recall@10"
+        );
+        assert_eq!(
+            primary_recall(&names(&["ndcg@10", "evidence_recall@context"])),
+            "evidence_recall@context"
+        );
     }
 }

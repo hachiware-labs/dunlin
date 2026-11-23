@@ -410,6 +410,8 @@ const recallArgs = z.strictObject({
   unresolved: z.literal('count_as_missed'),
 });
 const latencyArgs = z.strictObject({ percentiles: z.array(z.number().int().min(1).max(100)).min(1) });
+// metric.evidence_rank came after the JavaScript implementation; the reference follows the Rust one.
+const rankArgs = z.strictObject({ at: z.array(z.number().int().min(1).max(100)).min(1).optional() }).nullish();
 
 function validateEvaluation(config, issue) {
   if (config['eval-data'] !== undefined && (!isMapping(config['eval-data'])
@@ -434,8 +436,9 @@ function validateEvaluation(config, issue) {
   for (const [i, item] of settings.modules.entries()) {
     const path = ['eval', 'modules', i];
     const name = item?.use;
-    const schema = name === 'metric.evidence_recall' ? recallArgs : name === 'metric.latency' ? latencyArgs : null;
-    if (!schema) { issue('MODULE_UNKNOWN', path, 'metric.evidence_recall or metric.latency', 'Use a supported evaluation module.', { received: name }); continue; }
+    const schema = name === 'metric.evidence_recall' ? recallArgs : name === 'metric.latency' ? latencyArgs
+      : name === 'metric.evidence_rank' ? rankArgs : null;
+    if (!schema) { issue('MODULE_UNKNOWN', path, 'metric.evidence_recall, metric.latency or metric.evidence_rank', 'Use a supported evaluation module.', { received: name }); continue; }
     if (seen.has(name)) issue('ROLE_DUPLICATE', path, 'A single ' + name, 'Remove duplicates.', { module: name });
     seen.add(name);
     for (const key of Object.keys(item)) {
@@ -446,6 +449,7 @@ function validateEvaluation(config, issue) {
       for (const failure of checked.error.issues) issue(failure.code === 'unrecognized_keys' ? 'ARG_UNKNOWN' : 'ARG_TYPE',
         [...path, 'with', ...failure.path], 'Valid ' + name + ' arguments', 'See section 5.5.', { module: name });
     } else if (name === 'metric.evidence_recall') output.recall = checked.data;
+    else if (name === 'metric.evidence_rank') output.rank = { at: checked.data?.at ?? [10] };
     else output.percentiles = checked.data.percentiles;
   }
   for (const name of ['metric.evidence_recall', 'metric.latency']) {

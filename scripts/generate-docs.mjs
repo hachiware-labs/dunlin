@@ -110,9 +110,10 @@ const descriptions = {
   'retrieval.keyword': 'キーワードの一致を順位付けして取得します。',
   'retrieval.vector': '問い合わせの埋め込みとのコサイン類似度でチャンクを順位付けします。',
   'hannoy.search': 'hannoy の HNSW 索引から候補を取得します。',
-  'fusion.rrf': '複数の順位付き候補を Reciprocal Rank Fusion で統合します。',
+  'fusion.rrf': '複数の順位付き候補を Reciprocal Rank Fusion で統合します。各検索の順位は、その検索モジュールの `weight`（省くと1）の重みで数えます。',
   'rerank.model': 'チャットモデルで上位候補を並べ替えます。原文上の範囲は変えません。',
-  'context.assemble': '文字数の予算内で出典の抜粋を組み立てます。',
+  'rerank.cross_encoder': 'リランカー（cross-encoder）で上位候補を並べ替えます。`format: cohere` は Cohere・Jina 形式の `/v1/rerank`（llama.cpp、vLLM、Infinity も同じ形式）、`tei` は Text Embeddings Inference の `/rerank` に送ります。キーは `api_key_env` に書いた環境変数から読みます。原文上の範囲は変えません。',
+  'context.assemble': '文字数の予算内で出典の抜粋を組み立てます。`expand_lines` を書くと、各候補を前後の行まで広げて文脈に入れます（検索結果の範囲は変えません）。',
   'answer.generate': '渡した文脈に基づく回答を生成します。',
 };
 
@@ -142,7 +143,9 @@ function moduleGuide() {
       '| --- | --- | --- |',
       '| `metric.evidence_recall` | `at` は `context` または1〜100の整数の配列。`short_evidence_chars` は正の整数、`min_coverage` は0〜1、`unresolved` は `count_as_missed` | `[context, 10]`、`40`、`0.8`、`count_as_missed` |',
       '| `metric.latency` | `percentiles` は1〜100の整数の配列 | `[50, 95, 99]` |',
+      '| `metric.evidence_rank`（省略可） | `at` は1〜100の整数の配列。省くと `[10]`。根拠ごとの順位から `mrr@k` と `ndcg@k` を出す | 作られない |',
     ].join('\n'),
+    '`index.vector` と `hannoy.index` の `document_prefix`、`retrieval.vector` と `hannoy.search` の `query_prefix` は、埋め込む文の先頭に付ける文字列です（`passage: ` と `query: ` など）。検索モジュールの `weight` は `fusion.rrf` での重みです。どれも省くと、以前と同じ設定IDのままです。',
     '## Wiki・PARA のモジュール',
     [
       '| 区切り | モジュール | 主な引数と初期値 |',

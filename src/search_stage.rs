@@ -74,6 +74,12 @@ pub struct SearchOutcome {
     pub context: Vec<ConfigValue>,
     /// `exhausted`, `candidate_limit`, `budget` or `no_truncation`.
     pub context_stop: &'static str,
+    /// The evidence each retrieval module returned, by module name, in plan order. A name that
+    /// repeats gets `#2`, `#3` and so on. Evaluation finds where evidence was lost from these.
+    pub retrieved: Vec<(String, Vec<ConfigValue>)>,
+    /// The evidence of the candidates that `context.assemble` received, in their final order:
+    /// after fusion and reranking, before the budget.
+    pub candidates: Vec<ConfigValue>,
 }
 
 /// `vectors.json` of an open index, read once.
@@ -320,7 +326,10 @@ pub fn run(
     };
     let mut query = request.query.clone();
     let mut results: Vec<Found> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+    let mut weights: Vec<f64> = Vec::new();
     let mut current: Option<Found> = None;
+    let mut candidates: Vec<ConfigValue> = Vec::new();
     let mut assembled: Option<Assembled> = None;
     for module in plan {
         cancel
@@ -353,6 +362,8 @@ pub fn run(
                 }
                 "retrieval.keyword" => {
                     let found = keyword(database, &query, wanted(), request, cancel)?;
+                    names.push(retrieval_name(&names, name));
+                    weights.push(weight(&args));
                     results.push(found.clone());
                     current = Some(found);
                 }
@@ -374,15 +385,27 @@ pub fn run(
                         },
                         cancel,
                     )?;
+                    names.push(retrieval_name(&names, name));
+                    weights.push(weight(&args));
                     results.push(found.clone());
                     current = Some(found);
                 }
-                "fusion.rrf" => current = Some(fuse(&results, number(field(&args, "k")), max)),
+                "fusion.rrf" => {
+                    current = Some(fuse(&results, &weights, number(field(&args, "k")), max));
+                }
                 "rerank.model" => {
                     let found = current.as_mut().ok_or_else(|| {
                         StageError::plain("rerank.model needs candidates from a retrieval module.")
                     })?;
                     rerank(database, found, &query, &args, request, host, cancel)?;
+                }
+                "rerank.cross_encoder" => {
+                    let found = current.as_mut().ok_or_else(|| {
+                        StageError::plain(
+                            "rerank.cross_encoder needs candidates from a retrieval module.",
+                        )
+                    })?;
+                    cross_encoder(database, found, &query, &args, host, cancel)?;
                 }
                 "context.assemble" => {
                     let found = current.as_ref().ok_or_else(|| {
@@ -390,6 +413,7 @@ pub fn run(
                             "context.assemble needs candidates from a retrieval module.",
                         )
                     })?;
+                    candidates = found.hits.iter().map(|hit| hit.evidence.clone()).collect();
                     assembled = Some(assemble(
                         database,
                         found,
@@ -424,7 +448,40 @@ pub fn run(
             .map(|item| item.evidence.clone())
             .collect(),
         context_stop: assembled.stop,
+        retrieved: names
+            .into_iter()
+            .zip(results)
+            .map(|(name, found)| {
+                (
+                    name,
+                    found.hits.into_iter().map(|hit| hit.evidence).collect(),
+                )
+            })
+            .collect(),
+        candidates,
     })
+}
+
+/// The name a retrieval module's result is reported under: its module name, with `#2`, `#3`
+/// and so on when the plan uses the module again.
+fn retrieval_name(names: &[String], name: &str) -> String {
+    let count = names
+        .iter()
+        .filter(|existing| existing.split('#').next() == Some(name))
+        .count();
+    if count == 0 {
+        name.to_owned()
+    } else {
+        format!("{name}#{}", count + 1)
+    }
+}
+
+/// The weight a retrieval module's ranks have in `fusion.rrf`: its `weight`, or one.
+fn weight(args: &ConfigValue) -> f64 {
+    match field(args, "weight") {
+        Some(ConfigValue::Number(value)) => *value,
+        _ => 1.0,
+    }
 }
 
 fn keyword(
@@ -604,8 +661,10 @@ fn vector(search: &VectorSearch<'_>, cancel: &Cancellation) -> Result<Found, Sta
             total,
         });
     }
+    // A model that tells queries from documents by a prefix, such as `query: `, gets it here.
+    let prefix = string_field(args, "query_prefix").unwrap_or_default();
     let needle = Embedder::new(settings)
-        .embed(&[query.to_owned()], host, cancel)?
+        .embed(&[format!("{prefix}{query}")], host, cancel)?
         .pop()
         .unwrap_or_default();
     cancel.check().map_err(|_| StageError::aborted())?;
@@ -755,11 +814,13 @@ fn hannoy(
         .collect()
 }
 
-/// `fuseResults`: reciprocal rank fusion of every retrieval so far.
-fn fuse(results: &[Found], k: f64, max: f64) -> Found {
+/// `fuseResults`: reciprocal rank fusion of every retrieval so far. Each retrieval's ranks count
+/// by its weight; with every weight one, this is the fusion the JavaScript implementation did.
+fn fuse(results: &[Found], weights: &[f64], k: f64, max: f64) -> Found {
     let mut fused: Vec<Hit> = Vec::new();
     let mut keys: Vec<String> = Vec::new();
-    for result in results {
+    for (position, result) in results.iter().enumerate() {
+        let weight = weights.get(position).copied().unwrap_or(1.0);
         for (i, hit) in result.hits.iter().enumerate() {
             let evidence = &hit.evidence;
             let source = field(evidence, "source");
@@ -792,7 +853,7 @@ fn fuse(results: &[Found], k: f64, max: f64) -> Found {
                     fused.len() - 1
                 }
             };
-            fused[index].score += 1.0 / (k + 1.0 + i as f64);
+            fused[index].score += weight / (k + 1.0 + i as f64);
         }
     }
     let total = results
@@ -871,6 +932,139 @@ fn rerank(
     hits.extend(found.hits[count..].iter().cloned());
     found.hits = hits;
     Ok(())
+}
+
+/// `rerank.cross_encoder`: a reranking model scores the first `candidates` hits against the query
+/// through a rerank endpoint, and they are put in the order of the scores. The rest keep their
+/// places after them. The ranges and the scores the search returns stay as they were.
+///
+/// `cohere` is the request of Cohere and Jina (`/v1/rerank`), which llama.cpp, vLLM and Infinity
+/// also serve: `{ model, query, documents, top_n }`, answered by `{ results: [{ index,
+/// relevance_score }] }`. `tei` is the request of Text Embeddings Inference (`/rerank`):
+/// `{ query, texts }`, answered by `[{ index, score }]`.
+fn cross_encoder(
+    database: &KnowledgeBase,
+    found: &mut Found,
+    query: &str,
+    args: &ConfigValue,
+    host: &dyn SearchHost,
+    cancel: &Cancellation,
+) -> Result<(), StageError> {
+    let count = (number(field(args, "candidates")).max(0.0) as usize).min(found.hits.len());
+    if count < 2 {
+        return Ok(());
+    }
+    let max_chars = number(field(args, "max_chars")).max(1.0) as usize;
+    let mut texts = Vec::with_capacity(count);
+    for hit in &found.hits[..count] {
+        let content = database
+            .read(&evidence_of(&hit.evidence)?, cancel)
+            .map_err(StageError::native)?
+            .content;
+        // The heading tells the model what a chunk is about when its text does not say.
+        let passage = format!("{}\n{content}", hit.title);
+        texts.push(passage.chars().take(max_chars).collect::<String>());
+    }
+    let tei = string_field(args, "format") == Some("tei");
+    let body = cross_encoder_body(query, texts, string_field(args, "model"), tei);
+    let api_key = match string_field(args, "api_key_env") {
+        Some(name) => Some(std::env::var(name).map_err(|_| {
+            StageError::coded(
+                "MODEL_KEY_REQUIRED",
+                format!("Set the environment variable {name} for rerank.cross_encoder."),
+                2,
+            )
+        })?),
+        None => None,
+    };
+    let endpoint = crate::embed::Endpoint {
+        url: string_field(args, "url").unwrap_or_default().to_owned(),
+        api_key,
+        max_input_bytes: None,
+        label: "rerank endpoint".into(),
+    };
+    let response = crate::embed::post_json(
+        &crate::embed::model_agent(),
+        &endpoint,
+        &body.to_js_json(),
+        host,
+        cancel,
+    )?;
+    let order = cross_encoder_order(&response, tei, count)?;
+    let mut hits: Vec<Hit> = order.iter().map(|&i| found.hits[i].clone()).collect();
+    hits.extend(found.hits[count..].iter().cloned());
+    found.hits = hits;
+    Ok(())
+}
+
+/// The request of `rerank.cross_encoder` in the endpoint's format.
+fn cross_encoder_body(
+    query: &str,
+    texts: Vec<String>,
+    model: Option<&str>,
+    tei: bool,
+) -> ConfigValue {
+    let count = texts.len();
+    let texts = ConfigValue::Array(texts.iter().map(|passage| text(passage)).collect());
+    let mut body = Vec::new();
+    if tei {
+        body.push(("query".to_owned(), text(query)));
+        body.push(("texts".to_owned(), texts));
+        body.push(("truncate".to_owned(), ConfigValue::Bool(true)));
+    } else {
+        assign(&mut body, "model", model.map(text));
+        body.push(("query".to_owned(), text(query)));
+        body.push(("documents".to_owned(), texts));
+        body.push(("top_n".to_owned(), js_number(count as f64)));
+    }
+    ConfigValue::Object(body)
+}
+
+/// The order of the first `count` candidates from a rerank endpoint's answer: the scored ones by
+/// their score, then any it left out, each in the order the search gave them.
+fn cross_encoder_order(
+    response: &serde_json::Value,
+    tei: bool,
+    count: usize,
+) -> Result<Vec<usize>, StageError> {
+    let invalid = || {
+        StageError::coded(
+            "INVALID_MODEL_OUTPUT",
+            "The rerank endpoint must return a score for candidates by their index.",
+            1,
+        )
+    };
+    let results = if tei {
+        response.as_array()
+    } else {
+        response
+            .get("results")
+            .and_then(serde_json::Value::as_array)
+    }
+    .ok_or_else(invalid)?;
+    let mut scores: Vec<Option<f64>> = vec![None; count];
+    for result in results {
+        let index = result
+            .get("index")
+            .and_then(serde_json::Value::as_u64)
+            .map(|index| index as usize)
+            .filter(|index| *index < count)
+            .ok_or_else(invalid)?;
+        let score = result
+            .get(if tei { "score" } else { "relevance_score" })
+            .and_then(serde_json::Value::as_f64)
+            .filter(|score| score.is_finite())
+            .ok_or_else(invalid)?;
+        scores[index] = Some(score);
+    }
+    let mut order: Vec<usize> = (0..count).collect();
+    order.sort_by(|a, b| match (scores[*a], scores[*b]) {
+        (Some(a), Some(b)) => b.partial_cmp(&a).unwrap_or(std::cmp::Ordering::Equal),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    Ok(order)
 }
 
 /// Two evidence ranges of the same revision that overlap.
@@ -971,6 +1165,104 @@ fn merged(hits: &[Hit]) -> Vec<Hit> {
     groups
 }
 
+/// `expand_lines` of `context.assemble`: each candidate grows by `lines` lines before and after
+/// it, within its document, so that a small chunk that matched brings the text around it into
+/// the context. Search results keep the ranges they matched with; only the context grows. A
+/// candidate whose document has changed since the index was built is left as it is.
+fn expand(
+    database: &KnowledgeBase,
+    hits: &[Hit],
+    lines: usize,
+    cancel: &Cancellation,
+) -> Result<Vec<Hit>, StageError> {
+    // Each document once: its version, the byte offset where each line starts, and its length.
+    type Lines = (String, Vec<usize>, usize);
+    let mut documents: Vec<(String, Option<Lines>)> = Vec::new();
+    let mut expanded = Vec::with_capacity(hits.len());
+    for hit in hits {
+        cancel.check().map_err(|_| StageError::aborted())?;
+        let source = field(&hit.evidence, "source");
+        let part = |name: &str| {
+            source
+                .and_then(|source| string_field(source, name))
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let key = document_id(&hit.evidence);
+        if !documents.iter().any(|(existing, _)| *existing == key) {
+            let reference = crate::DocumentRef {
+                source_id: part("sourceId"),
+                object_id: part("objectId"),
+            };
+            let loaded = database
+                .get_document(&reference, cancel)
+                .map_err(StageError::native)?
+                .map(|document| {
+                    let mut starts = vec![0];
+                    starts.extend(
+                        document
+                            .content
+                            .match_indices('\n')
+                            .map(|(index, _)| index + 1)
+                            .filter(|&index| index < document.content.len()),
+                    );
+                    (
+                        document.evidence.source.version,
+                        starts,
+                        document.content.len(),
+                    )
+                });
+            documents.push((key.clone(), loaded));
+        }
+        let Some((_, Some((version, starts, length)))) =
+            documents.iter().find(|(existing, _)| *existing == key)
+        else {
+            expanded.push(hit.clone());
+            continue;
+        };
+        if *version != part("version") {
+            expanded.push(hit.clone());
+            continue;
+        }
+        let bound = |range: &str, name: &str| {
+            number(field(&hit.evidence, range).and_then(|range| field(range, name)))
+        };
+        let (start, end) = (bound("range", "startLine"), bound("range", "endLine"));
+        if !(start >= 1.0 && end >= start) {
+            expanded.push(hit.clone());
+            continue;
+        }
+        let (start, end) = (start as usize, end as usize);
+        let last = starts.len();
+        let new_start = start.saturating_sub(lines).max(1);
+        let new_end = (end + lines).min(last);
+        let line_start = |line: usize| starts[line - 1];
+        let line_end = |line: usize| starts.get(line).copied().unwrap_or(*length);
+        let mut evidence = hit.evidence.clone();
+        set_number(&mut evidence, &["range", "startLine"], new_start as f64);
+        set_number(&mut evidence, &["range", "endLine"], new_end as f64);
+        if truthy(field(&hit.evidence, "byteRange")) {
+            let byte_start = if new_start < start {
+                line_start(new_start) as f64
+            } else {
+                bound("byteRange", "start")
+            };
+            let byte_end = if new_end > end {
+                line_end(new_end) as f64
+            } else {
+                bound("byteRange", "end")
+            };
+            set_number(&mut evidence, &["byteRange", "start"], byte_start);
+            set_number(&mut evidence, &["byteRange", "end"], byte_end);
+        }
+        expanded.push(Hit {
+            evidence,
+            ..hit.clone()
+        });
+    }
+    Ok(expanded)
+}
+
 struct ContextItem {
     evidence: ConfigValue,
     text: String,
@@ -1006,10 +1298,16 @@ fn assemble(
     } else {
         "exhausted"
     };
+    let expanded = match field(args, "expand_lines") {
+        Some(ConfigValue::Number(lines)) if *lines >= 1.0 => {
+            expand(database, &found.hits, *lines as usize, cancel)?
+        }
+        _ => found.hits.clone(),
+    };
     let candidates = if flag("merge_overlaps") {
-        merged(&found.hits)
+        merged(&expanded)
     } else {
-        found.hits.clone()
+        expanded
     };
     let mut context: Vec<ContextItem> = Vec::new();
     for hit in &candidates {
@@ -1561,6 +1859,53 @@ mod tests {
     }
 
     #[test]
+    fn asks_a_rerank_endpoint_and_orders_by_its_scores() {
+        let texts = vec!["a".to_owned(), "b".to_owned(), "c".to_owned()];
+        assert_eq!(
+            cross_encoder_body("q", texts.clone(), Some("bge"), false).to_js_json(),
+            r#"{"model":"bge","query":"q","documents":["a","b","c"],"top_n":3}"#
+        );
+        assert_eq!(
+            cross_encoder_body("q", texts, Some("bge"), true).to_js_json(),
+            r#"{"query":"q","texts":["a","b","c"],"truncate":true}"#
+        );
+
+        let cohere: serde_json::Value = serde_json::from_str(
+            r#"{"results":[{"index":2,"relevance_score":0.9},{"index":0,"relevance_score":0.1},{"index":1,"relevance_score":0.5}]}"#,
+        )
+        .unwrap();
+        assert_eq!(cross_encoder_order(&cohere, false, 3).unwrap(), [2, 1, 0]);
+        // An endpoint that answers only its best keeps the others after it, in search order.
+        let partial: serde_json::Value =
+            serde_json::from_str(r#"[{"index":1,"score":3.5}]"#).unwrap();
+        assert_eq!(cross_encoder_order(&partial, true, 3).unwrap(), [1, 0, 2]);
+        let outside: serde_json::Value =
+            serde_json::from_str(r#"[{"index":3,"score":1}]"#).unwrap();
+        assert_eq!(
+            cross_encoder_order(&outside, true, 3).unwrap_err().code,
+            Some("INVALID_MODEL_OUTPUT")
+        );
+        assert!(cross_encoder_order(&cohere, true, 3).is_err());
+    }
+
+    #[test]
+    fn names_repeated_retrievals_apart() {
+        let mut names = Vec::new();
+        for name in ["retrieval.keyword", "retrieval.vector", "retrieval.keyword"] {
+            let named = retrieval_name(&names, name);
+            names.push(named);
+        }
+        assert_eq!(
+            names,
+            [
+                "retrieval.keyword",
+                "retrieval.vector",
+                "retrieval.keyword#2"
+            ]
+        );
+    }
+
+    #[test]
     fn fuses_ranks_and_merges_overlaps() {
         let keyword = Found {
             hits: vec![hit("a", 1, 2, 3.0), hit("b", 1, 2, 2.0)],
@@ -1570,11 +1915,22 @@ mod tests {
             hits: vec![hit("b", 1, 2, 0.9), hit("c", 1, 2, 0.8)],
             total: 5,
         };
-        let fused = fuse(&[keyword, vector], 60.0, 10.0);
+        let both = [keyword, vector];
+        let fused = fuse(&both, &[], 60.0, 10.0);
         let order: Vec<&str> = fused.hits.iter().map(|hit| hit.title.as_str()).collect();
         assert_eq!(order, ["b", "a", "c"]);
         assert_eq!(fused.total, 5);
         assert!((fused.hits[0].score - (1.0 / 62.0 + 1.0 / 61.0)).abs() < 1e-15);
+
+        // With the vector search weighed at nothing, the keyword search's order is kept.
+        let weighted = fuse(&both, &[1.0, 0.0], 60.0, 10.0);
+        let order: Vec<&str> = weighted.hits.iter().map(|hit| hit.title.as_str()).collect();
+        assert_eq!(order, ["a", "b", "c"]);
+        assert!((weighted.hits[1].score - 1.0 / 62.0).abs() < 1e-15);
+        // Twice the weight on the vector search lifts its second hit above the keyword's second.
+        let weighted = fuse(&both, &[1.0, 2.0], 60.0, 10.0);
+        let order: Vec<&str> = weighted.hits.iter().map(|hit| hit.title.as_str()).collect();
+        assert_eq!(order, ["b", "c", "a"]);
 
         let joined = merged(&[
             hit("a", 1, 3, 1.0),

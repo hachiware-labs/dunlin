@@ -18,6 +18,13 @@ app ─question→ Knowledge-Nest ─search→ evidence ─→ answering model �
 
 Unlike MCP, the answer is written by a model that Knowledge-Nest calls. Your app sends one question and receives one answer.
 
+## Compared with other ways
+
+- **Rather than building it with LangChain and the like.** No code to write: a configuration file and commands bring it up. The answer API takes the OpenAI SDK as it is, so an existing app only changes where it connects.
+- **No evidence, no answer.** A question with no evidence in the documents is declined rather than answered. An answer's sources point to the version of the document and the range in the original.
+- **Rather than a no-code RAG app.** Documents and index stay in a folder on your machine. With a local Ollama as the model, documents never leave it. When you open it to other machines, add authentication and limit who connects.
+- **Measure and optimize what answers stand on.** An answer is only as good as the evidence found. The search is the same as MCP's, so measure recall and optimize the settings.
+
 ## 1 Prepare an answering model
 
 This page uses `qwen3:4b` on a local Ollama. Start Ollama and pull the model with `ollama pull qwen3:4b`.

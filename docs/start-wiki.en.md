@@ -30,6 +30,17 @@ Knowledge-Nest adds source checks to this. Each page keeps the documents it was 
 
 People do not edit pages directly. To change a page, you instruct the AI to change it. That is how every page keeps its sources.
 
+## Compared with other ways
+
+Have a chat summarize your documents, and the answer is gone when the chat ends. Have a notes app's AI write, and you no longer know what came from the documents. Knowledge-Nest's Wiki piles up what it read as pages with sources, and follows the documents when they change.
+
+- **Knowledge piles up.** A new document extends the pages it concerns. A document with nothing new is recorded as having nothing to add, and does not pad the Wiki. An answer worth keeping becomes a page with `nest save-answer`.
+- **When a document is revised, only its pages are rewritten.** Ingest a new version, and the AI rewrites just the pages written from that document. `nest lint` points out pages not yet brought up to date.
+- **A program doubts what the AI wrote.** At every ingest, the numbers, dates and quotations of a page are checked against its sources. `nest lint --content` names contradictions between pages, terms with no page, and even questions to look into next and documents to look for.
+- **What people know is kept as a source too.** Field knowledge that is in no document, such as "we actually replace it every three months", is recorded with who said it, and the page is fixed with it as a source. Each change the AI makes is recorded as a job, and `nest undo` takes it back. Originals are never changed.
+- **Knowledge stays as files on your machine.** Pages are HTML files in `wiki/`, with a contents page (`index.html`) and a log of the work (`log.html`). They open without a server and move with the folder. People use the pages in a browser, and agents the same pages over MCP.
+- **Collect from pages behind a sign-in, and from X.** Sign in once in nest's own browser, and internal pages can be ingested. X bookmarks come in one post at a time, with the pages they link to and the posts they quote.
+
 ## 1 Prepare a writing model
 
 This page uses `qwen3:4b` on a local Ollama.

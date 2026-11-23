@@ -43,6 +43,16 @@ Commands, screen, and source rules are the same as the Wiki. Build a Wiki for an
 - You want each project's documents apart from those of work you own long-term
 - You want to put away finished projects' documents without deleting them
 
+## Compared with other ways
+
+PARA takes effort to keep up. Each new document needs a decision about which project it serves, and each finished project needs putting away; that effort is where PARA tends to fall apart. Knowledge-Nest hands that effort to the AI and to commands, and leaves setting the frame to you.
+
+- **Not just filed, but with how to use it.** A note says how this document serves this project. Unlike filing that stops at a folder, you can tell later why it is there.
+- **You set the frame, the AI keeps to it.** The AI can only use the projects and areas you listed in `rules.md`. A note aimed anywhere else is not saved, and its document stays pending; list the project and run `nest ingress --pending` to place it.
+- **A project's folder is ready to use.** A copy of each document sits in `資料/` beside its note, so opening a project's folder gives you the notes and the originals together.
+- **Put away in one step, and bring back any time.** `nest archive` moves a project's notes, document copies, links from other notes and its line of `rules.md` to Archives together; `--restore` or `nest undo` brings them back. `nest lint` points out projects past their deadline.
+- **Agents look things up in the context of your current work.** Notes are served over MCP too, so ask Claude "which parts do we replace in next month's work?" and it answers from that project's notes. Checks against sources, undo and the browser screen are shared with the Wiki.
+
 ## 1 Prepare a writing model
 
 This page uses `qwen3:4b` on a local Ollama.

@@ -17,7 +17,7 @@ This is the entrance for first-time users. Pick what you want to do and go to it
 - **Wiki and PARA both organize documents, for different ends.** The Wiki builds knowledge everyone uses, by what it is about; PARA organizes the documents of your own work, by which project they serve.
 - **Always with sources.** Search results, answers and pages all point back to the original documents.
 
-How Knowledge-Nest differs from other tools, and how the four forms differ, is in [How the four forms differ](../README.en.md#how-the-four-forms-differ) in the README.
+How Knowledge-Nest differs from other tools, and how the four forms differ, is in [How the four forms differ](forms.en.md) and [Where Knowledge-Nest fits](comparison.md) (Japanese).
 
 ## 2 What you need
 

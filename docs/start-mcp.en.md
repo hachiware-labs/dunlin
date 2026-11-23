@@ -21,6 +21,12 @@ You ─question→ agent ─knowledge.search→ Knowledge-Nest ─→ passages a
 
 Knowledge-Nest returns evidence, not answers. The agent's own model writes the answer.
 
+## Compared with other ways
+
+- **Rather than letting the agent read the folder itself.** PDF, Word, Excel and scanned documents are searchable by their Japanese words too. Only the passages that answer come back, with document and line, within a set number of characters, so thousands of documents do not fill the agent's context.
+- **Rather than a vector-only search server.** Japanese keyword search, strong where you need the exact word (part numbers, clause numbers, technical terms), runs without an embedding model. Add vector search, which handles rephrasing, for a hybrid.
+- **Measured, and optimized.** Register questions with the quotes that answer them (an AI can draft the questions too), and measure the share of evidence search finds. Try candidate settings, such as chunk sizes or the number of results, all at once, rank them, and switch serving only to the one you checked. With search you build yourself, you would set up this evaluation and tuning separately. [Measure and optimize search](guide.en.md)
+
 ## 1 Create a project and search
 
 Say your documents are in `./manuals`. If you have none at hand, use `examples/manuals` from the repository.

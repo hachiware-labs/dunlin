@@ -59,7 +59,7 @@ cd para
 
 `init para` は、`site/` の下に4分類のディレクトリと、決まり（`rules.md`）を作ります。
 
-次に、`rules.md` の `## Projects` に、いま進めている取り組みを、`## Areas` に、続けて責任を持つ領域を書きます。AI はここにない取り組みや領域を作りません。期限は `YYYY-MM-DD` で書くと、過ぎたときに `nest lint` が知らせます。
+次に、`rules.md` の `## Projects` に、いま進めている取り組みを、`## Areas` に、続けて責任を持つ領域を書きます。AI はここにない取り組みや領域を作りません。期限は `YYYY-MM-DD` で書くと、過ぎたときに `nest lint` が知らせます。`rules.md` のうち AI が書き足すのは `## Resources` の話題だけで、ほかはあなたが書く部分です（`## Archives` には `nest archive` が取り組みの行を移します）。
 
 ```markdown
 ## Projects

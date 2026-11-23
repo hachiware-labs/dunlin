@@ -59,7 +59,7 @@ cd para
 
 `init para` creates a folder for each of the four categories under `site/`, and the rules (`rules.md`).
 
-Then list the projects you are running under `## Projects` of `rules.md`, and the areas you are responsible for under `## Areas`. The AI makes no project or area that is not listed there. Write a deadline as `YYYY-MM-DD`, and `nest lint` tells you when it has passed.
+Then list the projects you are running under `## Projects` of `rules.md`, and the areas you are responsible for under `## Areas`. The AI makes no project or area that is not listed there. Write a deadline as `YYYY-MM-DD`, and `nest lint` tells you when it has passed. Of `rules.md`, the AI adds only the topics under `## Resources`; the rest is yours to write (`nest archive` moves a project's line to `## Archives`).
 
 ```markdown
 ## Projects

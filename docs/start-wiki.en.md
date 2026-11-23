@@ -116,6 +116,8 @@ nest instruct --persistent "Write procedures as numbered steps"
 
 List the rules with `nest rules`. On the screen, open a page and write in the right-hand box to do the same.
 
+The AI gives each page a category when it ingests, and adds a new one under `## 分類` (categories) of `rules.md` when none fits. Adding is all it does. When similar categories pile up, edit `rules.md` yourself to merge or rename them. `nest lint` points out pages whose category is no longer listed; move them with `nest instruct <page> --category <category>`. `nest lint --content` names pages whose category does not fit. [Details](wiki.md#分類)
+
 ## 7 Check
 
 ```sh

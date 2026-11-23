@@ -72,6 +72,7 @@
 - `verify` に、分類のないページ（`NO_CATEGORY`）と、`rules.md` にない分類のページ（`UNKNOWN_CATEGORY`）の指摘を足しました。`--content` では、AI が分類の合っていないページと合っている分類を挙げます（`CATEGORY_MISMATCH`）。画面ではこの指摘から分類を付け替えられます。
 - Wiki の目録（`wiki/index.html`）と `serve` の画面の左の列を、`wiki/` と `raw/` の2つの見出しにしました。ページは `wiki/` のフォルダ名（`concepts/`、`sources/` など）のとおりに、原本は `raw/` のフォルダとファイルのとおりに並びます。原本にはそれぞれ **反映済み**・**未反映**・**未取り込み** が付きます。これまでは「考え方・用語（concepts）」のように言い換えたフォルダ名と、取り込んだときのファイル名で並べていました。
 - `ingress` に、既存のページを書き直す形を足しました。`wiki.write` の `update: rewrite` では、AI がページの一覧から資料が関係するページを選び、その本文と引用箇所を読んで書き直します。外れた文は `STATEMENTS_REMOVED` の警告と作業の結果に出ます。`update: append` は、これまでどおり文を足すだけです。`update` を省くと、Ollama では `append`、OpenAI と Strata では `rewrite` になります。
+- `init wiki` と `init para` が作る `rules.md` に、どこを人が書き、どこを AI が書き足すかを書くようにしました。Wiki では AI は `## 分類` に足すだけで、まとめる・名前を変えるのは人が行い、外れたページは `lint` の `UNKNOWN_CATEGORY` から付け替えます。PARA では AI が書き足すのは `## Resources` の話題だけです。Wiki と PARA の入門にも同じことを書きました。既存のプロジェクトの `rules.md` は変わりません。
 - README を CLI 利用者向けにし、Node.js API、検索評価、Wiki・PARA、設定や運用のガイドを整備しました。
 
 ### 以前のプロジェクトから移行する

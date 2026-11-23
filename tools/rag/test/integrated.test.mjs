@@ -244,9 +244,9 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
     calls.push(input);
     if (pauseModel) await pauseModel.promise;
     const fact = { text: '交換手順を確認する。', citations: [{ id: 1, quote: '交換手順を確認する。' }] };
-    const id = input.messages[0].content.includes('Projects/') ? 'Projects/maintenance' : 'maintenance';
+    const id = 'places' in JSON.parse(input.messages[1].content) ? 'Resources/保全/maintenance' : 'maintenance';
     // A page an ingest writes has a category; a revision's does not.
-    const category = input.format.properties.conflict ? {} : { category: id.startsWith('Projects/') ? '' : '保全' };
+    const category = input.format.properties.conflict ? {} : { category: id.startsWith('Resources/') ? '' : '保全' };
     let result = input.format.properties.pages ? { pages: [{ id, title: '交換手順', ...category, markdown: '交換手順を確認する。', sources: [1] }],
       ...(input.format.properties.conflict && { conflict: '' }) } : { facts: [fact] };
     if (input.format.properties.conflict) {
@@ -404,10 +404,10 @@ test('writes and verifies a Wiki page with an explicitly configured model', { ti
   await writeFile(paraPath, stringify(para));
   const paraRun = async (...args) => JSON.parse((await run('--project', 'para', ...args, '--json')).stdout);
   await paraRun('ingress', 'manual.txt');
-  const archived = await paraRun('archive', 'Projects/maintenance');
-  const archiveFile = join(root, 'para', 'site', 'Archives', 'Projects', 'maintenance.html');
+  const archived = await paraRun('archive', 'Resources/保全/maintenance');
+  const archiveFile = join(root, 'para', 'site', 'Archives', 'Resources', '保全', 'maintenance.html');
   assert.match(await readFile(archiveFile, 'utf8'), /交換手順/u);
-  assert.match(await readFile(join(root, 'para', 'site', 'Projects', 'maintenance.html'), 'utf8'), /アーカイブで読む/u);
+  assert.match(await readFile(join(root, 'para', 'site', 'Resources', '保全', 'maintenance.html'), 'utf8'), /アーカイブで読む/u);
   await paraRun('undo', archived.run_id);
   await assert.rejects(readFile(archiveFile, 'utf8'), { code: 'ENOENT' });
 });

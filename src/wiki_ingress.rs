@@ -241,6 +241,9 @@ pub(crate) fn verify(
     let mut suggestions: Option<ConfigValue> = None;
     let said = |page: &ConfigValue, what: &str| text(&format!("{}：{what}", str_of(page, "id")));
     let database = project.trigram_database()?;
+    // What a page may also take its numbers and quotations from: the rules, as the goal and the
+    // deadline of a project, and the names of its sources.
+    let rules_text = read_file(&project.rules_file()).unwrap_or_default();
     for (completed, page) in material.iter().enumerate() {
         tracker.progress("checking_citations", Some((completed, material.len())));
         let page_id = page.get("id").cloned().unwrap_or_default();
@@ -297,6 +300,14 @@ pub(crate) fn verify(
         }
         // Numbers, dates and quotations are written as the sources write them.
         if !truthy(page.get("archived")) {
+            texts.push(rules_text.clone());
+            texts.extend(page_sources(page).iter().map(|entry| {
+                str_of(
+                    &entry.get("source").cloned().unwrap_or_default(),
+                    "objectId",
+                )
+                .to_owned()
+            }));
             for literal in unsupported_literals(str_of(page, "markdown"), &texts) {
                 issues.push(object(vec![
                     ("code", text("UNSUPPORTED_LITERAL")),
@@ -371,6 +382,60 @@ pub(crate) fn verify(
                         "description",
                         text(&format!(
                             "{id}：分類「{category}」は決まり（rules.md）の分類にありません"
+                        )),
+                    ),
+                ]));
+            }
+        }
+    }
+    // A note of PARA is in a project or an area the rules list, or in a topic of Resources; a
+    // project whose deadline has passed may be done.
+    if project.para() {
+        let rules = read_file(&project.rules_file()).unwrap_or_default();
+        let projects = crate::wiki_project::rule_items(&rules, "Projects");
+        let areas = crate::wiki_project::rule_items(&rules, "Areas");
+        let listed =
+            |list: &[(String, String)], name: &str| list.iter().any(|(known, _)| known == name);
+        for page in material.iter().filter(|page| !truthy(page.get("archived"))) {
+            let id = str_of(page, "id");
+            let parts: Vec<&str> = id.split('/').collect();
+            let (code, what) = match parts[..] {
+                ["Projects" | "Areas" | "Resources", _] => (
+                    "NO_PLACE",
+                    "どの取り組み・領域・話題のノートかが ID にありません".to_owned(),
+                ),
+                ["Projects", name, _, ..] if !listed(&projects, name) => (
+                    "UNKNOWN_PROJECT",
+                    format!("取り組み「{name}」は決まり（rules.md）の Projects にありません"),
+                ),
+                ["Areas", name, _, ..] if !listed(&areas, name) => (
+                    "UNKNOWN_AREA",
+                    format!("領域「{name}」は決まり（rules.md）の Areas にありません"),
+                ),
+                _ => continue,
+            };
+            issues.push(object(vec![
+                ("code", text(code)),
+                ("page", text(id)),
+                ("description", text(&format!("{id}：{what}"))),
+            ]));
+        }
+        let today: String = iso_now().chars().take(10).collect();
+        static DATE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let date = DATE.get_or_init(|| regex::Regex::new(r"\d{4}-\d{2}-\d{2}").expect("valid"));
+        for (name, about) in &projects {
+            let Some(deadline) = date.find(about).map(|found| found.as_str()) else {
+                continue;
+            };
+            if deadline < today.as_str() {
+                issues.push(object(vec![
+                    ("code", text("PROJECT_OVERDUE")),
+                    ("project", text(name)),
+                    ("deadline", text(deadline)),
+                    (
+                        "description",
+                        text(&format!(
+                            "Projects/{name}：期限（{deadline}）を過ぎています。終わっていれば nest archive Projects/{name} で Archives へ移します"
                         )),
                     ),
                 ]));
@@ -968,9 +1033,10 @@ pub(crate) fn ingress(
         _ => project.writer(str_of(&writing, "model"))?.provider != "ollama",
     };
     // The pages the model is given in full and returns whole: those written from a source that
-    // changed, and, when it rewrites, those it names as the ones the sources add to.
+    // changed, and, when it rewrites, those it names as the ones the sources add to. A note of
+    // PARA is about one source, so no other note is chosen.
     let mut revision = affected.clone();
-    if rewrite {
+    if rewrite && !project.para() {
         let others: Vec<&ConfigValue> = existing
             .iter()
             .filter(|page| !affected.iter().any(|id| id == str_of(page, "id")))
@@ -1020,7 +1086,7 @@ pub(crate) fn ingress(
     }
     tracker.progress("writing_pages", None);
     let instruction = format!(
-        "Write in the language of the project and follow the rules. Write each page in Markdown from the numbered sources, and give the numbers of the sources it is written from. State only what the sources say, and copy numbers, dates, names and quotations exactly as the sources write them. Link related pages as [title](/page-id). Where a source contradicts a page, keep both and say that they disagree. {}Return no pages when the sources add nothing new to the wiki or are outside its purpose. {}",
+        "Write in the language of the project and follow the rules. Write each page in Markdown from the numbered sources, and give the numbers of the sources it is written from; do not list the sources in the text, as the page lists them. State only what the sources say, and copy numbers, dates, names and quotations exactly as the sources write them. Link related pages as [title](/page-id). Where a source contradicts a page, keep both and say that they disagree. {}Return no pages when the sources add nothing new to the wiki or are outside its purpose. {}",
         if !revision.is_empty() {
             "A page listed in pages_needing_revision is given in full: return the whole page, revised with what the sources add or change, keeping what still holds. For any other existing page, return only the new text to add to it. "
         } else if !existing.is_empty() {
@@ -1029,42 +1095,70 @@ pub(crate) fn ingress(
             ""
         },
         if project.para() {
-            "An ID must start with Projects/, Areas/, Resources/ or Archives/. Leave the category empty."
+            "Write one note for each source that is of use, as the rules say, at one place only. Its ID is the place where the source will be used: one of places, or Resources/<a new topic> when none fits; a project before an area, an area before a topic. The note is named after its source, and its title says what the source is. Leave the category empty."
         } else {
             "Give each page the category it belongs to: one of the categories in the rules, or, if none fits, a short name of a broad subject that other pages can share (not the kind of page). Page IDs are names without folders."
         }
     );
+    // The places of PARA a note can go to: the projects and areas of the rules, and the topics
+    // of Resources so far.
+    let places: Vec<ConfigValue> = ["Projects", "Areas", "Resources"]
+        .iter()
+        .flat_map(|top| {
+            crate::wiki_project::rule_items(&rules, top)
+                .into_iter()
+                .map(move |(name, _)| text(&format!("{top}/{name}")))
+        })
+        .collect();
     let result = project.generate(
         str_of(&writing, "model"),
         WRITTEN_SCHEMA,
         &instruction,
-        &In::Map(vec![
-            ("about", In::Value(request.about.clone())),
-            ("rules", In::text(&rules)),
-            ("sources", named_sources(&refs)),
-            (
-                "pages",
-                In::List(
-                    existing
-                        .iter()
-                        .map(|page| {
-                            let mut entries =
-                                vec![("id", field(page, "id")), ("title", field(page, "title"))];
-                            if revision.iter().any(|id| id == str_of(page, "id")) {
-                                entries.push(("markdown", field(page, "markdown")));
-                            }
-                            In::Map(entries)
-                        })
-                        .collect(),
+        &In::Map(
+            {
+                let mut input = vec![("about", In::Value(request.about.clone()))];
+                if project.para() {
+                    input.push(("places", In::Value(ConfigValue::Array(places))));
+                }
+                input
+            }
+            .into_iter()
+            .chain(vec![
+                ("rules", In::text(&rules)),
+                ("sources", named_sources(&refs)),
+                (
+                    "pages",
+                    // A note of PARA is about its own source: the model is given only the notes of
+                    // a source that changed.
+                    In::List(
+                        existing
+                            .iter()
+                            .filter(|page| {
+                                !project.para()
+                                    || revision.iter().any(|id| id == str_of(page, "id"))
+                            })
+                            .map(|page| {
+                                let mut entries = vec![
+                                    ("id", field(page, "id")),
+                                    ("title", field(page, "title")),
+                                ];
+                                if revision.iter().any(|id| id == str_of(page, "id")) {
+                                    entries.push(("markdown", field(page, "markdown")));
+                                }
+                                In::Map(entries)
+                            })
+                            .collect(),
+                    ),
                 ),
-            ),
-            (
-                "pages_needing_revision",
-                In::Value(ConfigValue::Array(
-                    revision.iter().map(|id| text(id)).collect(),
-                )),
-            ),
-        ]),
+                (
+                    "pages_needing_revision",
+                    In::Value(ConfigValue::Array(
+                        revision.iter().map(|id| text(id)).collect(),
+                    )),
+                ),
+            ])
+            .collect(),
+        ),
     )?;
     let [list] = strict(&result, &["pages"]).ok_or_else(model_output)?[..] else {
         return Err(model_output());
@@ -1092,7 +1186,55 @@ pub(crate) fn ingress(
     let mut changes = Vec::new();
     // The sources the pages written are written from.
     let mut used_sources: HashSet<String> = HashSet::new();
-    for item in written {
+    // The sources of notes not saved for their place, which stay to be worked in again.
+    let mut held_sources: HashSet<String> = HashSet::new();
+    // The sources a new note of PARA is placed for in this run.
+    let mut placed: HashSet<String> = HashSet::new();
+    // The projects and areas of PARA, which people list, and the files of the sources by ID.
+    let projects = crate::wiki_project::rule_items(&rules, "Projects");
+    let areas = crate::wiki_project::rule_items(&rules, "Areas");
+    let source_files: HashMap<&str, &str> = grouped
+        .iter()
+        .map(|(id, file, _)| (id.as_str(), file.as_str()))
+        .collect();
+    let pages_folder = node_path::resolve(&request.root, &request.pages);
+    for mut item in written {
+        item.id = item.id.trim().trim_matches('/').to_owned();
+        // The sources it names; a page that names none is written from all of them.
+        let mut used: Vec<ConfigValue> = Vec::new();
+        for number in &item.sources {
+            if let Some(reference) = number.checked_sub(1).and_then(|index| refs.get(index)) {
+                used = merged_sources(&used, &[entry_of(reference)]);
+            }
+        }
+        if used.is_empty() {
+            used = refs.iter().map(entry_of).collect();
+        }
+        // A new note of PARA is given as its place, and is named after its source. A note that
+        // exists is only written again from its own source when it changed; another source the
+        // model puts there makes a note of its own at that place.
+        let parts: Vec<&str> = item.id.split('/').collect();
+        let place = match parts[..] {
+            [top, place] => Some((top, place)),
+            [top, place, ..]
+                if !revision.iter().any(|id| *id == item.id)
+                    && existing.iter().any(|page| str_of(page, "id") == item.id) =>
+            {
+                Some((top, place))
+            }
+            _ => None,
+        };
+        if project.para()
+            && let Some((top @ ("Projects" | "Areas" | "Resources"), place)) = place
+        {
+            let name = used
+                .first()
+                .map(|entry| source_name(entry))
+                .unwrap_or_default();
+            if !name.is_empty() {
+                item.id = format!("{top}/{place}/{name}");
+            }
+        }
         let lower = item.id.to_lowercase();
         if ids.contains(&lower) {
             return Err(coded(
@@ -1112,17 +1254,81 @@ pub(crate) fn ingress(
             ));
         }
         ids.insert(lower);
-        // The sources it names; a page that names none is written from all of them.
-        let mut used: Vec<ConfigValue> = Vec::new();
-        for number in &item.sources {
-            if let Some(reference) = number.checked_sub(1).and_then(|index| refs.get(index)) {
-                used = merged_sources(&used, &[entry_of(reference)]);
+        let earlier = existing.iter().find(|page| str_of(page, "id") == item.id);
+        if project.para() && earlier.is_none() {
+            if let Some(reason) = misplaced(&item.id, &projects, &areas) {
+                held_sources.extend(used.iter().map(|entry| source_key(entry).to_owned()));
+                warnings.push(object(vec![
+                    ("code", text("PLACE_INVALID")),
+                    (
+                        "message",
+                        text(&format!(
+                            "{}: not saved, {reason}. Add it to the rules and run ingress --pending, or run ingress again.",
+                            item.id
+                        )),
+                    ),
+                    ("page", text(&item.id)),
+                ]));
+                continue;
+            }
+            // A source has one place: the first note written for it is kept.
+            let key = used
+                .first()
+                .map(|entry| source_key(entry).to_owned())
+                .unwrap_or_default();
+            if !placed.insert(key) {
+                warnings.push(object(vec![
+                    ("code", text("NOTE_SKIPPED")),
+                    (
+                        "message",
+                        text(&format!(
+                            "{}: not saved, its source has a note at another place already.",
+                            item.id
+                        )),
+                    ),
+                    ("page", text(&item.id)),
+                ]));
+                continue;
             }
         }
-        if used.is_empty() {
-            used = refs.iter().map(entry_of).collect();
+        // The copy of each source of a note of PARA is in the folder of the note, under 資料/,
+        // and the note links to it.
+        if project.para() {
+            let parts: Vec<&str> = item.id.split('/').collect();
+            let mut folder: Vec<&str> = parts[..parts.len() - 1].to_vec();
+            folder.push("資料");
+            let folder = node_path::join(&pages_folder, &folder);
+            for entry in &mut used {
+                let Some(file) = source_files.get(source_key(entry)) else {
+                    continue;
+                };
+                let bytes = std::fs::read(file).map_err(|error| fs_error("open", file, &error))?;
+                let name = std::path::Path::new(file)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let copy = crate::wiki_fetch::keep_in(&folder, &name, &bytes)?;
+                let web = entry
+                    .get("source")
+                    .and_then(|source| string_field(source, "url"))
+                    .is_some_and(crate::wiki_fetch::is_web_address);
+                if let (false, ConfigValue::Object(entries)) = (web, entry) {
+                    let mut source = entries
+                        .iter()
+                        .find(|(name, _)| name == "source")
+                        .map(|(_, value)| value.clone())
+                        .unwrap_or_default();
+                    if let ConfigValue::Object(fields) = &mut source {
+                        assign(
+                            fields,
+                            "url",
+                            Some(text(&crate::source_load::file_url(&copy))),
+                        );
+                    }
+                    assign(entries, "source", Some(source));
+                }
+            }
         }
-        let earlier = existing.iter().find(|page| str_of(page, "id") == item.id);
         let added = js_trim(&without_markers(&item.markdown)).to_owned();
         // A page given in full comes back whole; any other only gains what is new to it.
         let markdown = match earlier {
@@ -1142,9 +1348,10 @@ pub(crate) fn ingress(
         );
         used_sources.extend(used.iter().map(|entry| source_key(entry).to_owned()));
         // Numbers, dates and quotations that none of its sources has are pointed out.
-        let mut texts = Vec::new();
+        let mut texts = vec![rules.clone()];
         for entry in &sources {
             let source = entry.get("source").cloned().unwrap_or_default();
+            texts.push(str_of(&source, "objectId").to_owned());
             if let Some(document) = current_document(&database, &source, project.cancel)? {
                 texts.push(str_of(&document, "content").to_owned());
             }
@@ -1194,7 +1401,7 @@ pub(crate) fn ingress(
     // A source no page is written from adds nothing to the wiki: it is recorded as such.
     let no_material: Vec<&String> = source_ids
         .iter()
-        .filter(|id| !used_sources.contains(id.as_str()))
+        .filter(|id| !used_sources.contains(id.as_str()) && !held_sources.contains(id.as_str()))
         .collect();
     let mut extra = vec![
         ("sources", ConfigValue::Number(documents.len() as f64)),
@@ -1238,8 +1445,15 @@ pub(crate) fn ingress(
         extra,
         |connection| {
             for id in &source_ids {
-                // 1: pages are written from it; 2: it adds nothing to them.
-                let state = if used_sources.contains(id) { 1 } else { 2 };
+                // 1: pages are written from it; 2: it adds nothing to them. A source of a note
+                // not saved for its place stays to be worked in.
+                let state = if used_sources.contains(id) {
+                    1
+                } else if held_sources.contains(id) {
+                    continue;
+                } else {
+                    2
+                };
                 connection
                     .execute(
                         "UPDATE wiki_sources SET reflected = ?2 WHERE id = ?1",
@@ -1251,19 +1465,96 @@ pub(crate) fn ingress(
         },
     )?;
     // A category the model gives that the rules do not list is added to them, for people to
-    // see and change.
-    let listed = crate::wiki_project::rule_categories(&rules);
+    // see and change; so is a topic of Resources that a note of PARA is placed in.
+    let (heading, listed) = if project.para() {
+        named = Vec::new();
+        for page in items(done.get("pages")) {
+            let parts: Vec<&str> = str_of(page, "id").split('/').collect();
+            if parts.len() > 2
+                && parts[0] == "Resources"
+                && !named.iter().any(|name| name == parts[1])
+            {
+                named.push(parts[1].to_owned());
+            }
+        }
+        let topics = crate::wiki_project::rule_items(&rules, "Resources");
+        (
+            "Resources",
+            topics.into_iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        )
+    } else {
+        ("分類", crate::wiki_project::rule_categories(&rules))
+    };
     named.retain(|name| !listed.contains(name));
-    if !project.para()
-        && !named.is_empty()
+    if !named.is_empty()
         && let Ok(file) = project.rules_path()
     {
         atomic_write(
             &file,
-            crate::wiki_project::with_categories(&rules, &named).as_bytes(),
+            crate::wiki_project::with_items(&rules, heading, &named).as_bytes(),
         )?;
     }
     Ok(done)
+}
+
+/// The name a note of PARA takes from its source: the file name without its extension, or the
+/// last part of the path of a web address, or its host.
+fn source_name(entry: &ConfigValue) -> String {
+    let source = entry.get("source");
+    let field = |name: &str| {
+        source
+            .and_then(|source| string_field(source, name))
+            .unwrap_or_default()
+    };
+    let object_id = field("objectId");
+    let last = if crate::wiki_fetch::is_web_address(object_id) {
+        url::Url::parse(object_id)
+            .ok()
+            .and_then(|url| {
+                let segment = url
+                    .path_segments()
+                    .and_then(|mut segments| segments.rfind(|part| !part.is_empty()))
+                    .and_then(crate::wiki_project::decode_uri_component);
+                segment.or_else(|| url.host_str().map(str::to_owned))
+            })
+            .unwrap_or_default()
+    } else {
+        object_id
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let stem = match last.rfind('.').filter(|&at| at > 0) {
+        Some(at) => &last[..at],
+        None => last.as_str(),
+    };
+    stem.trim().to_owned()
+}
+
+/// Why a new note of PARA cannot be placed at its ID, if it cannot: it is in a project or an area
+/// of the rules, or in a topic of Resources, by the name of its source.
+fn misplaced(
+    id: &str,
+    projects: &[(String, String)],
+    areas: &[(String, String)],
+) -> Option<String> {
+    let parts: Vec<&str> = id.split('/').collect();
+    let listed =
+        |list: &[(String, String)], name: &str| list.iter().any(|(known, _)| known == name);
+    match parts[..] {
+        [_, _] | [_] => {
+            Some("a note is placed as <Projects|Areas|Resources>/<name>/<source>".to_owned())
+        }
+        ["Projects", name, ..] if !listed(projects, name) => {
+            Some(format!("{name} is not a project of the rules"))
+        }
+        ["Areas", name, ..] if !listed(areas, name) => {
+            Some(format!("{name} is not an area of the rules"))
+        }
+        ["Projects" | "Areas" | "Resources", ..] => None,
+        _ => Some("a new note goes into Projects, Areas or Resources".to_owned()),
+    }
 }
 
 /// A page with text added: the paragraphs of the text that the page does not have yet, after it.

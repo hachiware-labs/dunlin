@@ -1874,8 +1874,39 @@ impl WikiServer {
                         })
                         .collect::<String>()
                 );
+                // A note of PARA goes to Archives with the other notes of its project, area or
+                // topic, and comes back with them.
+                let parts: Vec<&str> = str_of(page, "id").split('/').collect();
+                let folder_form = |value: &str, button: &str, label: String| {
+                    format!(
+                        "<form class=\"row\" method=\"post\" action=\"/action{action}\"><input type=\"hidden\" name=\"token\" value=\"{form_key}\"><input type=\"hidden\" name=\"value\" value=\"{}\"><button name=\"action\" value=\"{button}\">{}</button></form>",
+                        escape_html(value),
+                        escape_html(&label)
+                    )
+                };
+                let folder = match parts[..] {
+                    [top @ ("Projects" | "Areas" | "Resources"), name, _, ..]
+                        if base.kind == "para" && !archived =>
+                    {
+                        folder_form(
+                            &format!("{top}/{name}"),
+                            "archive",
+                            format!("「{name}」のノートをまとめて Archives へ移す"),
+                        )
+                    }
+                    ["Archives", name, _, ..]
+                        if base.kind == "para" && string_field(page, "archived_from").is_some() =>
+                    {
+                        folder_form(
+                            &format!("Archives/{name}"),
+                            "restore",
+                            format!("「{name}」のノートをまとめて元の場所へ戻す"),
+                        )
+                    }
+                    _ => String::new(),
+                };
                 let manage = format!(
-                    "<p class=\"hint\">検査は引用とリンクを確かめます。内容の検査は AI が関連ページとの食い違いを調べます。</p>{}<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button>{}</form>",
+                    "<p class=\"hint\">検査は出典とリンクを確かめます。内容の検査は AI が関連ページとの食い違いを調べます。</p>{}<button name=\"action\" value=\"verify\">検査</button><button name=\"action\" value=\"content\">内容を検査</button>{}</form>{folder}",
                     form("row"),
                     if archived {
                         "<button name=\"action\" value=\"restore\">アーカイブから戻す</button>"

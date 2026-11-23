@@ -1214,7 +1214,7 @@ Wiki/PARA側は、資料を読んで知識をページやノートに蓄積し�
 
 次の2例は、グローバル設定にモデルと OCR の登録がなく、`init` に追加のオプションを渡さない場合に生成する `KnowledgeNestfile.yaml` の全文である。`about.title` にはプロジェクトのディレクトリ名が入る。`--purpose` を指定すると、その文が `about.purpose` に入る。取り込みを始めるには目的と `models.writer.model` を設定する。`--llm-model` やグローバル設定から執筆モデルを指定できる。 [初期化時のモデル指定](#初期化時のモデル指定)
 
-Wiki は `wiki.write` でページを書き、PARA は `para.write` でノートを書く。PARA の分類は Projects、Areas、Resources、Archives の4つで、`init para` が `site/` の下に各ディレクトリを作る。
+Wiki は `wiki.write` でページを書き、PARA は `para.write` でノートを書く。PARA の分類は Projects、Areas、Resources、Archives の4つで、`init para` が `site/` の下に各ディレクトリを作る。PARA のノートは使い道のある資料1件ごとに1か所に1つで、ID は `<分類>/<取り組み・領域・話題>/<資料の名前>`。AI には置ける場所の一覧（`places`）を渡し、AI は置き場所だけを返す。ノートの名前は資料の名前から付け、同じ資料の2つ目以降のノートは保存しない（`NOTE_SKIPPED`）。AI にはほかのノートを見せない（資料が変わったノートだけを渡す）。Projects と Areas の一覧は人が `rules.md` に書き、AI はそこにない取り組み・領域にノートを置かない（`PLACE_INVALID`。資料は未反映のまま残す）。Resources の話題は AI が足し、`rules.md` に加える。資料の写しはノートと同じフォルダの `資料/` に置く。`archive Projects/<取り組み>` は、ノートの ID と出典、フォルダ、ほかのノートからのリンク、`rules.md` の行をまとめて Archives へ移し、`--restore` と `undo` で戻せる。`verify` は `UNKNOWN_PROJECT`、`UNKNOWN_AREA`、`NO_PLACE`、`PROJECT_OVERDUE` を指摘する。
 
 #### Wiki の KnowledgeNestfile.yaml
 
@@ -1867,7 +1867,7 @@ nest serve
 | --- | --- |
 | 入り口のコマンド名 | 決定。`ingress` のまま、`ingest` を別名にする（`verify` には `lint`） |
 | 資料の階層の作り方 | 区分をAIが決めるか、人が先に決めるか。人が目的と範囲を決め、区分はAIが提案する形が候補 |
-| 運用の決まりの初期値 | 決定。Wiki は、分類、ページ（平らな ID、資料ごとの要約ページ。全体をまとめるページは作らず、全体は目録で見る）、書き方、取り込みの手順を `init` が書く。PARA は見出しだけ |
+| 運用の決まりの初期値 | 決定。Wiki は、分類、ページ（平らな ID、資料ごとの要約ページ。全体をまとめるページは作らず、全体は目録で見る）、書き方、取り込みの手順を `init` が書く。PARA は、人が書く Projects と Areas、AI が足す Resources、Archives、ノートの書き方と置き場所の決め方を書く |
 | 使うモデルの設定 | 取り込み、質問、検査で同じモデルを使うか、分けられるようにするか |
 | RAG/MCP側とのつながり | 作業中に、RAG/MCP側で作った索引も引けるようにするか |
 | 外部エージェントによる実行 | 標準はKnowledge-Nestによる実行。作業を外部エージェントが取りに来て実行する経路をいつ用意するか |

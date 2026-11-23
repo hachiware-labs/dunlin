@@ -38,30 +38,39 @@ pub(crate) fn keep_source(
     name: &str,
     bytes: &[u8],
 ) -> Result<String, StageError> {
-    let digest = sha256_hex(bytes);
-    let (folder, names) = match raw_folder(root) {
+    match raw_folder(root) {
         Some(raw) => {
             let parts: Vec<&str> = folders.iter().map(String::as_str).collect();
-            let (stem, extension) = match name.rfind('.').filter(|&at| at > 0) {
-                Some(at) => (&name[..at], &name[at..]),
-                None => (name, ""),
-            };
-            (
-                node_path::join(&raw, &parts),
-                vec![
-                    name.to_owned(),
-                    format!("{stem}-{}{extension}", &digest[..8]),
-                ],
-            )
+            keep_in(&node_path::join(&raw, &parts), name, bytes)
         }
-        None => (
-            node_path::join(artifacts, &["uploads", &digest]),
-            vec![name.to_owned()],
-        ),
+        None => {
+            let folder = node_path::join(artifacts, &["uploads", &sha256_hex(bytes)]);
+            write_once(&folder, vec![name.to_owned()], bytes)
+        }
+    }
+}
+
+/// Keeps a file in a folder under its name, never over another: the same bytes under that name
+/// are the file already, and other bytes get the first 8 characters of their SHA-256 before the
+/// extension. Returns the path of the file.
+pub(crate) fn keep_in(folder: &str, name: &str, bytes: &[u8]) -> Result<String, StageError> {
+    let digest = sha256_hex(bytes);
+    let (stem, extension) = match name.rfind('.').filter(|&at| at > 0) {
+        Some(at) => (&name[..at], &name[at..]),
+        None => (name, ""),
     };
-    std::fs::create_dir_all(&folder).map_err(|error| fs_error("mkdir", &folder, &error))?;
+    let names = vec![
+        name.to_owned(),
+        format!("{stem}-{}{extension}", &digest[..8]),
+    ];
+    write_once(folder, names, bytes)
+}
+
+/// Writes the bytes under the first of the names that is free or holds them already.
+fn write_once(folder: &str, names: Vec<String>, bytes: &[u8]) -> Result<String, StageError> {
+    std::fs::create_dir_all(folder).map_err(|error| fs_error("mkdir", folder, &error))?;
     for name in names {
-        let file = node_path::join(&folder, &[&name]);
+        let file = node_path::join(folder, &[&name]);
         match std::fs::read(&file) {
             Ok(existing) if existing == bytes => return Ok(file),
             Ok(_) => continue,

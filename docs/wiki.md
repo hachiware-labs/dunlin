@@ -103,9 +103,9 @@ Karpathy の LLM-Wiki では、目録（index）を種類ごとに分けて並�
 - **付け替え**：`nest instruct <ページ> --category <分類>` で付け替えます。AI は使わず、`nest undo` で戻せます。ページのファイルの JSON を直接書き換えてもかまいません。
 - **点検**：`nest lint` で、分類のないページ（`NO_CATEGORY`）と、一覧にない分類のページ（`UNKNOWN_CATEGORY`）を指摘します。`nest lint --content` では、AI が分類の合っていないページと、一覧のうち合っている分類を挙げます（`CATEGORY_MISMATCH`）。画面ではこの指摘に **分類を「…」にする** ボタンが出ます。
 
-PARA は、これまでどおり `Projects/`・`Areas/`・`Resources/`・`Archives/` のフォルダで分けます。
+PARA は `Projects/`・`Areas/`・`Resources/`・`Archives/` の下に、取り組み・領域・話題ごとのフォルダで分けます。`init para` の `rules.md` には、人が取り組みを書く `## Projects`、領域を書く `## Areas`、AI が話題を足す `## Resources`、アーカイブした取り組みが並ぶ `## Archives`、ノートの書き方と置き場所の決め方が入ります。ノートは資料1件ごとに1つで、資料の写しはノートと同じフォルダの `資料/` に置かれます。`nest archive Projects/<取り組み>` は、そのノートと資料をフォルダごと `Archives/<取り組み>` へ移します。詳しくは [PARA 入門](start-para.md) にあります。すでにあるプロジェクトの `rules.md` は変わりません。
 
-PARA の `rules.md` は見出しだけで始まります。すでにあるプロジェクトの `rules.md` は変わりません。
+PARA の `nest lint` は、決まりにない取り組み（`UNKNOWN_PROJECT`）・領域（`UNKNOWN_AREA`）のノート、取り組み・領域・話題のフォルダに入っていないノート（`NO_PLACE`）、期限（`YYYY-MM-DD`）を過ぎた取り組み（`PROJECT_OVERDUE`）も指摘します。
 
 ## 画面の見かた
 
@@ -187,7 +187,7 @@ nest instruct PAGE_ID "点検前の確認事項を箇条書きにしてくださ
 |---|---|
 | `SOURCE_MISSING` | 出典の資料がプロジェクトにない |
 | `STALE_VERSION` | 出典の資料が新しくなっている（新しい版をまだページに反映していない） |
-| `UNSUPPORTED_LITERAL` | 本文の数字（2桁以上）・日付・「」『』“” の引用が、出典の資料のどれにもない。空白と数字の桁区切りの `,` は区別しない |
+| `UNSUPPORTED_LITERAL` | 本文の数字（2桁以上）・日付・「」『』“” の引用が、出典の資料のどれにもない。資料の名前と `rules.md`（取り組みの期限など）にあるものは指摘しない。空白と数字の桁区切りの `,` は区別しない |
 | `BROKEN_LINK` | リンク先のページがない |
 | `ORPHAN_PAGE` | どのページからもリンクされていない |
 | `MISSING_LINK` | ほかのページの題名に触れているのに、そのページへのリンクがない |

@@ -568,44 +568,50 @@ pub(crate) fn written_pages(value: &ConfigValue, category: bool) -> Option<Vec<W
         .collect()
 }
 
-/// The categories that `rules.md` lists under `## 分類`: one on each line that starts with `- `,
-/// its name before `：` or `:`.
-pub(crate) fn rule_categories(rules: &str) -> Vec<String> {
-    let mut found = Vec::new();
+/// The items a section of `rules.md` lists, as `## Projects`: one on each line that starts with
+/// `- `, its name before `：` or `:` and what follows.
+pub(crate) fn rule_items(rules: &str, heading: &str) -> Vec<(String, String)> {
+    let mut found: Vec<(String, String)> = Vec::new();
     let mut inside = false;
     for line in rules.lines() {
         let line = line.trim_end();
-        if let Some(heading) = line.strip_prefix("## ") {
-            inside = heading.trim() == "分類";
+        if let Some(title) = line.strip_prefix("## ") {
+            inside = title.trim() == heading;
             continue;
         }
         let Some(item) = line.strip_prefix("- ").filter(|_| inside) else {
             continue;
         };
-        let name = item
-            .split(['：', ':'])
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .trim_matches(['*', '`'])
-            .trim();
-        if !name.is_empty() && !found.iter().any(|known: &String| known == name) {
-            found.push(name.to_owned());
+        let (name, about) = match item.find(['：', ':']) {
+            Some(at) => (&item[..at], item[at..].trim_start_matches(['：', ':'])),
+            None => (item, ""),
+        };
+        let name = name.trim().trim_matches(['*', '`']).trim();
+        if !name.is_empty() && !found.iter().any(|(known, _)| known == name) {
+            found.push((name.to_owned(), about.trim().to_owned()));
         }
     }
     found
 }
 
-/// `rules.md` with categories added at the end of its `## 分類` section, which is made when it
-/// is missing.
-pub(crate) fn with_categories(rules: &str, names: &[String]) -> String {
+/// The categories that `rules.md` lists under `## 分類`.
+pub(crate) fn rule_categories(rules: &str) -> Vec<String> {
+    rule_items(rules, "分類")
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// `rules.md` with items added at the end of a section, which is made when it is missing.
+pub(crate) fn with_items(rules: &str, heading: &str, items: &[String]) -> String {
     let lines: Vec<&str> = rules.lines().collect();
-    let added = names
+    let added = items
         .iter()
-        .map(|name| format!("- {name}"))
+        .map(|item| format!("- {item}"))
         .collect::<Vec<_>>();
-    let Some(start) = lines.iter().position(|line| line.trim_end() == "## 分類") else {
-        return format!("{}\n\n## 分類\n\n{}\n", rules.trim_end(), added.join("\n"));
+    let title = format!("## {heading}");
+    let Some(start) = lines.iter().position(|line| line.trim_end() == title) else {
+        return format!("{}\n\n{title}\n\n{}\n", rules.trim_end(), added.join("\n"));
     };
     let end = lines[start + 1..]
         .iter()
@@ -627,6 +633,24 @@ pub(crate) fn with_categories(rules: &str, names: &[String]) -> String {
         out += &rest.join("\n");
     }
     out + "\n"
+}
+
+/// `rules.md` without the item of a name in a section.
+pub(crate) fn without_item(rules: &str, heading: &str, name: &str) -> String {
+    let mut inside = false;
+    let mut out: Vec<&str> = Vec::new();
+    for line in rules.lines() {
+        if let Some(title) = line.trim_end().strip_prefix("## ") {
+            inside = title.trim() == heading;
+        } else if inside && let Some(item) = line.strip_prefix("- ") {
+            let named = item.split(['：', ':']).next().unwrap_or_default();
+            if named.trim().trim_matches(['*', '`']).trim() == name {
+                continue;
+            }
+        }
+        out.push(line);
+    }
+    out.join("\n") + "\n"
 }
 
 pub(crate) fn model_output() -> StageError {
@@ -1552,7 +1576,7 @@ impl Project<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{portable_links, rule_categories, with_categories};
+    use super::{portable_links, rule_categories, rule_items, with_items, without_item};
 
     #[test]
     fn the_categories_are_the_items_of_their_section_of_the_rules() {
@@ -1561,18 +1585,41 @@ mod tests {
         assert_eq!(rule_categories("# 決まり\n"), Vec::<String>::new());
         let names = ["リーン".to_owned()];
         assert_eq!(
-            with_categories(rules, &names),
+            with_items(rules, "分類", &names),
             "# 決まり\n\n## 分類\n\n説明。\n\n- トヨタ生産方式：製造の手法\n- **アジャイル**\n- アジャイル\n- リーン\n\n## 書き方\n\n- 引用する\n"
         );
         // Without the section, it is made at the end.
         assert_eq!(
-            with_categories("# 決まり\n", &names),
+            with_items("# 決まり\n", "分類", &names),
             "# 決まり\n\n## 分類\n\n- リーン\n"
         );
         let empty = "# 決まり\n\n## 分類\n\n説明。\n\n## 追加の決まり\n";
         assert_eq!(
-            with_categories(empty, &names),
+            with_items(empty, "分類", &names),
             "# 決まり\n\n## 分類\n\n説明。\n\n- リーン\n\n## 追加の決まり\n"
+        );
+    }
+
+    #[test]
+    fn the_projects_of_para_are_items_with_what_they_aim_at() {
+        let rules = "# 決まり\n\n## Projects\n\n例：`- 名前：目標`\n\n- ポンプ更新工事：2026-12-20 までに交換する\n- 研修\n\n## Areas\n\n- 保全: 停止を減らす\n";
+        assert_eq!(
+            rule_items(rules, "Projects"),
+            [
+                (
+                    "ポンプ更新工事".to_owned(),
+                    "2026-12-20 までに交換する".to_owned()
+                ),
+                ("研修".to_owned(), String::new())
+            ]
+        );
+        assert_eq!(
+            rule_items(rules, "Areas"),
+            [("保全".to_owned(), "停止を減らす".to_owned())]
+        );
+        assert_eq!(
+            without_item(rules, "Projects", "ポンプ更新工事"),
+            "# 決まり\n\n## Projects\n\n例：`- 名前：目標`\n\n- 研修\n\n## Areas\n\n- 保全: 停止を減らす\n"
         );
     }
 

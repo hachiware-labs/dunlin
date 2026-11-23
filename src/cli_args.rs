@@ -231,7 +231,10 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
             ),
             ("rules", "Print the writing rules of the wiki"),
             ("progress", "Show the progress of a running job"),
-            ("cite", "Show a source a page is written from, with its text"),
+            (
+                "cite",
+                "Show a source a page is written from, with its text",
+            ),
             ("instruct", "Ask for a change to a page, or add a rule"),
             ("save-answer", "Save a query answer as a page"),
             ("archive", "Archive or restore a page"),

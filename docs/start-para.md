@@ -2,7 +2,7 @@
 
 [English](start-para.en.md) · [入門の一覧](getting-started.md)
 
-溜まった資料やメモを AI に読ませ、PARA の4分類（Projects・Areas・Resources・Archives）にノートとして整理させます。ノートのすべての文には、元の資料への引用が付きます。人はブラウザで読み、エージェントは MCP で同じノートを引けます。
+溜まった資料やメモを AI に読ませ、PARA の4分類（Projects・Areas・Resources・Archives）にノートとして整理させます。ノートは、使い道のある資料1件ごとに1つで、資料の写しと一緒に、それを使う取り組みや領域のフォルダに入ります。人はブラウザで読み、エージェントは MCP で同じノートを引けます。
 
 ## PARA という考え方
 
@@ -27,12 +27,14 @@ PARA は、Tiago Forte が提唱した、デジタルの情報を整理する方
 
 | | Wiki | PARA |
 |---|---|---|
-| まとまりの単位 | テーマごとのページ | ノート |
-| いちばん上の区分 | テーマの区分 | Projects、Areas、Resources、Archives |
-| アーカイブ | 古くなったページをしまう | 終わった取り組みを Archives へ移す |
+| まとまりの単位 | テーマごとのページ | 資料1件ごとのノート（要点と使い道） |
+| いちばん上の区分 | テーマの区分 | Projects、Areas、Resources、Archives。その下に、取り組み・領域・話題ごとのフォルダ |
+| 区分を決めるもの | AI（`rules.md` の分類に足していく） | Projects と Areas は人が `rules.md` に書く。Resources の話題は AI が足す |
+| 資料の置き場所 | `raw/` | ノートと同じフォルダの `資料/` |
+| アーカイブ | 古くなったページをしまう | 終わった取り組みを、ノートと資料ごと Archives へ移す |
 | ホーム | 件数と最近更新したページ | 4区分の説明と件数、進行中の Projects の一覧 |
 
-コマンド、画面、引用の決まりは Wiki と共通です。「知識の事典」を作るなら Wiki、「仕事の机」を整えるなら PARA です。
+コマンド、画面、出典の決まりは Wiki と共通です。「知識の事典」を作るなら Wiki、「仕事の机」を整えるなら PARA です。
 
 ## こんなときに
 
@@ -55,9 +57,21 @@ nest init para ./para --purpose "設備保全の仕事に関わる資料とメ�
 cd para
 ```
 
-`init para` は、`site/` の下に4分類のディレクトリを作ります。
+`init para` は、`site/` の下に4分類のディレクトリと、決まり（`rules.md`）を作ります。
 
-`--purpose` は、AI が分類を決めるときの基準になります。いま進めている取り組みや、担当している領域を書いておくと、AI が Projects と Areas を見分けやすくなります。たとえば「来月のポンプ更新工事を進め、設備の定期保全を担当している」のように書きます。あとで `KnowledgeNestfile.yaml` の `about.purpose` で直せます。
+次に、`rules.md` の `## Projects` に、いま進めている取り組みを、`## Areas` に、続けて責任を持つ領域を書きます。AI はここにない取り組みや領域を作りません。期限は `YYYY-MM-DD` で書くと、過ぎたときに `nest lint` が知らせます。
+
+```markdown
+## Projects
+
+- ポンプ更新工事：2026-12-20 までに主ポンプを交換する
+
+## Areas
+
+- 設備の定期保全：故障による停止を年 2 回以下にする
+```
+
+`--purpose` には、この PARA が何のための場所かを書きます。あとで `KnowledgeNestfile.yaml` の `about.purpose` で直せます。
 
 ## 3 資料を取り込む
 
@@ -65,7 +79,14 @@ cd para
 nest ingress ../inbox
 ```
 
-AI が資料を読み、ノートを書いて、4分類のどこかに置きます。`nest ingress https://...` のように URL を渡すと、Web のページも取り込めます。書いた文の引用は検証され、資料と一字一句一致しない文は保存されません。時間がかかるときは、表示された作業 ID を `nest progress <作業ID>` に渡して進み具合を見られます。
+AI が資料を1件ずつ読み、使い道のある資料ごとにノートを書いて、それを使う場所に置きます。ノートは、何の資料か、**要点**（その取り組み・領域に使うところ）、**使い道** を書いたものです。
+
+1. Projects のどれかに使う資料は `Projects/<取り組み>/<資料の名前>`
+2. Areas のどれかの仕事に使う資料は `Areas/<領域>/<資料の名前>`
+3. それ以外で役立ちそうな資料は `Resources/<話題>/<資料の名前>`。新しい話題は `rules.md` の `## Resources` に足されます
+4. どこにも使わない資料にはノートを書かず、「得るものなし」として記録します
+
+AI には、置ける場所（決まりの取り組み・領域と、これまでの話題）の一覧を渡します。AI が決めるのは置き場所だけで、ノートの名前は資料の名前になります。1つの資料のノートは1か所だけで、AI が別の場所にも書いたときは最初の1つを残し、ほかは `NOTE_SKIPPED` の警告にします。資料の写しは、ノートと同じフォルダの `資料/` に置かれ、ノートの出典はそこを指します。決まりにない取り組みにノートを置こうとしたときは保存せず、`PLACE_INVALID` の警告を出します。その資料は未反映のまま残るので、決まりに取り組みを足してから `nest ingress --pending` で取り込み直せます。本文の数字・日付・引用が資料にないときは、`UNSUPPORTED_LITERAL` の警告が出ます。`nest ingress https://...` のように URL を渡すと、Web のページも取り込めます。時間がかかるときは、表示された作業 ID を `nest progress <作業ID>` に渡して進み具合を見られます。
 
 ## 4 読む：ブラウザと MCP
 
@@ -83,10 +104,12 @@ nest serve
 | したいこと | コマンド |
 |---|---|
 | ノートを根拠に質問する | `nest query "来月の工事で交換する部品は？"` |
-| 分類や書き方を直させる | `nest instruct <ノート> "これは Areas に移して"` |
+| 書き方を直させる | `nest instruct <ノート> "要点を3つに絞って"` |
+| 新しい取り組みを始める | `rules.md` の `## Projects` に書き足す |
 | 今後の分け方の決まりを足す | `nest instruct --persistent "カタログ類は Resources に置く"` |
-| 終わった取り組みを片づける | `nest archive <ノート>`（Archives へ移る。`--restore` で戻せる） |
-| 引用切れや食い違いを見つける | `nest verify`、`nest verify --content` |
+| 終わった取り組みを片づける | `nest archive Projects/<取り組み>`（ノートと資料のフォルダごと `Archives/<取り組み>` へ移り、`rules.md` の行も `## Archives` へ移る。ほかのノートからのリンクも付け替わる。`nest archive --restore Archives/<取り組み>` か `nest undo` で戻せる） |
+| ノート1つだけしまう | `nest archive <ノート>` |
+| 期限切れや食い違いを見つける | `nest verify`、`nest verify --content` |
 | 作業を取り消す | `nest undo <作業ID>` |
 
 アーカイブしたノートは、通常の質問の対象から外れます。消えるわけではなく、読むことも戻すこともできます。
@@ -95,9 +118,9 @@ nest serve
 
 | 症状 | 対処 |
 |---|---|
-| 思った分類に入らない | `--purpose` に進行中の取り組みと担当領域を書く。決まりを `instruct --persistent` で足す |
+| 思った場所に入らない | `rules.md` の `## Projects` と `## Areas` に、取り組みと領域を書く。決まりを `instruct --persistent` で足す |
+| `PLACE_INVALID` の警告 | 決まりにない取り組み・領域に置こうとしたノートは保存されない。決まりに足して `nest ingress --pending` |
 | `MODEL_REQUIRED` | `models.writer.model` を設定する |
-| `INVALID_CITATION` | 引用がどれも資料と一致しなかった。もう一度 `ingress` するか、より大きなモデルを使う |
 
 そのほかは [Wiki 入門](start-wiki.md#9-うまくいかないとき) と [困ったときは](troubleshooting.md) にあります。
 

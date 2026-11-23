@@ -2,7 +2,7 @@
 
 [日本語](start-para.md) · [All introductions](getting-started.en.md)
 
-Have an AI read the documents and notes you have piled up and organize them as notes in the four PARA categories: Projects, Areas, Resources, and Archives. Every sentence in a note carries a citation to the original. People read the notes in a browser, and agents use the same notes over MCP.
+Have an AI read the documents and notes you have piled up and organize them as notes in the four PARA categories: Projects, Areas, Resources, and Archives. There is one note for each document of use, kept with a copy of the document in the folder of the project or area that uses it. People read the notes in a browser, and agents use the same notes over MCP.
 
 ## The PARA idea
 
@@ -27,12 +27,14 @@ The order runs from closest to action at the top to farthest at the bottom.
 
 | | Wiki | PARA |
 |---|---|---|
-| Unit | Pages by topic | Notes |
-| Top-level sections | Topic sections | Projects, Areas, Resources, Archives |
-| Archiving | Puts stale pages away | Moves finished efforts to Archives |
+| Unit | Pages by topic | A note for each document (key points and use) |
+| Top-level sections | Topic sections | Projects, Areas, Resources, Archives, with a folder for each project, area or topic under them |
+| Who decides the sections | The AI (added to the categories of `rules.md`) | People list Projects and Areas in `rules.md`; the AI adds topics of Resources |
+| Where documents are kept | `raw/` | `資料/` in the folder of the note |
+| Archiving | Puts stale pages away | Moves a finished project to Archives with its notes and documents |
 | Home | Counts and the pages changed lately | The four categories with their counts, and the list of active Projects |
 
-Commands, screen, and citation rules are the same as the Wiki. Build a Wiki for an encyclopedia of knowledge; build PARA to keep your desk in order.
+Commands, screen, and source rules are the same as the Wiki. Build a Wiki for an encyclopedia of knowledge; build PARA to keep your desk in order.
 
 ## When to use it
 
@@ -55,9 +57,21 @@ nest init para ./para --purpose "Organize documents and notes for my equipment m
 cd para
 ```
 
-`init para` creates a folder for each of the four categories under `site/`.
+`init para` creates a folder for each of the four categories under `site/`, and the rules (`rules.md`).
 
-`--purpose` is what the AI goes by when it chooses a category. Write the efforts you are running and the areas you own, and the AI tells Projects from Areas more easily — for example, "Running next month's pump replacement; responsible for routine equipment maintenance". You can change it later in `about.purpose` of `KnowledgeNestfile.yaml`.
+Then list the projects you are running under `## Projects` of `rules.md`, and the areas you are responsible for under `## Areas`. The AI makes no project or area that is not listed there. Write a deadline as `YYYY-MM-DD`, and `nest lint` tells you when it has passed.
+
+```markdown
+## Projects
+
+- ポンプ更新工事：2026-12-20 までに主ポンプを交換する
+
+## Areas
+
+- 設備の定期保全：故障による停止を年 2 回以下にする
+```
+
+`--purpose` says what this PARA is for. You can change it later in `about.purpose` of `KnowledgeNestfile.yaml`.
 
 ## 3 Ingest documents
 
@@ -65,7 +79,14 @@ cd para
 nest ingress ../inbox
 ```
 
-The AI reads the documents, writes notes, and files each under one of the four categories. Pass a URL, as in `nest ingress https://...`, to ingest a web page. The citations of what it wrote are checked, and sentences that do not match the source word for word are not saved. If it takes a while, give the job ID to `nest progress <job-id>` to follow it.
+The AI reads the documents, writes a note for each document of use, and puts it where it will be used. A note says what the document is, its **key points** for the project or area, and **how to use it**.
+
+1. A document for one of the Projects goes to `Projects/<project>/<document>`
+2. A document for the work of one of the Areas goes to `Areas/<area>/<document>`
+3. Anything else that may help later goes to `Resources/<topic>/<document>`; a new topic is added under `## Resources` of `rules.md`
+4. A document of no use gets no note and is recorded as having nothing to add ("得るものなし")
+
+The AI is given the list of places a note can go to (the projects and areas of the rules, and the topics so far). It decides only the place; the note is named after its document. A document has one note at one place: when the AI writes it at another place as well, the first is kept and the others are warned of (`NOTE_SKIPPED`). A copy of the document is kept in `資料/` beside the note, and the note's source points to it. A note placed in a project that the rules do not list is not saved (`PLACE_INVALID`); its document stays pending, so list the project and run `nest ingress --pending`. Numbers, dates and quotations not found in the document are warned of (`UNSUPPORTED_LITERAL`). Pass a URL, as in `nest ingress https://...`, to ingest a web page. If it takes a while, give the job ID to `nest progress <job-id>` to follow it.
 
 ## 4 Read: in a browser and over MCP
 
@@ -83,10 +104,12 @@ nest serve
 | You want to | Command |
 |---|---|
 | Ask a question answered from the notes | `nest query "Which parts are replaced in next month's work?"` |
-| Have a category or wording fixed | `nest instruct <note> "Move this to Areas"` |
+| Have the wording fixed | `nest instruct <note> "Keep three key points"` |
+| Start a new project | Add it under `## Projects` of `rules.md` |
 | Add a rule for sorting from now on | `nest instruct --persistent "Put catalogs in Resources"` |
-| Put away a finished effort | `nest archive <note>` (moves to Archives; `--restore` brings it back) |
-| Find broken citations and conflicts | `nest verify`, `nest verify --content` |
+| Put away a finished project | `nest archive Projects/<project>` (moves to `Archives/<project>` with its notes and documents, moves its line of `rules.md` to `## Archives`, and follows the links to its notes; `nest archive --restore Archives/<project>` or `nest undo` brings it back) |
+| Put away a single note | `nest archive <note>` |
+| Find overdue projects and conflicts | `nest verify`, `nest verify --content` |
 | Undo a job | `nest undo <job-id>` |
 
 Archived notes leave ordinary questions. They are not deleted; you can still read them and bring them back.
@@ -95,9 +118,9 @@ Archived notes leave ordinary questions. They are not deleted; you can still rea
 
 | Symptom | What to do |
 |---|---|
-| Notes land in the wrong category | Write your active efforts and areas in `--purpose`. Add rules with `instruct --persistent` |
+| Notes land in the wrong place | List your projects and areas under `## Projects` and `## Areas` of `rules.md`. Add rules with `instruct --persistent` |
+| `PLACE_INVALID` warning | A note for a project or area the rules do not list is not saved. List it and run `nest ingress --pending` |
 | `MODEL_REQUIRED` | Set `models.writer.model` |
-| `INVALID_CITATION` | None of the citations matched the documents. Run `ingress` again, or use a larger model |
 
 More in [Wiki](start-wiki.en.md#9-when-something-goes-wrong) and [Troubleshooting](troubleshooting.md) (Japanese).
 

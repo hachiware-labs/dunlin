@@ -513,6 +513,9 @@ fn undo(project: &Project<'_>, connection: &Connection) -> Result<ConfigValue, S
             let _ = atomic_write(&file, after.as_bytes());
         });
     }
+    if let Some(job) = found.as_ref().filter(|job| job.get("folder").is_some()) {
+        return undo_folder(project, connection, job);
+    }
     let Some(found) = found.filter(|job| {
         job.get("previous_pages")
             .is_some_and(|value| truthy(Some(value)))
@@ -615,6 +618,12 @@ fn archive(
 ) -> Result<ConfigValue, StageError> {
     let target = arg(project, 0);
     let all = pages(project.request, connection, true)?;
+    // A project, an area or a topic of PARA goes to Archives with all its notes.
+    if project.para() && !all.iter().any(|page| str_of(page, "id") == target) {
+        if let Some(done) = archive_folder(project, connection, tracker, target, &all)? {
+            return Ok(done);
+        }
+    }
     let Some(page) = all.iter().find(|page| str_of(page, "id") == target) else {
         return Err(coded(
             3,
@@ -715,6 +724,403 @@ fn archive(
             ("archived", ConfigValue::Bool(archived)),
         ],
         |_| Ok(()),
+    )
+}
+
+/// The Markdown of a page with its links to moved pages pointing to where they are now. `from`
+/// is the ID the links are read from.
+fn relinked(from: &str, markdown: &str, moves: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(markdown.len());
+    let mut last = 0;
+    for (start, end) in crate::wiki_project::link_targets(markdown) {
+        let target = &markdown[start..end];
+        let Some(moved) =
+            crate::wiki_project::linked_page(from, target).and_then(|page| moves.get(&page))
+        else {
+            continue;
+        };
+        out += &markdown[last..start];
+        out += "/";
+        out += moved;
+        if let Some(at) = target.find('#') {
+            out += &target[at..];
+        }
+        last = end;
+    }
+    out + &markdown[last..]
+}
+
+/// Moves a project, an area or a topic of PARA to Archives with all its notes, or one of
+/// Archives back to where it was: the notes get the IDs of the new place, the folder moves with
+/// the copies of the sources in it, links to the notes follow them, and the rules list it in its
+/// new section. None when the target is no such folder.
+fn archive_folder(
+    project: &Project<'_>,
+    connection: &Connection,
+    tracker: &Tracker,
+    target: &str,
+    all: &[ConfigValue],
+) -> Result<Option<ConfigValue>, StageError> {
+    let restoring = truthy(project.value("restore"));
+    let parts: Vec<&str> = target.split('/').collect();
+    let [top, name] = parts[..] else {
+        return Ok(None);
+    };
+    let prefix = format!("{target}/");
+    let moved: Vec<&ConfigValue> = all
+        .iter()
+        .filter(|page| str_of(page, "id").starts_with(&prefix))
+        .filter(|page| {
+            if restoring {
+                top == "Archives" && string_field(page, "archived_from").is_some()
+            } else {
+                ["Projects", "Areas", "Resources"].contains(&top) && !truthy(page.get("archived"))
+            }
+        })
+        .collect();
+    let Some(first) = moved.first() else {
+        return Ok(None);
+    };
+    let destination = if restoring {
+        str_of(first, "archived_from").to_owned()
+    } else {
+        format!("Archives/{name}")
+    };
+    let moves: HashMap<String, String> = moved
+        .iter()
+        .map(|page| {
+            let id = str_of(page, "id");
+            (
+                id.to_owned(),
+                format!("{destination}{}", &id[target.len()..]),
+            )
+        })
+        .collect();
+    if all.iter().any(|page| {
+        moves.values().any(|id| id == str_of(page, "id")) && !moves.contains_key(str_of(page, "id"))
+    }) {
+        return Err(coded(
+            4,
+            "PAGE_EXISTS",
+            format!("{destination} already has those notes."),
+        ));
+    }
+    let folder = |id: &str| {
+        let pages = node_path::resolve(&project.request.root, &project.request.pages);
+        node_path::join(&pages, &id.split('/').collect::<Vec<_>>())
+    };
+    let (old_folder, new_folder) = (folder(target), folder(&destination));
+    if std::fs::metadata(&new_folder).is_ok() {
+        return Err(coded(
+            4,
+            "PAGE_EXISTS",
+            format!("The folder {destination} exists already."),
+        ));
+    }
+    let (old_url, new_url) = (
+        crate::source_load::file_url(&old_folder) + "/",
+        crate::source_load::file_url(&new_folder) + "/",
+    );
+    let now = iso_now();
+    // The notes at their new place.
+    let mut added: Vec<ConfigValue> = Vec::new();
+    for page in &moved {
+        let ConfigValue::Object(mut entries) = (*page).clone() else {
+            continue;
+        };
+        let id = str_of(page, "id");
+        assign(&mut entries, "id", Some(text(&moves[id])));
+        assign(
+            &mut entries,
+            "markdown",
+            Some(text(&relinked(id, str_of(page, "markdown"), &moves))),
+        );
+        assign(
+            &mut entries,
+            "archived",
+            Some(ConfigValue::Bool(!restoring)),
+        );
+        assign(
+            &mut entries,
+            "archived_from",
+            (!restoring).then(|| text(target)),
+        );
+        let sources: Vec<ConfigValue> = crate::wiki_project::page_sources(page)
+            .iter()
+            .map(|entry| {
+                let url = entry
+                    .get("source")
+                    .and_then(|source| string_field(source, "url"))
+                    .unwrap_or_default();
+                let Some(rest) = url.strip_prefix(&old_url) else {
+                    return entry.clone();
+                };
+                let mut entry = entry.clone();
+                if let ConfigValue::Object(fields) = &mut entry {
+                    let mut source = fields
+                        .iter()
+                        .find(|(name, _)| name == "source")
+                        .map(|(_, value)| value.clone())
+                        .unwrap_or_default();
+                    if let ConfigValue::Object(source) = &mut source {
+                        assign(source, "url", Some(text(&format!("{new_url}{rest}"))));
+                    }
+                    assign(fields, "source", Some(source));
+                }
+                entry
+            })
+            .collect();
+        assign(&mut entries, "sources", Some(ConfigValue::Array(sources)));
+        assign(&mut entries, "changed", Some(text(&now)));
+        added.push(ConfigValue::Object(entries));
+    }
+    // The other pages that link to them.
+    let mut relinked_pages: Vec<(ConfigValue, ConfigValue)> = Vec::new();
+    for page in all
+        .iter()
+        .filter(|page| !moves.contains_key(str_of(page, "id")))
+    {
+        let markdown = relinked(str_of(page, "id"), str_of(page, "markdown"), &moves);
+        if markdown == str_of(page, "markdown") {
+            continue;
+        }
+        let ConfigValue::Object(mut entries) = page.clone() else {
+            continue;
+        };
+        assign(&mut entries, "markdown", Some(text(&markdown)));
+        assign(&mut entries, "changed", Some(text(&now)));
+        relinked_pages.push((page.clone(), ConfigValue::Object(entries)));
+    }
+    // The rules list it in its new section.
+    let rules_file = project.rules_path().ok();
+    let rules_before = rules_file.as_deref().map(read_file).transpose()?;
+    let rules_after = rules_before.as_deref().map(|rules| {
+        let day: String = now.chars().take(10).collect();
+        if restoring {
+            let back = str_of(first, "archived_from")
+                .split('/')
+                .next()
+                .unwrap_or("Projects");
+            let about = crate::wiki_project::rule_items(rules, "Archives")
+                .into_iter()
+                .find(|(known, _)| known == name)
+                .map(|(_, about)| {
+                    about
+                        .rfind('（')
+                        .filter(|_| about.ends_with("に移した）"))
+                        .map_or(about.clone(), |at| about[..at].to_owned())
+                })
+                .unwrap_or_default();
+            let item = if about.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{name}：{about}")
+            };
+            crate::wiki_project::with_items(
+                &crate::wiki_project::without_item(rules, "Archives", name),
+                back,
+                &[item],
+            )
+        } else {
+            let about = crate::wiki_project::rule_items(rules, top)
+                .into_iter()
+                .find(|(known, _)| known == name)
+                .map(|(_, about)| about)
+                .unwrap_or_default();
+            let item = if about.is_empty() {
+                format!("{name}：（{top} から {day} に移した）")
+            } else {
+                format!("{name}：{about}（{top} から {day} に移した）")
+            };
+            crate::wiki_project::with_items(
+                &crate::wiki_project::without_item(rules, top, name),
+                "Archives",
+                &[item],
+            )
+        }
+    });
+    tracker.progress(
+        "saving_pages",
+        Some((0, added.len() + relinked_pages.len())),
+    );
+    let mut snapshots: Vec<(String, Option<String>)> = Vec::new();
+    let mut renamed = false;
+    let outcome = (|| {
+        for page in &moved {
+            let path = project.publication_path(str_of(page, "id"))?;
+            snapshots.push((path.clone(), read_text(&path)?));
+            remove(&path)?;
+        }
+        if std::fs::metadata(&old_folder).is_ok() {
+            if let Some(parent) = std::path::Path::new(&new_folder).parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|error| fs_error("mkdir", &new_folder, &error))?;
+            }
+            std::fs::rename(&old_folder, &new_folder)
+                .map_err(|error| fs_error("rename", &old_folder, &error))?;
+            renamed = true;
+        }
+        for page in added
+            .iter()
+            .chain(relinked_pages.iter().map(|(_, after)| after))
+        {
+            let path = project.publication_path(str_of(page, "id"))?;
+            snapshots.push((path.clone(), read_text(&path)?));
+            project.save_page(page)?;
+        }
+        if let (Some(file), Some(after)) = (&rules_file, &rules_after) {
+            snapshots.push((file.clone(), rules_before.clone()));
+            atomic_write(file, after.as_bytes())?;
+        }
+        let mut previous: Vec<ConfigValue> = moved
+            .iter()
+            .map(|page| {
+                object(vec![
+                    ("id", page.get("id").cloned().unwrap_or_default()),
+                    ("before", (*page).clone()),
+                ])
+            })
+            .collect();
+        previous.extend(added.iter().map(|page| {
+            object(vec![
+                ("id", page.get("id").cloned().unwrap_or_default()),
+                ("before", ConfigValue::Null),
+                ("after", page.clone()),
+            ])
+        }));
+        previous.extend(relinked_pages.iter().map(|(before, after)| {
+            object(vec![
+                ("id", before.get("id").cloned().unwrap_or_default()),
+                ("before", before.clone()),
+                ("after", after.clone()),
+            ])
+        }));
+        let mut entries = vec![
+            (
+                "id",
+                text(project.request.run_id.as_deref().unwrap_or_default()),
+            ),
+            ("action", text(&project.request.command)),
+            ("page", text(target)),
+            ("archived", ConfigValue::Bool(!restoring)),
+            (
+                "folder",
+                object(vec![("from", text(target)), ("to", text(&destination))]),
+            ),
+            (
+                "pages",
+                ConfigValue::Array(
+                    added
+                        .iter()
+                        .map(|page| {
+                            object(vec![
+                                ("id", page.get("id").cloned().unwrap_or_default()),
+                                ("title", page.get("title").cloned().unwrap_or_default()),
+                            ])
+                        })
+                        .collect(),
+                ),
+            ),
+            ("previous_pages", ConfigValue::Array(previous)),
+        ];
+        if let (Some(before), Some(after)) = (&rules_before, &rules_after) {
+            entries.push((
+                "folder_rules",
+                object(vec![("before", text(before)), ("after", text(after))]),
+            ));
+        }
+        remember(connection, object(entries))
+    })();
+    if outcome.is_err() {
+        for page in &added {
+            if let Ok(path) = project.publication_path(str_of(page, "id")) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        if renamed {
+            let _ = std::fs::rename(&new_folder, &old_folder);
+        }
+        restore(snapshots);
+    }
+    outcome.map(Some)
+}
+
+/// Undoes a move of a folder of PARA: the notes go back to their IDs, the folder to where it was,
+/// the links and the rules as they were.
+fn undo_folder(
+    project: &Project<'_>,
+    connection: &Connection,
+    found: &ConfigValue,
+) -> Result<ConfigValue, StageError> {
+    let current = pages(project.request, connection, true)?;
+    for entry in items(found.get("previous_pages")) {
+        let id = str_of(entry, "id");
+        let now = current.iter().find(|page| str_of(page, "id") == id);
+        let after = entry.get("after").cloned().map(page_form);
+        if json_or_undefined(now) != json_or_undefined(after.as_ref()) {
+            return Err(coded(
+                4,
+                "PAGE_CHANGED",
+                format!("A newer work changed {id}."),
+            ));
+        }
+    }
+    let rules = found.get("folder_rules");
+    let file = project.rules_path().ok();
+    if let (Some(rules), Some(file)) = (rules, &file)
+        && read_file(file)? != str_of(rules, "after")
+    {
+        return Err(coded(
+            4,
+            "RULES_CHANGED",
+            "The rules changed after this work.",
+        ));
+    }
+    let folder = found.get("folder").cloned().unwrap_or_default();
+    let place = |id: &str| {
+        let pages = node_path::resolve(&project.request.root, &project.request.pages);
+        node_path::join(&pages, &id.split('/').collect::<Vec<_>>())
+    };
+    let (from, to) = (place(str_of(&folder, "from")), place(str_of(&folder, "to")));
+    for entry in items(found.get("previous_pages")) {
+        if matches!(entry.get("before"), Some(ConfigValue::Null)) {
+            remove(&project.publication_path(str_of(entry, "id"))?)?;
+        }
+    }
+    if std::fs::metadata(&to).is_ok() && std::fs::metadata(&from).is_err() {
+        if let Some(parent) = std::path::Path::new(&from).parent() {
+            std::fs::create_dir_all(parent).map_err(|error| fs_error("mkdir", &from, &error))?;
+        }
+        std::fs::rename(&to, &from).map_err(|error| fs_error("rename", &to, &error))?;
+    }
+    for entry in items(found.get("previous_pages")) {
+        if let Some(before) = entry.get("before").filter(|before| truthy(Some(before))) {
+            project.save_page(before)?;
+        }
+    }
+    if let (Some(rules), Some(file)) = (rules, &file) {
+        atomic_write(file, str_of(rules, "before").as_bytes())?;
+    }
+    remember(
+        connection,
+        object(vec![
+            (
+                "id",
+                text(project.request.run_id.as_deref().unwrap_or_default()),
+            ),
+            ("action", text("undo")),
+            ("job", found.get("id").cloned().unwrap_or_default()),
+            (
+                "pages",
+                ConfigValue::Array(
+                    items(found.get("previous_pages"))
+                        .iter()
+                        .filter(|entry| truthy(entry.get("before")))
+                        .map(|entry| entry.get("id").cloned().unwrap_or_default())
+                        .collect(),
+                ),
+            ),
+        ]),
     )
 }
 

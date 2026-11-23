@@ -74,6 +74,8 @@ mod generate;
 #[cfg(any(feature = "node", test))]
 mod html_text;
 #[cfg(any(feature = "node", test))]
+mod http_agent;
+#[cfg(any(feature = "node", test))]
 mod index_stage;
 #[cfg(any(feature = "node", test))]
 mod lighton;

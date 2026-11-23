@@ -500,12 +500,13 @@ fn signed_out(asked: &url::Url, landed: &url::Url) -> bool {
 /// Downloads a page or a file once over HTTP, as the server sends it.
 fn download(url: url::Url, root: &str, artifacts: &str) -> Result<Kept, StageError> {
     let failed = |message: String| coded(1, "FETCH_FAILED", format!("{url}: {message}"));
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(60)))
-        .http_status_as_error(false)
-        .user_agent(concat!("knowledge-nest/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .into();
+    let agent = crate::http_agent::agent(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(60)))
+            .http_status_as_error(false)
+            .user_agent(concat!("knowledge-nest/", env!("CARGO_PKG_VERSION")))
+            .build(),
+    );
     let mut response = agent
         .get(url.as_str())
         .header(

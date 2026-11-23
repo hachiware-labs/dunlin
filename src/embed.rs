@@ -121,15 +121,16 @@ pub(crate) fn model_agent() -> ureq::Agent {
 
 /// The HTTP client of a model call that may take up to the given time.
 pub(crate) fn model_agent_for(wait: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(wait))
-        // fetch(..., { redirect: 'error' })
-        .max_redirects(0)
-        // Node.js fetch ignores HTTP_PROXY, so a local Ollama stays direct.
-        .proxy(None)
-        .http_status_as_error(false)
-        .build()
-        .into()
+    crate::http_agent::agent(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(wait))
+            // fetch(..., { redirect: 'error' })
+            .max_redirects(0)
+            // Node.js fetch ignores HTTP_PROXY, so a local Ollama stays direct.
+            .proxy(None)
+            .http_status_as_error(false)
+            .build(),
+    )
 }
 
 /// A model endpoint: its URL, key, request size limit and the name its errors use.
@@ -374,6 +375,10 @@ pub(crate) mod tests {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { break };
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
+                // A connection to `localhost` first tries each address and closes the trials.
+                if reader.read_line(&mut String::new()).unwrap_or(0) == 0 {
+                    continue;
+                }
                 let mut length = 0;
                 loop {
                     let mut line = String::new();
@@ -439,6 +444,23 @@ pub(crate) mod tests {
             bodies.lock().unwrap()[0],
             "{\"model\":\"m\",\"input\":[\"a\",\"\u{2028}\\\"\"],\"truncate\":false}"
         );
+    }
+
+    /// Ollama listens on 127.0.0.1 only, while `localhost` also resolves to `::1`, which Windows
+    /// refuses only after about 2 seconds of retries. The request must not wait for that.
+    #[test]
+    fn reaches_an_ipv4_server_through_localhost_at_once() {
+        let (base, _) = serve(|_| (200, r#"{"embeddings":[[1.0]]}"#.into()));
+        let url = format!("{}/api/embed", base.replace("127.0.0.1", "localhost"));
+        let embedder = Embedder::new(settings("ollama", &url));
+        for _ in 0..3 {
+            let started = std::time::Instant::now();
+            embedder
+                .embed(&["a".into()], &Free, &Cancellation::default())
+                .unwrap();
+            let took = started.elapsed();
+            assert!(took < Duration::from_millis(500), "took {took:?}");
+        }
     }
 
     #[test]

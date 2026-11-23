@@ -585,12 +585,13 @@ pub fn ocr_request(env: &CliEnv, tools: Option<&ConfigValue>) -> Result<ConfigVa
 
 /// The HTTP client of downloads: fetch's defaults, which follow redirects and ignore proxies.
 fn download_agent(timeout: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .proxy(None)
-        .http_status_as_error(false)
-        .build()
-        .into()
+    crate::http_agent::agent(
+        ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .proxy(None)
+            .http_status_as_error(false)
+            .build(),
+    )
 }
 
 fn file_digest(path: &str) -> std::io::Result<String> {

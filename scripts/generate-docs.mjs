@@ -51,7 +51,7 @@ function cliGuide() {
       'nest eval-data list',
       'nest eval-data show <dataset>',
       'nest eval-data split --test-ratio <ratio> --seed <integer>',
-      'nest eval-data generate [--model <alias>] [--doc <document>] [--count <n>] [--kind <lexical|paraphrase|identifier>]',
+      'nest eval-data generate [--model <alias>] [--doc <document>] [--count <n>] [--kind <lexical|paraphrase|identifier|variant>]',
       'nest eval-data review <dataset> [--case <id>... --state reviewed|rejected --reviewer <name> --reviewer-type human|agent]',
       'nest eval-data sync <dataset>',
       'nest eval-data diff <dataset-a> <dataset-b>',

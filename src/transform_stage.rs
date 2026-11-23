@@ -1106,6 +1106,7 @@ mod tests {
                 api_key: None,
                 max_input_bytes: None,
                 unlimited_output: false,
+                max_output_tokens: None,
             }),
         };
         let cancel = Cancellation::default();

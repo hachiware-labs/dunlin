@@ -25,7 +25,7 @@ use crate::{Cancellation, DocumentRef, KnowledgeBase, SourceLocation};
 
 /// What a question asks with: the words of its quotes, other words, or a code, number or name
 /// written in the document. A case may have no kind.
-pub(crate) const KINDS: [&str; 3] = ["lexical", "paraphrase", "identifier"];
+pub(crate) const KINDS: [&str; 4] = ["lexical", "paraphrase", "identifier", "variant"];
 
 const STATUSES: [&str; 6] = [
     "generated",

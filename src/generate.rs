@@ -29,6 +29,9 @@ pub struct GeneratorSettings {
     /// that answers and reranking send (1024 tokens, 2048 with OpenAI).
     #[serde(default)]
     pub unlimited_output: bool,
+    /// The limit of an answer in place of the provider's, for requests whose answers are longer.
+    #[serde(default)]
+    pub max_output_tokens: Option<f64>,
 }
 
 /// The output text, when the provider returned a string, and the provider's token counts.
@@ -143,6 +146,16 @@ fn object_of(entries: Vec<(&str, Option<ConfigValue>)>) -> ConfigValue {
     )
 }
 
+/// Whether an error is a response the provider cut off before it ended, at the output limit for
+/// example: what `generate` says for an incomplete Ollama, Strata or OpenAI response.
+pub(crate) fn incomplete(error: &EmbedError) -> bool {
+    error.code.is_none()
+        && (error.message.ends_with(" response was incomplete")
+            || error
+                .message
+                .starts_with("OpenAI response status: incomplete"))
+}
+
 /// Sends one generation request: `createGenerator(...)(instructions, input, schema)`.
 pub fn generate(
     settings: &GeneratorSettings,
@@ -155,7 +168,9 @@ pub fn generate(
     let model = text(&settings.model);
     let schema = json(schema);
     // The limit of an answer, unless the length is left to the model.
-    let limit = |tokens: f64| (!settings.unlimited_output).then(|| number(tokens));
+    let limit = |tokens: f64| {
+        (!settings.unlimited_output).then(|| number(settings.max_output_tokens.unwrap_or(tokens)))
+    };
     let body = match settings.provider.as_str() {
         "openai" => object_of(vec![
             ("model", Some(model)),
@@ -745,6 +760,7 @@ mod tests {
                 api_key: None,
                 max_input_bytes: None,
                 unlimited_output: false,
+                max_output_tokens: None,
             },
         };
         let response = answer(&request, &Free, &Cancellation::default()).unwrap();

@@ -45,9 +45,9 @@ async function model(t) {
     const body = Buffer.concat(chunks).toString('utf8');
     bodies.push(body);
     const excerpts = JSON.parse(JSON.parse(body).messages[1].content);
-    const kinds = ['lexical', 'paraphrase', 'identifier'];
+    const kinds = ['lexical', 'paraphrase', 'identifier', 'variant'];
     const cases = excerpts.flatMap(({ doc, text }, i) => {
-      const one = (question, ...quotes) => ({ question, kind: kinds[i % 3], evidence: quotes.map((quote) => ({ doc, quote })) });
+      const one = (question, ...quotes) => ({ question, kind: kinds[(i + question.length) % 4], evidence: quotes.map((quote) => ({ doc, quote })) });
       // Without the lone surrogate an excerpt can start with, which JSON.parse accepted.
       const whole = (value) => [...value].filter((unit) => !(unit.length === 1 && unit >= '\ud800' && unit <= '\udfff'));
       const lines = text.split('\n').map((value) => value.trim()).filter(Boolean);
@@ -63,7 +63,9 @@ async function model(t) {
     });
     const content = bodies.length === 2 ? 'not json' : JSON.stringify({ cases });
     response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ done: true, message: { content } }));
+    // The first answer of a run that asks for two candidates is cut off at the output limit.
+    const cut = bodies.length === 1 && JSON.parse(body).messages[0].content.includes('Return at most 2 candidates');
+    response.end(JSON.stringify({ done: true, ...(cut && { done_reason: 'length' }), message: { content } }));
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -143,7 +145,7 @@ test('generates evaluation candidates like the reference in JavaScript', { timeo
       assert.equal(actual.errors[0].code, failure.code, label);
       assert.equal(actual.errors[0].message, failure.message, label);
       assert.equal(actual.exitCode, failure.exitCode, label);
-      return null;
+      return { failed: failure.message, sent };
     }
     assert.equal(actual.status, 'succeeded', label + ' ' + JSON.stringify(actual.errors));
     assert.equal(actualIds(JSON.stringify(actual.data)), expectedIds(JSON.stringify(expected)), label);
@@ -158,18 +160,23 @@ test('generates evaluation candidates like the reference in JavaScript', { timeo
   await same({ model: 'local', kind: 'other' });
   const only = await same({ model: 'local', count: '3', kind: 'identifier' });
   assert.ok(only.actual.dropped.kind_not_requested > 0);
-  assert.deepEqual(only.actual.kinds, { lexical: 0, paraphrase: 0, identifier: only.actual.generated });
+  assert.deepEqual(only.actual.kinds, { lexical: 0, paraphrase: 0, identifier: only.actual.generated, variant: 0 });
   assert.ok(only.sent.every((body) => body.includes('Write only identifier questions. ')));
   const generated = await same({ model: 'local', count: '30' });
   assert.ok(generated.sent.length >= 3, 'several requests');
   assert.ok(generated.sent.some((body) => body.includes('\\ud83d')), 'a lone surrogate at an excerpt boundary');
   assert.deepEqual(Object.keys(generated.actual.dropped).sort(),
     ['duplicate', 'invalid_model_output', 'quote_not_in_excerpt', 'quote_not_unique', 'quote_too_long']);
+  assert.ok(generated.sent.every((body) => JSON.parse(body).options.num_predict === 4096), 'the output limit of candidates');
   assert.ok(Object.values(generated.actual.kinds).every((count) => count > 0), 'every kind');
   // A second run reads documents that have no cases yet first, then the parts of long.md that
   // have the fewest quotes of cases.
   await same({ model: 'local', count: '5', doc: 'long.md' });
   await same({ model: 'local', count: '3' });
+  // An answer cut off at the output limit is dropped, and the next request is sent.
+  const cut = await same({ model: 'local', count: '2', doc: 'long.md' });
+  assert.match(cut.failed ?? JSON.stringify(cut.actual.dropped), /"incomplete_model_output":1/u);
+  assert.ok(cut.sent.length >= 2);
 
   const parsed = (database) => JSON.stringify(database.prepare('SELECT id, data FROM evaluation_datasets ORDER BY rowid').all()
     .map(({ id, data }) => ({ id, data: JSON.parse(data) })));

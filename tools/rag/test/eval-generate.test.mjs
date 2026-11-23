@@ -66,9 +66,9 @@ test('generates evaluation candidates across uncovered documents and keeps only 
   const result = await json('eval-data', 'generate', '--count', '4');
   assert.equal(result.generated, 4);
   assert.equal(result.cases, 5);
-  assert.deepEqual(result.kinds, { lexical: 4, paraphrase: 0, identifier: 0 });
+  assert.deepEqual(result.kinds, { lexical: 4, paraphrase: 0, identifier: 0, variant: 0 });
   assert.deepEqual(result.dropped, { quote_not_in_excerpt: 1, duplicate: 1, quote_not_unique: 1 });
-  assert.match(prompts[0], /Use the three kinds about equally\. .* at most 300 characters /u);
+  assert.match(prompts[0], /Use the four kinds about equally\. .* at most 300 characters /u);
   // Documents without cases are offered before the one that already has a case.
   assert.deepEqual(requests[0].map(({ doc }) => doc),
     ['docs:long.txt', 'docs:pump.txt', 'docs:repeat.txt', 'docs:covered.txt', 'docs:long.txt']);
@@ -77,7 +77,7 @@ test('generates evaluation candidates across uncovered documents and keeps only 
   const generated = cases.filter(({ state }) => state === 'generated');
   assert.equal(generated.length, 4);
   assert.ok(generated.every(({ input_by, generation, kind }) => input_by === 'model' && generation.model === 'writer'
-    && generation.prompt_version === 3 && kind === 'lexical'));
+    && generation.prompt_version === 4 && kind === 'lexical'));
 
   // Generated candidates stay out of the scores until they are reviewed.
   const before = await json('eval', '--tag', 'before');
@@ -104,7 +104,7 @@ test('generates evaluation candidates across uncovered documents and keeps only 
   const pump = 'ポンプの点検は毎月最初の営業日に行う。';
   reply = () => ({ cases: [one('ポンプの点検はいつ', 'docs:pump.txt', pump), one('月初の作業は', 'docs:pump.txt', pump, 'paraphrase')] });
   const paraphrases = await json('eval-data', 'generate', '--doc', 'pump.txt', '--kind', 'paraphrase', '--count', '2');
-  assert.deepEqual(paraphrases.kinds, { lexical: 0, paraphrase: 1, identifier: 0 });
+  assert.deepEqual(paraphrases.kinds, { lexical: 0, paraphrase: 1, identifier: 0, variant: 0 });
   assert.deepEqual(paraphrases.dropped, { kind_not_requested: 1 });
   assert.match(prompts.at(-1), /Write only paraphrase questions\. /u);
   await rejects(json('eval-data', 'generate', '--kind', 'other'), 'INVALID_EVAL_DATA');

@@ -10,10 +10,11 @@ This is the entrance for first-time users. Pick what you want to do and go to it
 |---|---|---|
 | **Let Claude or another agent look things up in my documents** | Not needed | [MCP](start-mcp.en.md) |
 | **Have my app or chatbot return answers with sources** | Needed to answer | [RAG](start-rag.en.md) |
-| **Build a knowledge base from my documents that people and agents can read** | Needed to write | [Wiki](start-wiki.en.md) |
-| **Sort piles of documents and notes by the work they serve** | Needed to write | [PARA](start-para.en.md) |
+| **Write up my documents as knowledge pages my team uses** | Needed to write | [Wiki](start-wiki.en.md) |
+| **Organize the documents and notes of my own work by my projects** | Needed to write | [PARA](start-para.en.md) |
 
 - **If unsure, start with the first.** No model to prepare; you can try it in minutes, and make the other forms from the same documents later.
+- **Wiki and PARA both organize documents, for different ends.** The Wiki builds knowledge everyone uses, by what it is about; PARA organizes the documents of your own work, by which project they serve.
 - **Always with sources.** Search results, answers and pages all point back to the original documents.
 
 How Knowledge-Nest differs from other tools, and how the four forms differ, is in [How the four forms differ](../README.en.md#how-the-four-forms-differ) in the README.

@@ -27,6 +27,7 @@ The order runs from closest to action at the top to farthest at the bottom.
 
 | | Wiki | PARA |
 |---|---|---|
+| Purpose | Build knowledge everyone uses (shared by a team) | Get your own work done (the documents of your projects) |
 | Unit | Pages by topic | A note for each document (key points and use) |
 | Top-level sections | Topic sections | Projects, Areas, Resources, Archives, with a folder for each project, area or topic under them |
 | Who decides the sections | The AI (added to the categories of `rules.md`) | People list Projects and Areas in `rules.md`; the AI adds topics of Resources |

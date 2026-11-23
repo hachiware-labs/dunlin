@@ -4,15 +4,34 @@
 
 **Turn the documents you have into knowledge an AI can use and cite. A few commands, and no programming.**
 
-Hand Knowledge-Nest a folder of documents (Markdown, PDF, Word, Excel, web pages ...) and it puts them in a form an AI can use. Start from one of the three things below, by what you want to do. Your documents and index stay in a folder on your machine, and answers and pages always carry their sources.
+Hand Knowledge-Nest a folder of documents (Markdown, PDF, Word, Excel, web pages ...) and it puts them in a form an AI can use. Your documents and index stay in a folder on your machine, and answers and pages always carry their sources.
+
+**One tool makes four kinds of document database.** Search that agents query (MCP), an API that answers with sources (RAG), knowledge pages everyone uses (Wiki), and notes that organize your own work (PARA). Where you would usually pick and combine a vector database, a RAG framework, a wiki tool and a notes app, Knowledge-Nest alone makes them all.
+
+```text
+                                         ┌─ MCP    search that agents query
+Folder of documents ──→ Knowledge-Nest ──┼─ RAG    answers with sources, returned to your app
+(Markdown, PDF, Word, Excel ...)         ├─ Wiki   knowledge pages everyone uses
+                                         └─ PARA   notes that organize your own work
+```
+
+- **One thing to learn.** One install, and one way to start: `nest init <form>`. Loading documents, citing sources, the configuration file (`KnowledgeNestfile.yaml`) and serving with `nest serve` are the same for every form.
+- **Grow from the same documents as needs change.** Start with search on a folder of documents, then add the answer API or a Wiki on the same folder later, with nothing to rebuild or migrate.
+- **Agents can reach every form.** All four are served over MCP, so agents such as Claude use the documents themselves and the knowledge an AI wrote from them in the same way.
+
+Start from one of the four things below, by what you want to do.
 
 ## Start from what you want to do
 
 | What you want | How to start | AI model | Where you see and use it |
 |---|---|---|---|
 | [**Let Claude look things up in my documents**](#let-claude-look-things-up-in-your-documents) | `nest init mcp` | Not needed | Agents such as Claude Desktop and Claude Code |
-| [**Build a knowledge base people can read from my documents**](#build-a-knowledge-base-from-your-documents-wiki) | `nest init wiki` | Needed (Ollama or an API) | A browser. Agents can look it up too |
-| [**Sort piles of documents and notes by the work they serve**](#sort-documents-and-notes-by-the-work-they-serve-para) | `nest init para` | Needed (Ollama or an API) | A browser. Agents can look it up too |
+| [**Return answers based on my documents in a chat app or internal tool**](#return-answers-based-on-your-documents-in-a-chat-app-rag) | `nest init rag` | Needed to answer (Ollama or an API) | Your own app or chatbot (HTTP, callable with the OpenAI SDK) |
+| [**Write up my documents as knowledge pages everyone uses**](#write-up-documents-as-a-knowledge-base-everyone-uses-wiki) | `nest init wiki` | Needed to write (Ollama or an API) | A browser. Agents can look it up too |
+| [**Organize the documents and notes of my own work by my projects**](#organize-your-own-documents-and-notes-by-project-para) | `nest init para` | Needed to write (Ollama or an API) | A browser. Agents can look it up too |
+
+- **Search, or answer.** The first two search the documents at each question. MCP lets an agent look things up and answer itself; RAG returns the words of the answer to your app.
+- **Both organize documents, for different ends.** The last two have an AI read and organize the documents first. The Wiki builds knowledge everyone uses, arranged by what it is about. PARA helps you get your own work done, arranged by which project a document serves. Shared team knowledge goes in a Wiki; the documents of your own work go in PARA.
 
 If unsure, start with the first: it needs no model. You can make the other forms from the same documents later. See [Install](#install); a step-by-step walkthrough is in [Getting started](docs/getting-started.en.md).
 
@@ -43,11 +62,36 @@ Paste what the last command prints into the MCP settings of Claude Desktop or Cl
 - **Rather than a vector-only search server.** Japanese keyword search, strong where you need the exact word (part numbers, clause numbers, technical terms), runs without an embedding model. Add vector search, which handles rephrasing, for a hybrid.
 - **Measured, and optimized.** Register questions with the quotes that answer them (an AI can draft the questions too), and measure the share of evidence search finds. Try candidate settings, such as chunk sizes or the number of results, all at once, rank them, and switch serving only to the one you checked. With search you build yourself, you would set up this evaluation and tuning separately. [Measure and optimize search](#measure-and-optimize-search-mcp-and-rag)
 
-**When your own app or chatbot should get answers with sources**, `nest init rag` adds an AI model that answers on top of the same search. `nest ask "question"` and HTTP return answers with sources. Unlike building it with LangChain and the like, there is no code to write. The HTTP API takes the OpenAI SDK as it is, so an existing app only changes where it connects. A question with no evidence in the documents is declined rather than answered. [RAG guide](docs/start-rag.en.md)
+### Return answers based on your documents in a chat app (RAG)
 
-### Build a knowledge base from your documents (Wiki)
+Have an internal chatbot, a help desk or your own app return answers written from your documents. It is the search above with an AI model added that writes the answer. The app only sends the question and gets back an answer with sources.
 
-An AI reads scattered manuals and minutes and writes them up as pages by subject. Each document you add extends the pages it concerns. People read the pages in a browser, and agents can look up the same pages.
+```sh
+curl http://127.0.0.1:4318/v1/responses -d '{"input":"How often is the mechanical seal replaced?"}'
+# → "Every two years [1]", where [1] cites line 7 of maintenance.md
+```
+
+```sh
+nest config set llm --provider ollama --model qwen3:4b   # choose the AI that writes answers (once)
+nest init rag ./rag --source ./manuals
+cd rag
+nest build
+nest ask "ポンプの点検周期は？"   # try a question
+nest serve                        # serve answers, search and MCP at http://127.0.0.1:4318
+```
+
+[RAG guide](docs/start-rag.en.md)
+
+**Compared with other ways**
+
+- **Rather than building it with LangChain and the like.** No code to write: a configuration file and commands bring it up. The answer API takes the OpenAI SDK as it is, so an existing app only changes where it connects.
+- **No evidence, no answer.** A question with no evidence in the documents is declined rather than answered. An answer's sources point to the version of the document and the range in the original.
+- **Rather than a no-code RAG app.** Documents and index stay in a folder on your machine. With a local Ollama as the model, documents never leave it. When you open it to other machines, add authentication and limit who connects.
+- **Measure and optimize what answers stand on.** An answer is only as good as the evidence found. The search is the same as MCP's, so measure recall and optimize the settings.
+
+### Write up documents as a knowledge base everyone uses (Wiki)
+
+Use it to build knowledge a team or department shares. An AI reads scattered manuals and minutes and writes them up as pages by subject, arranged by what the knowledge is about so that anyone can follow it. Each document you add extends the pages it concerns. People read the pages in a browser, and agents can look up the same pages.
 
 ```text
 Pump maintenance
@@ -78,9 +122,9 @@ Have a chat summarize your documents, and the answer is gone when the chat ends.
 
 It follows Andrej Karpathy's LLM-Wiki idea ([what an LLM-Wiki is](#what-an-llm-wiki-is)). [Wiki guide](docs/start-wiki.en.md)
 
-### Sort documents and notes by the work they serve (PARA)
+### Organize your own documents and notes by project (PARA)
 
-Use it when documents and notes have piled up and you no longer know what is where. An AI writes a note for each document and puts it in one of the four places of Tiago Forte's PARA. PARA sorts by whether you use something in your work now, not by subject ([explanation](https://fortelabs.com/the-p-a-r-a-method-a-universal-system-for-organizing-digital-information-75a9da8bfb37/)).
+Use it when the documents and notes of your own work have piled up and you no longer know what is where. Where the Wiki arranges knowledge for everyone by subject, PARA arranges it by whether you use it in your own projects. An AI writes a note for each document and puts it in one of the four places of Tiago Forte's PARA. PARA sorts by whether you use something in your work now, not by subject ([explanation](https://fortelabs.com/the-p-a-r-a-method-a-universal-system-for-organizing-digital-information-75a9da8bfb37/)).
 
 | Place | What goes there | Example |
 |---|---|---|
@@ -119,7 +163,9 @@ This part is for those who want the details. If the table above was enough to ch
 | | MCP | RAG | Wiki | PARA |
 |---|---|---|---|---|
 | What you get | Search for agents | An API that answers with sources | Pages of knowledge with sources | Notes in PARA form |
-| Who uses it | Agents | Your app | People and agents | People and agents |
+| Who uses it | Agents | Your app | A team, and agents | You, and agents |
+| Why organize | — | — | To build knowledge everyone uses | To get your own work done |
+| Arranged by | — | — | What the knowledge is about (subject) | Which project it serves (Projects, Areas, Resources, Archives) |
 | When documents are read | At each question | At each question | At ingest | At ingest |
 | What an agent receives | Passages of the documents | Passages of the documents (`/mcp`) | Pages the AI wrote | Notes the AI organized |
 | AI model | Not needed | Needed to answer | Needed to write | Needed to write |

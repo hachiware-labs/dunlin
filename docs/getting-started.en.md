@@ -17,7 +17,7 @@ This is the entrance for first-time users. Pick what you want to build and go to
 - **Search type and compiled type.** MCP and RAG search your documents at each question. Wiki and PARA have an AI read the documents first and write them up as pages or notes.
 - **Always sourced.** Search results, answers, and sentences on pages all point back to the place in the original.
 
-For more on choosing, see [Which document database to build, and when](../README.en.md#which-document-database-to-build-and-when) in the README.
+For more on choosing, see [How the four forms differ](../README.en.md#how-the-four-forms-differ) in the README.
 
 ## 2 What you need
 

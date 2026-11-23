@@ -2,22 +2,23 @@
 
 [日本語](README.md)
 
-**Hand over a folder of documents, and AI can answer from it — and show where the answer came from.**
+**Turn the documents you have into knowledge an AI can use and cite. A few commands, and no programming.**
 
-Knowledge-Nest builds a document database for AI from the documents you already have. From the same folder it makes search that agents query (MCP), an API that answers with sources (RAG), a Wiki that an AI writes and keeps up (LLM-Wiki), or notes that an AI organizes (PARA). Your documents and index stay on your machine, and answers always carry sources.
+Hand Knowledge-Nest a folder of documents (Markdown, PDF, Word, Excel, web pages ...) and it puts them in a form an AI can use. Start from one of the three things below, by what you want to do. Your documents and index stay in a folder on your machine, and answers and pages always carry their sources.
 
-```text
-Folder of documents ──→  Knowledge-Nest  ──┬─ MCP    agents such as Claude look things up and answer
-(Markdown, PDF,                            ├─ RAG    your app gets answers with sources over an API
- Word, Excel ...)                          ├─ Wiki   an AI reads the documents and writes pages with citations (served on the web and over MCP)
-                                           └─ PARA   an AI sorts documents and notes into the four PARA categories (served on the web and over MCP)
-```
+## Start from what you want to do
 
-## What it looks like
+| What you want | How to start | AI model | Where you see and use it |
+|---|---|---|---|
+| [**Let Claude look things up in my documents**](#let-claude-look-things-up-in-your-documents) | `nest init mcp` | Not needed | Agents such as Claude Desktop and Claude Code |
+| [**Build a knowledge base people can read from my documents**](#build-a-knowledge-base-from-your-documents-wiki) | `nest init wiki` | Needed (Ollama or an API) | A browser. Agents can look it up too |
+| [**Sort piles of documents and notes by the work they serve**](#sort-documents-and-notes-by-the-work-they-serve-para) | `nest init para` | Needed (Ollama or an API) | A browser. Agents can look it up too |
 
-These are illustrations. The source document is [the pump maintenance procedure](examples/manuals/maintenance.md) (in Japanese; translated here).
+If unsure, start with the first: it needs no model. You can make the other forms from the same documents later. See [Install](#install); a step-by-step walkthrough is in [Getting started](docs/getting-started.en.md).
 
-**Let Claude look things up in your manuals (MCP)**
+### Let Claude look things up in your documents
+
+Agents such as Claude find and read your manuals and design documents themselves, and answer with sources. Knowledge-Nest needs no AI model for this. Japanese search works on your machine right away, and your documents stay there. The source here is [the pump maintenance procedure](examples/manuals/maintenance.md) (in Japanese; translated here).
 
 ```text
 You      When do we inspect the pump again?
@@ -26,207 +27,115 @@ Claude   On the first business day of every month. Before inspecting, stop the p
          Sources: maintenance.md line 3, line 5
 ```
 
-**Get answers with sources in your own app (RAG)**
-
 ```sh
-curl http://127.0.0.1:4318/v1/responses -d '{"input":"How often is the mechanical seal replaced?"}'
-# → "Every two years [1]", where [1] cites line 7 of maintenance.md
+nest init mcp ./kb --source ./manuals          # make it from a folder of documents
+cd kb
+nest build                                     # read the documents and build the index
+nest search "ポンプの点検はいつ実施しますか"   # try a search
+nest serve --print-config                      # print what to paste into the agent's settings
 ```
 
-**Let an AI write a Wiki — and keep not one sentence without evidence (Wiki)**
+Paste what the last command prints into the MCP settings of Claude Desktop or Claude Code, and you are done. After you edit the documents, run `nest build` again: only the changed documents are processed, and a running agent sees the new content from its next question. [MCP guide](docs/start-mcp.en.md)
+
+**When your own app or chatbot should get answers with sources**, `nest init rag` adds an AI model that answers on top of the same search. `nest ask "question"` and HTTP return answers with sources; the HTTP API takes the OpenAI SDK as it is. [RAG guide](docs/start-rag.en.md)
+
+### Build a knowledge base from your documents (Wiki)
+
+An AI reads scattered manuals and minutes and writes them up as pages by subject. Each document you add extends the pages it concerns. People read the pages in a browser, and agents can look up the same pages.
 
 ```text
 Pump maintenance
-  Inspect on the first business day of every month [1]. Stop the pump and cut power first [2].
-  [1] maintenance.md line 3  [2] maintenance.md line 5
+  Inspect the pump on the first business day of every month. Before inspecting, stop the pump
+  and make sure the power is off.
+  Replace the mechanical seal every two years.
+  Sources: maintenance.md
 ```
-
-## Try it in three minutes: let an agent search your documents
-
-No model to set up. Japanese keyword search works on your machine right away.
 
 ```sh
-nest init mcp ./kb --source ./manuals
-cd kb
-nest build
-nest search "ポンプの点検はいつ実施しますか"
-nest serve --print-config
+nest config set llm --provider ollama --model qwen3:4b   # choose the AI that writes pages (once)
+nest init wiki ./wiki --purpose "Collect the maintenance procedures and parts information"
+cd wiki
+nest ingest ../manuals   # ingest documents; pass a URL for a web page
+nest serve               # open http://127.0.0.1:4319 in a browser
 ```
 
-Paste what the last command prints into the settings of an MCP client such as Claude Desktop or Claude Code, and the agent can search your documents. After you edit the documents, run `nest build` again; only the changed documents are processed.
+- **Checked against sources.** Each page lists the documents it was written from as its sources. `nest lint` tells you when a number, date or quotation of a page is not in its sources.
+- **Read and ask in the browser.** See documents, pages and sources side by side, and instruct a page, such as "list the checks before inspection as bullets".
+- **Everything can be undone.** Original documents are never changed. Each job is recorded, and `nest undo` takes it back.
 
-See [Install](#install). A step-by-step walkthrough is in [Getting started](docs/getting-started.en.md).
+It follows Andrej Karpathy's LLM-Wiki idea ([what an LLM-Wiki is](#what-an-llm-wiki-is)). [Wiki guide](docs/start-wiki.en.md)
 
-## Which document database to build, and when
+### Sort documents and notes by the work they serve (PARA)
 
-### Decide with two questions
+Use it when documents and notes have piled up and you no longer know what is where. An AI writes a note for each document and puts it in one of the four places of Tiago Forte's PARA. PARA sorts by whether you use something in your work now, not by subject ([explanation](https://fortelabs.com/the-p-a-r-a-method-a-universal-system-for-organizing-digital-information-75a9da8bfb37/)).
 
-```text
-Q1 When are your documents read?
-   │
-   ├─ At each question, by searching them (search type)
-   │     │
-   │     Q2 Who writes the answer?
-   │     ├─ The agent itself (Claude, for example) ............ MCP
-   │     └─ Knowledge-Nest (the app only receives the answer) .. RAG
-   │
-   └─ In advance: an AI reads them and writes them up as pages (compiled type)
-         │
-         Q2 How should it be arranged?
-         ├─ As pages of knowledge, by topic ................... Wiki
-         └─ By how you work (the four PARA categories) ........ PARA
-```
-
-The search type looks up your documents as they are and uses them as evidence. However many documents you have and however often they change, updates show up right away. With the compiled type, what an AI has read and organized is used by people in a browser and by agents over MCP. Because the knowledge has been rewritten, it can be read and understood as it is.
-
-### Choose by situation
-
-| When you… | Build | Why |
+| Place | What goes there | Example |
 |---|---|---|
-| Want Claude Code to look up your internal procedures and design documents while it works | **MCP** | The agent rephrases and searches as often as it needs. No model to set up |
-| Don't want to hand your documents to an outside model, and want to try everything locally first | **MCP** | Keyword search runs entirely on your machine, and the agent you already use writes the answer |
-| Want to add Q&A based on your documents to an internal portal or a chatbot | **RAG** | Send a question over HTTP and get an answer with sources back. The OpenAI SDK works as is |
-| Must always show the evidence behind answers to inquiries | **RAG** | Each citation points to the document's version and the range in its text |
-| Want a knowledge base that newcomers can read, built from scattered procedures and minutes | **Wiki** | An AI writes pages by topic and puts a citation on every sentence. It can be published on the web |
-| Want agents to use the same knowledge base that people read | **Wiki** | The same pages go to the browser and to MCP, so people and agents never drift apart |
-| Want to find contradictions between rules and manuals, or statements that went stale | **Wiki** | `verify --content` finds contradictions between pages; `verify` finds stale citations |
-| Have research notes and documents piling up and can't find what's where | **PARA** | An AI sorts them into projects, ongoing work, reference, and finished things |
-| Want to keep each project's documents apart from the documents of work you own long-term | **PARA** | Projects and Areas are kept apart, finished projects move to Archives, and agents can use them over MCP |
-| Need to explain and improve search accuracy with evidence | **MCP or RAG** | Measure recall with pairs of questions and answers, then compare settings and choose |
+| Projects | Efforts with a deadline | Next month's pump replacement |
+| Areas | Ongoing responsibilities | Routine equipment maintenance |
+| Resources | Reference that may help someday | A parts maker's catalog |
+| Archives | What is finished | Last year's inspection records |
 
-### The four forms at a glance
+You list your projects and areas in `rules.md`. The AI picks, from that list, where each document will be used, and writes its key points and how to use it in a note. `nest archive` moves a finished project to Archives with its notes. It starts as the Wiki does, with `init para` in place of `init wiki`. [PARA guide](docs/start-para.en.md)
+
+## What all of them share
+
+- **No programming.** You use the `nest` commands and a browser screen. What is done and how is written out to `KnowledgeNestfile.yaml`, which you touch only when you want to change something.
+- **Stays on your machine.** Documents and indexes are kept in the project folder. The only thing sent out is the text needed for a model you set up yourself.
+- **Always with sources.** Search results, answers and pages all point back to the original documents.
+- **Agents can use it too.** Every form is served over MCP, so agents such as Claude use the same knowledge.
+
+How Knowledge-Nest compares with LangChain or a vector database is in [Where Knowledge-Nest fits](docs/comparison.md) (Japanese).
+
+## How the four forms differ
+
+This part is for those who want the details. If the table above was enough to choose, skip it.
+
+### At a glance
 
 | | MCP | RAG | Wiki | PARA |
 |---|---|---|---|---|
-| What you get | Search for agents | An API that answers with sources | Pages of knowledge with citations | Notes in the PARA method |
-| Used by | Agents | Your app | People and agents | People and agents |
+| What you get | Search for agents | An API that answers with sources | Pages of knowledge with sources | Notes in PARA form |
+| Who uses it | Agents | Your app | People and agents | People and agents |
 | When documents are read | At each question | At each question | At ingest | At ingest |
-| What an agent receives | Passages from the documents | Passages from the documents (`/mcp`) | Pages an AI wrote | Notes an AI organized |
-| Model | Not needed | Needed to answer | Needed to write | Needed to write |
-| Updating documents | `build`; only changed documents | `build`; only changed documents | `ingress`; adds to the pages | `ingress`; adds to the notes |
-| How it is served | MCP | HTTP (answers, search) and MCP | Web (pages and a working screen) and MCP | Web (notes and a working screen) and MCP |
+| What an agent receives | Passages of the documents | Passages of the documents (`/mcp`) | Pages the AI wrote | Notes the AI organized |
+| AI model | Not needed | Needed to answer | Needed to write | Needed to write |
+| Updating documents | `build`, changed documents only | `build`, changed documents only | `ingress` adds to pages | `ingress` adds notes |
+| Served as | MCP | HTTP (answers, search) and MCP | Web (pages and a work screen) and MCP | Web (notes and a work screen) and MCP |
 
-- **Every form can be used over MCP.** From an agent's point of view, MCP and RAG give the documents themselves, while Wiki and PARA give knowledge an AI has compiled.
-- **Model effort**: only MCP needs no model on Knowledge-Nest's side. RAG calls a model at each question; Wiki and PARA call one at each ingest.
-- **Not sure? Start with MCP.** One document folder is enough to try it. If you later build RAG or a Wiki from the same documents, MCP keeps working.
+MCP and RAG search the documents at each question, so even many or often-changing documents are reflected at once. Wiki and PARA have an AI read and organize the documents first; the result is knowledge people can read as it is.
 
 ### How MCP and RAG differ
 
-Both search your documents at each question. The difference is **who writes the answer from the evidence found**.
+The difference is **who writes the answer from the evidence found**.
 
 ```text
-MCP   question ─→ [agent] ─asks for a search─→ Knowledge-Nest ─→ evidence (the passages)
-                     ↑                                       │
-                     └── the agent's own model reads the evidence and answers ──┘
+MCP   question ─→ [agent] ─asks for a search─→ Knowledge-Nest ─→ evidence (passages)
+                     ↑                                            │
+                     └──────── the agent's model reads it and answers ──┘
 
 RAG   question ─→ Knowledge-Nest ─→ search ─→ evidence ─→ a model Knowledge-Nest calls writes the answer ─→ answer with sources
 ```
 
-| | MCP | RAG |
-|---|---|---|
-| An analogy | A librarian brings the right documents to the person doing the research | A librarian reads the documents and hands over a written answer |
-| What Knowledge-Nest returns | Evidence (the passages and their sources) | An answer with sources |
-| Who writes the answer | The model on the agent's side (Claude, for example) | A model that Knowledge-Nest calls (Ollama or an API) |
-| The caller | An agent or app that speaks MCP | Anything that can call HTTP (your own app, the OpenAI SDK) |
-| A model on Knowledge-Nest's side | Not needed | An answering model is needed (search works without one) |
-| How questions go | The agent rephrases and searches as often as it needs | You send one question and get one answer back |
+- **MCP** is a librarian who brings the documents to the person looking things up. The agent rephrases and searches as often as it needs. Results carry document, line and heading, and `knowledge.read` reads back the original text.
+- **RAG** is a librarian who reads the documents and hands over a written answer. One question in, one answer out. Responses take the shape of OpenAI's Responses API, and `/v1/responses`, `/v1/search` and `/mcp` are served on one port. Token authentication and connection limits are available when you open it to others.
+- RAG's `serve` also serves MCP (`/mcp`), so moving from MCP to RAG keeps agents' search working.
 
-- **You want Claude or another agent to research your documents** → MCP.
-- **You want your app to receive answers** → RAG.
-- **Not sure** → start with MCP. It needs no model. The `serve` of a RAG project also offers MCP (`/mcp`) on the same port, so agents keep their search if you move to RAG later.
+Japanese is segmented with Lindera and IPADIC, and documents that match only on light words such as "する" or "こと" are not returned. Add technical terms with a user dictionary. Hybrid search with vectors, PDF, Office, HTML and OCR are supported too. [MCP and RAG](docs/mcp.md) (Japanese)
 
-### MCP: let Claude search your documents
+### What an LLM-Wiki is
 
-- **All it takes is a folder.** No GPU, no embedding model: ask in plain Japanese and it finds the passages. Your documents never leave your machine.
-- **Sources down to the line.** Each result carries the document, lines, and heading, and the agent can read the original back with `knowledge.read`.
-- **Connecting is copy and paste.** Paste the output of `nest serve --print-config` into your MCP client's settings.
-- **Keeps up with your documents without stopping.** Run `nest build` again: only the changed documents are processed, and running search uses the new index from the next question.
+LLM-Wiki is an approach to building a knowledge base with an LLM, proposed by Andrej Karpathy ([the original gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)).
 
-Japanese is split into words with Lindera and IPADIC, and documents that match only on light words such as "する" or "こと" are not returned. Add specialist terms with a user dictionary. Hybrid search with vectors, and PDF, Office, HTML, and OCR, are supported too. [MCP introduction](docs/start-mcp.en.md) · [MCP and RAG](docs/mcp.md) (Japanese)
-
-### RAG: an API that answers your app with sources
-
-- **The OpenAI SDK just works.** Responses have the shape of the OpenAI Responses API. Point `baseURL` at `http://127.0.0.1:4318/v1` and you are done.
-- **Citations point into the original.** Each citation carries the version of the document and the range in its text.
-- **Answers, search, and MCP on one port.** `/v1/responses`, `/v1/search`, and `/mcp` are served together.
-- **Local model or API, your choice.** Use a local Ollama model or an external API. To expose it, set token authentication and connection limits.
-
-```sh
-nest config set llm --provider ollama --model qwen3:4b
-nest init rag ./rag --source ./manuals
-cd rag
-nest build
-nest ask "ポンプの点検周期は？"
-nest serve
-```
-
-[RAG introduction](docs/start-rag.en.md) · [MCP and RAG](docs/mcp.md) (Japanese)
-
-### Wiki: an AI writes, and nothing without evidence survives
-
-#### What an LLM-Wiki is
-
-LLM-Wiki is an idea proposed by Andrej Karpathy for building a knowledge base with an LLM ([the original gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)).
-
-RAG searches the original documents for fragments at each question and assembles an answer on the spot. It reads from scratch every time, so nothing it read is kept. In an LLM-Wiki, the LLM writes what it has read into Wiki pages that link to each other. When a new document arrives, it adds to the related pages, revises summaries, and flags contradictions. Knowledge becomes something you compile once and keep growing.
-
-People choose the sources to add and ask the questions. The tedious upkeep — summarizing, linking pages, keeping them current — is the LLM's job. The pattern rests on three operations, and each maps directly to a Knowledge-Nest command.
+RAG searches the documents for fragments at each question and builds an answer on the spot; nothing it read is kept. In an LLM-Wiki, the LLM writes what it read as linked Wiki pages, and extends the pages a new document concerns. Knowledge becomes something written once and grown. People choose the documents and ask the questions.
 
 | LLM-Wiki operation | What it does | Knowledge-Nest |
 |---|---|---|
-| Ingest | Read a source, and write or revise the related pages | `nest ingress` |
-| Query | Ask questions against the Wiki pages, not the original documents | `nest query` |
-| Lint | Find orphaned pages, broken links, contradictions, and stale claims | `nest verify` (citations, source versions, links); `--content` (contradictions between pages) |
+| Ingest | Read a document and write or revise the pages it concerns | `nest ingest` |
+| Query | Ask the Wiki's pages, not the original documents | `nest query` |
+| Lint | Find orphan pages, broken links, contradictions and stale statements | `nest lint` (sources, versions, numbers and quotations, links), `--content` (contradictions between pages) |
 
-Sentences an LLM writes can contain plausible mistakes. Knowledge-Nest fills this gap in the LLM-Wiki pattern with citation checks.
-
-#### What Knowledge-Nest's Wiki adds
-
-- **Knowledge grows as pages.** Instead of searching the documents again at every question, an AI reads them and writes tidy pages. Each new document makes the pages grow.
-- **Every sentence the AI writes is checked.** Statements carry citations, and a statement whose citation does not match the source word for word is not saved.
-- **Everything can be undone.** Originals are never rewritten. Every change is recorded as a job, and `nest undo` takes it back.
-- **Finds what went stale.** `nest verify` finds broken links and stale citations; with `--content` it also finds contradictions between pages.
-- **The web for people, MCP for agents.** The same pages are served by a web server for browsers and over MCP. Knowledge that people have checked is what agents use, too.
-- **Read and ask in a browser.** Read documents, pages, and sources side by side, and ask for changes such as "list the checks before inspection as bullets".
-
-```sh
-nest config set llm --provider ollama --model qwen3:4b
-nest init wiki ./wiki --purpose "Collect maintenance procedures and part information"
-cd wiki
-nest ingress ../manuals
-nest serve        # serves the pages on the web and over MCP; open http://127.0.0.1:4319 in a browser
-```
-
-Agents can use the pages over MCP. Register the Knowledge-Nest Wiki in your MCP client's settings, and Claude or another agent answers from the pages the AI compiled. You can also get answers based on the pages with `nest query "question" --json`, and the pages as HTML in the project's `site/`. [Wiki introduction](docs/start-wiki.en.md) · [Wiki and PARA](docs/wiki.md) (Japanese)
-
-### PARA: an AI organizes your documents and notes
-
-PARA is a way to organize digital information proposed by Tiago Forte ([an introduction](https://fortelabs.com/the-p-a-r-a-method-a-universal-system-for-organizing-digital-information-75a9da8bfb37/)). Its core idea is to sort **not by topic, but by how close the information is to action**.
-
-Sort by topic — "pumps", "rules" — and folders keep multiplying while what you need right now gets buried. PARA sorts by "will I use this in my work now?" into four categories, from closest to action at the top to farthest at the bottom.
-
-| Category | What goes in | Example |
-|---|---|---|
-| Projects | Efforts with a deadline | Next month's pump replacement work |
-| Areas | Ongoing responsibilities | Routine equipment maintenance |
-| Resources | Reference that may help someday | A parts maker's catalog |
-| Archives | Finished things | Last year's inspection records |
-
-- **Information moves as your situation changes.** When a project ends, its material moves from Projects to Archives, and so does an area you no longer own. The categories are not fixed shelves; they reflect your work right now.
-- **Leave the sorting to the AI.** When you ingest documents, the AI writes notes and files them under a category.
-- **The same safety and delivery as the Wiki.** Citation checks, storage that never rewrites originals, undoable jobs, and serving on the web and over MCP work the same way.
-
-Read `init wiki` as `init para ./para` and you are started. [PARA introduction](docs/start-para.en.md)
-
-## Why Knowledge-Nest
-
-- **Everything stays local.** Documents and index live in the project folder. The only text sent anywhere is what a model needs, and only when you configure that model.
-- **Always sourced.** Search results, answers, and Wiki statements all point back to the place in the original.
-- **Improve by numbers, not by feel.** Register pairs of "this question, this sentence answers it", and measure the share of questions whose evidence search finds (recall). Change a setting, measure again, compare, then choose (MCP and RAG).
-- **Trying is fast.** The same input and the same processing never run twice. Changing only the chunk size does not read the documents again, so you can try many variations.
-- **The configuration is visible.** What Knowledge-Nest does is written to `KnowledgeNestfile.yaml`, and `nest validate` checks it before you run.
-
-How Knowledge-Nest compares with LangChain or a vector database is in [Where Knowledge-Nest fits](docs/comparison.md) (Japanese).
+Text an LLM writes can contain plausible errors. Knowledge-Nest covers this weakness by checking against sources. PARA shares with the Wiki the checks against sources, originals that are never changed, undoable jobs, and serving on the web and over MCP. [Using Wiki and PARA](docs/wiki.md) (Japanese)
 
 ## Improve search by numbers (new commands, in development)
 

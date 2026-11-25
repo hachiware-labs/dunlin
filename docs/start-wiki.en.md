@@ -11,6 +11,7 @@ This follows the LLM-Wiki idea proposed by Andrej Karpathy ([the original gist](
 - RAG searches for fragments of your documents at each question and assembles an answer on the spot. Nothing it read is kept.
 - An LLM-Wiki keeps what the AI has read, written up as pages. When a new document arrives, the related pages are extended, and the knowledge grows.
 - People choose the sources, ask questions, and give instructions. Summarizing, linking pages, and keeping them current are the AI's job.
+- **Knowledge grows into a shared asset of the team.** A document anyone adds extends the pages of its subjects, and a revised document gets only its own pages rewritten. Field knowledge in no document can become a source, with who said it, and an answer worth keeping becomes a page. Everyone reads the same pages in a browser, and agents look them up over MCP.
 
 Knowledge-Nest adds source checks to this. Each page keeps the documents it was written from as its sources, and a program checks that the numbers, dates and quotations of a page appear as written in those documents.
 

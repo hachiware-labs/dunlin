@@ -78,6 +78,19 @@ Answers cite the version of the document and the range in the original, and a qu
 
 ### Wiki: knowledge pages everyone uses
 
+What the Wiki does well is **grow a team's knowledge into a shared asset that belongs to no one person**. The documents and field knowledge each member has gather into pages by subject, and build up with their sources kept.
+
+| How it grows | What happens | What does it |
+|---|---|---|
+| Someone adds a document | The pages it concerns are extended, and a new subject becomes a page. A document with nothing new is recorded as such and does not pad the Wiki | `nest ingest`, or **資料を取り込む** (add documents) on the screen |
+| A document is revised | Only the pages written from it are rewritten from the new version | Tracking document versions |
+| People add what they know | Field knowledge in no document becomes a source, with who said it, and goes into the page | `nest instruct <page> "..." --supplement "..." --by <name>` |
+| Someone asks a question | An answer worth keeping becomes a page for the next person | `nest query`, `nest save-answer` |
+| Gaps and conflicts are found | Contradictions between pages, terms with no page, and questions and documents to look for next are named | `nest lint --content` |
+| Everyone uses it | The browser screen, opened to the team's network, and agents over MCP use the same pages | `nest serve` |
+
+People do not edit pages directly; they instruct the AI to change them. So whoever works on a page, it keeps its sources. What was done and when is kept in the log of the work (`log.html`), and each job can be undone.
+
 **With other tools** (LLM-Wiki scripts, notes app AI and the like), you do this yourself:
 
 1. Build the way an AI reads documents and writes pages, and the rules for writing them

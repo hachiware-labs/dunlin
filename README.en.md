@@ -37,6 +37,16 @@ It does not just make them all. For every form, Knowledge-Nest takes on the chor
 
 ### MCP: search that agents query
 
+What MCP does well is **grow the search to fit your documents and how they are used**. It is not done once loaded: you measure it, and make it find more.
+
+| How it grows | What happens | What does it |
+|---|---|---|
+| Documents are added or changed | Only the changed documents are processed; a running agent sees the new content from its next question, with nothing stopped | `nest build` |
+| Measure how well it finds answers | Collect questions with the quotes that answer them, and measure the share of evidence search finds. An AI drafts candidate questions, and people check them before adding | `nest eval-data generate` and `review`, `nest eval` |
+| Teach it your words | From missed questions, suggest technical terms that get split apart, and add them to a user dictionary | `nest dictionary suggest` and `add` |
+| Improve the setup | Try chunk sizes, hybrid search, a reranker and more, and compare with earlier results. Trying candidates at once optimizes it too | `nest report compare`, `nest optimize` |
+| Switch safely | Trying never changes the search being served; only a result you checked is switched to | `nest use`, `nest release` |
+
 **With other MCP servers** (filesystem or vector database MCP servers), you do this yourself:
 
 1. Find a tool that turns PDF and Office into text an agent can read
@@ -56,6 +66,14 @@ nest serve --print-config   # paste what it prints into the agent's settings
 It reads PDF, Office and scanned documents, and searches them by Japanese words with no embedding model. After you edit the documents, `nest build` replaces only the ones that changed. Measure how well it finds answers by recall, and optimize by trying candidate settings at once. [MCP guide](docs/start-mcp.en.md)
 
 ### RAG: an API that answers with sources
+
+What RAG does well, too, is **keep growing what its answers stand on**. An answer is only as good as the evidence found, and RAG's search is the same as MCP's, so the growth above becomes the quality of the answers. On top of that, the answering side can widen.
+
+| How it grows | What happens | What does it |
+|---|---|---|
+| The search grows | Document updates, measuring, the user dictionary, and optimizing the setup, as for MCP | As for MCP |
+| Change the model that writes answers | Swap a local Ollama for an API model by changing the settings and restarting `serve`, with no index to rebuild | `models` in `KnowledgeNestfile.yaml` |
+| Serve more apps | Open the same API to other internal apps and chatbots; agents use `/mcp` on the same port. Add authentication and limit who connects | `nest serve`, `serve.access` |
 
 **With other libraries** (LangChain, LlamaIndex and the like), you do this yourself:
 

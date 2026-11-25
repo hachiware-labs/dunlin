@@ -18,6 +18,8 @@ app ─question→ Knowledge-Nest ─search→ evidence ─→ answering model �
 
 Unlike MCP, the answer is written by a model that Knowledge-Nest calls. Your app sends one question and receives one answer.
 
+An answer is only as good as the evidence found. The search the answers stand on grows as MCP's does: document updates, measuring, a user dictionary and a better setup (section 4 of the [MCP introduction](start-mcp.en.md)). Swap the model that writes answers by changing the settings and restarting `serve`.
+
 ## Compared with other ways
 
 - **Rather than building it with LangChain and the like.** No code to write: a configuration file and commands bring it up. The answer API takes the OpenAI SDK as it is, so an existing app only changes where it connects.

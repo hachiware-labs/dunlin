@@ -22,6 +22,7 @@ PARA は、Tiago Forte が提唱した、デジタルの情報を整理する方
 - **Projects と Areas の違い**は終わりがあるかどうかです。「工事を終える」は Projects、「設備を保ち続ける」は Areas です。
 - **Areas と Resources の違い**は責任があるかどうかです。自分が守る基準のある領域は Areas、関心があるだけの話題は Resources です。
 - **情報は動く**。工事が終われば、その資料は Projects から Archives へ移ります。分類は固定の棚ではなく、いまの仕事を映すものです。
+- **仕事の知識と、自分の知識を分けて育てる**。Projects と Areas には、いまの仕事・テーマの知識が集まり、仕事とともに入れ替わります。Resources には、自分のスキルや関心の知識が集まり、仕事が変わっても残って積み上がります。Knowledge-Nest では、仕事の枠（Projects と Areas）は人が `rules.md` に書き、関心の枠（Resources の話題）は AI が資料に合わせて足していきます。
 
 ## Wiki との違い
 

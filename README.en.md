@@ -98,6 +98,17 @@ A program checks that numbers, dates and quotations are in the sources, and poin
 
 ### PARA: notes that organize your own work
 
+What PARA (Tiago Forte's method) does well is **grow the knowledge of your work and the knowledge of yourself apart**.
+
+| Place | Knowledge it grows | Example | Who decides |
+|---|---|---|---|
+| **Projects** | Knowledge for current work and themes; it has a deadline and is put away when done | Next month's pump replacement | You (in `rules.md`) |
+| **Areas** | Knowledge for work you stay responsible for | Routine equipment maintenance | You (in `rules.md`) |
+| **Resources** | Knowledge of your own skills and interests; it stays and builds up when your work changes | Vibration diagnosis, trends among parts makers | The AI, adding topics as documents come |
+| **Archives** | Finished projects, and areas you no longer own | Last year's replacement | Moved with `nest archive` |
+
+Documents for your work gather as notes of that project, and the whole project goes to Archives when it ends. Documents you do not use in current work but that feed your own growth collect under topics in Resources, and keep growing as your work changes. In Knowledge-Nest you set the frame of your work (Projects and Areas), and the AI widens the frame of your interests (Resources) as documents come.
+
 **Running PARA in a notes app** (Notion, Obsidian and the like), you do this yourself:
 
 1. Read each new document, decide which project it serves, and file it

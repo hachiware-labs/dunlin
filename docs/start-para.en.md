@@ -22,6 +22,7 @@ The order runs from closest to action at the top to farthest at the bottom.
 - **Projects vs. Areas** is about whether it ends. "Finish the replacement" is a Project; "keep the equipment running" is an Area.
 - **Areas vs. Resources** is about responsibility. A field where you keep a standard is an Area; a topic you are merely interested in is a Resource.
 - **Information moves.** When the replacement is done, its material moves from Projects to Archives. The categories are not fixed shelves; they reflect your work right now.
+- **Grow the knowledge of your work and of yourself apart.** Projects and Areas gather knowledge for current work and themes, which changes with your work. Resources gathers knowledge of your own skills and interests, which stays and builds up when your work changes. In Knowledge-Nest, people write the frame of their work (Projects and Areas) in `rules.md`, and the AI adds to the frame of interests (the topics of Resources) as documents come.
 
 ## How it differs from the Wiki
 

@@ -52,7 +52,9 @@
 - `init wiki` が作る `rules.md` に、ページの種類（`sources/`、`entities/`、`concepts/`、`overview`）、書き方、取り込みの手順を書くようにしました。Karpathy の LLM-Wiki の「schema」にあたります。既存のプロジェクトの `rules.md` と、PARA の `rules.md` は変わりません。
 - `log.html` を追記式にしました。作業を古い順に並べ、新しい作業を末尾に足します。1件は `[2026-01-02] ingest | スクラムガイド.md` のように、日付、したこと、対象で始まります。質問は質問文で、検査は指摘の件数で記録します。CLI の `verify`（`--content` なし）も作業として記録するようにしました。`--json` の結果に `run_id` が付きます。
 - `verify` に指摘を足しました。`MISSING_LINK` は、ほかのページの題名に触れているのにリンクのないページです。`--content` では、ページに出てくるのにページのない概念を `MISSING_PAGE` として挙げ、次に調べるとよい問いと探すとよい資料を `suggestions` に返します。すべての指摘に、ページと内容を書いた `description` が付きます。
-- `nest ingest` を `nest ingress` の、`nest lint` を `nest verify` の別名として使えるようにしました。
+- Wiki と PARA の取り込みと点検のコマンドを、`nest ingest` と `nest lint` にしました。LLM-Wiki の操作の名前と、作業の記録（`log.html`）と同じです。`nest --help`、`nest help`、使い方と打ち間違えの候補はこの名前で示します。前の名前の `nest ingress` と `nest verify` も受け付け、同じ動きをします。`--json` の結果の `command`、作業の記録、設定の `ingress` の区切りは変わりません。
+- `nest release` で、`init` が作ったプロジェクトのビルドも提供に切り替えられるようにしました。`nest use` と同じ動きで、`nest use` もそのまま使えます。このプロジェクトでは提供するビルドは1つなので、`--name` は受け付けません。`build` の表示も `nest release` を案内します。
+- 段階ごとの並びで書いた設定（版の保管）のプロジェクトを、`nest serve` で提供できるようにしました。設定の `serve` の `tag`（既定は `release`）が指す索引を、MCP（標準入出力）か HTTP（`/v1/search` と `/mcp`）で出します。`release` で名前を動かすと、動いている `serve` は止めずに次の要求から新しい索引を使います。検索は `search` の `top_k` までのチャンクを、4000 文字までの文脈にまとめて返します。HTTP の設定は RAG のプロジェクトと同じです。何も `release` していないときは `BUILD_REQUIRED` で止まり、`nest release` を案内します。答えを返す `/v1/responses` と `nest ask` は、この形ではまだ使えません。
 - `query` の結果に `question` を足しました。回答の引用でモデルがページの番号を取り違えても、その引用のあるページが1つだけなら、そのページの引用として扱います。`qwen3:4b` が出典の番号（`[3]` など）をページの番号として返し、`INVALID_CITATION` で失敗していました。
 - Wiki と PARA のページの本体を、`wiki/`（PARA は `site/`）の HTML ファイルにしました。これまでは `.knowledge-nest/state.sqlite` の表が本体で、HTML はそこから書き出したものでした。各ファイルの末尾の `<script type="application/json" id="knowledge-nest-page">` に、ページの ID、題名、本文、引用が読める JSON で入り、コマンドはここからページを読みます。以前の形のプロジェクトは、次に書き込みのあるコマンドを実行したときに、表のページがファイルに移ります。
 - `init wiki` が原本のフォルダ `raw/` を作るようにしました。`raw/` があるプロジェクトでは、`serve` の画面から上げたファイルを `raw/` に、URL から取った資料を `raw/<ホスト名>/<パス>` に保存します。これまでは `.knowledge-nest/artifacts/uploads/` に保存していました。

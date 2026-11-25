@@ -76,19 +76,19 @@ nest report compare baseline trial-eval
 - `nest dictionary suggest --report <tag>` proposes user dictionary words when a
   question's word is split differently from the document's.
 
-Adopting a trial is `nest use <build>`. It changes what is served: leave it to the user
+Adopting a trial is `nest release <build>`. It changes what is served: leave it to the user
 unless they ask you to do it.
 
 ## Wiki and PARA
 
 ```sh
-nest ingress <folder or file>    # read sources and write pages from them
+nest ingest <folder or file>    # read sources and write pages from them
 nest query "<question>"          # answer from the pages
-nest verify                      # check pages against their sources
+nest lint                      # check pages against their sources
 nest serve                       # browse the pages
 ```
 
-`ingress`, `instruct`, `archive` and `undo` change pages. `nest progress <work-id>` shows
+`ingest`, `instruct`, `archive` and `undo` change pages. `nest progress <work-id>` shows
 a running job and `nest undo <work-id>` reverts one. Take the rest from `--help`.
 
 ## Reading results

@@ -49,7 +49,7 @@ Commands, screen, and source rules are the same as the Wiki. Build a Wiki for an
 PARA takes effort to keep up. Each new document needs a decision about which project it serves, and each finished project needs putting away; that effort is where PARA tends to fall apart. Knowledge-Nest hands that effort to the AI and to commands, and leaves setting the frame to you.
 
 - **Not just filed, but with how to use it.** A note says how this document serves this project. Unlike filing that stops at a folder, you can tell later why it is there.
-- **You set the frame, the AI keeps to it.** The AI can only use the projects and areas you listed in `rules.md`. A note aimed anywhere else is not saved, and its document stays pending; list the project and run `nest ingress --pending` to place it.
+- **You set the frame, the AI keeps to it.** The AI can only use the projects and areas you listed in `rules.md`. A note aimed anywhere else is not saved, and its document stays pending; list the project and run `nest ingest --pending` to place it.
 - **A project's folder is ready to use.** A copy of each document sits in `資料/` beside its note, so opening a project's folder gives you the notes and the originals together.
 - **Put away in one step, and bring back any time.** `nest archive` moves a project's notes, document copies, links from other notes and its line of `rules.md` to Archives together; `--restore` or `nest undo` brings them back. `nest lint` points out projects past their deadline.
 - **Agents look things up in the context of your current work.** Notes are served over MCP too, so ask Claude "which parts do we replace in next month's work?" and it answers from that project's notes. Checks against sources, undo and the browser screen are shared with the Wiki.
@@ -88,7 +88,7 @@ Then list the projects you are running under `## Projects` of `rules.md`, and th
 ## 3 Ingest documents
 
 ```sh
-nest ingress ../inbox
+nest ingest ../inbox
 ```
 
 The AI reads the documents, writes a note for each document of use, and puts it where it will be used. A note says what the document is, its **key points** for the project or area, and **how to use it**.
@@ -98,7 +98,7 @@ The AI reads the documents, writes a note for each document of use, and puts it 
 3. Anything else that may help later goes to `Resources/<topic>/<document>`; a new topic is added under `## Resources` of `rules.md`
 4. A document of no use gets no note and is recorded as having nothing to add ("得るものなし")
 
-The AI is given the list of places a note can go to (the projects and areas of the rules, and the topics so far). It decides only the place; the note is named after its document. A document has one note at one place: when the AI writes it at another place as well, the first is kept and the others are warned of (`NOTE_SKIPPED`). A copy of the document is kept in `資料/` beside the note, and the note's source points to it. A note placed in a project that the rules do not list is not saved (`PLACE_INVALID`); its document stays pending, so list the project and run `nest ingress --pending`. Numbers, dates and quotations not found in the document are warned of (`UNSUPPORTED_LITERAL`). Pass a URL, as in `nest ingress https://...`, to ingest a web page. Before that, run `nest browser` once, sign in to the sites to read in the browser of nest it opens, then close it ([details](wiki.md)). If it takes a while, give the job ID to `nest progress <job-id>` to follow it.
+The AI is given the list of places a note can go to (the projects and areas of the rules, and the topics so far). It decides only the place; the note is named after its document. A document has one note at one place: when the AI writes it at another place as well, the first is kept and the others are warned of (`NOTE_SKIPPED`). A copy of the document is kept in `資料/` beside the note, and the note's source points to it. A note placed in a project that the rules do not list is not saved (`PLACE_INVALID`); its document stays pending, so list the project and run `nest ingest --pending`. Numbers, dates and quotations not found in the document are warned of (`UNSUPPORTED_LITERAL`). Pass a URL, as in `nest ingest https://...`, to ingest a web page. Before that, run `nest browser` once, sign in to the sites to read in the browser of nest it opens, then close it ([details](wiki.md)). If it takes a while, give the job ID to `nest progress <job-id>` to follow it.
 
 ## 4 Read: in a browser and over MCP
 
@@ -121,7 +121,7 @@ nest serve
 | Add a rule for sorting from now on | `nest instruct --persistent "Put catalogs in Resources"` |
 | Put away a finished project | `nest archive Projects/<project>` (moves to `Archives/<project>` with its notes and documents, moves its line of `rules.md` to `## Archives`, and follows the links to its notes; `nest archive --restore Archives/<project>` or `nest undo` brings it back) |
 | Put away a single note | `nest archive <note>` |
-| Find overdue projects and conflicts | `nest verify`, `nest verify --content` |
+| Find overdue projects and conflicts | `nest lint`, `nest lint --content` |
 | Undo a job | `nest undo <job-id>` |
 
 Archived notes leave ordinary questions. They are not deleted; you can still read them and bring them back.
@@ -131,7 +131,7 @@ Archived notes leave ordinary questions. They are not deleted; you can still rea
 | Symptom | What to do |
 |---|---|
 | Notes land in the wrong place | List your projects and areas under `## Projects` and `## Areas` of `rules.md`. Add rules with `instruct --persistent` |
-| `PLACE_INVALID` warning | A note for a project or area the rules do not list is not saved. List it and run `nest ingress --pending` |
+| `PLACE_INVALID` warning | A note for a project or area the rules do not list is not saved. List it and run `nest ingest --pending` |
 | `MODEL_REQUIRED` | Set `models.writer.model` |
 
 More in [Wiki](start-wiki.en.md#9-when-something-goes-wrong) and [Troubleshooting](troubleshooting.md) (Japanese).

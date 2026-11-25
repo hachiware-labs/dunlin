@@ -115,12 +115,8 @@ pub fn run(
         print(&crate::cli_args::help_text());
         return 0;
     };
-    // The names an LLM Wiki gives two of its operations.
-    let command = match command.as_str() {
-        "ingest" => "ingress".to_owned(),
-        "lint" => "verify".to_owned(),
-        _ => command,
-    };
+    // `ingest` and `lint` run as `ingress` and `verify` (cli_args::public_name).
+    let command = crate::cli_args::internal_name(&command).to_owned();
     if command == "--help" || command == "-h" {
         print(&crate::cli_args::help_text());
         return 0;
@@ -565,11 +561,21 @@ fn dispatch(
     explicit: Option<&str>,
     json: bool,
 ) -> Result<Done, CliError> {
-    let command = state.command;
     let env = state.env;
     // The versioned store has its own files. Its own commands always go there; the commands
     // both stores have go there when the configuration file is written for it.
     let project = env.resolve(parsed.string("project").or(explicit).unwrap_or("."));
+    // `release` serves a build of a project made by `init` as `use` does: one command serves
+    // what was checked, whichever form the project is written in.
+    if state.command == "release" && made_by_init(&project) {
+        if parsed.value("name").is_some() {
+            return Err(invalid(
+                "--name works with a configuration file written as lists of modules. A project made by init serves one build.",
+            ));
+        }
+        state.command = "use";
+    }
+    let command = state.command;
     if let Some((action, argument)) = crate::cli_store::route(command, parsed, &project, env)? {
         let (data, text) = crate::cli_store::command(
             action,
@@ -598,6 +604,11 @@ fn dispatch(
     };
     if command == "serve" && flag("json") && !flag("print-config") {
         return Err(invalid("Use --json with serve --print-config."));
+    }
+    if command == "serve"
+        && let Some(done) = serve_staged(state, parsed, &project)?
+    {
+        return Ok(done);
     }
     let first = positionals.first().map(String::as_str);
     if let Some(error) = first.and_then(|given| unknown_action(command, given)) {
@@ -1868,9 +1879,9 @@ fn initialize(
             let first = if missing.is_empty() && kind == "wiki" {
                 "Put sources in raw/, then run nest ingest raw/<file>.".to_owned()
             } else if missing.is_empty() {
-                "Run nest ingress <path>.".to_owned()
+                "Run nest ingest <path>.".to_owned()
             } else {
-                format!("Set {}, then run nest ingress.", missing.join(" and "))
+                format!("Set {}, then run nest ingest.", missing.join(" and "))
             };
             // Web pages are read only in the browser profile of nest.
             format!(
@@ -3537,10 +3548,23 @@ fn status_command(state: &mut Run, project: &Project) -> Result<ConfigValue, Cli
 
 /// `withServeOverrides(type, settings, values, issue)`: the settings and their issues.
 fn serve_overrides(project: &Project, parsed: &Parsed) -> (Option<ConfigValue>, Vec<ConfigValue>) {
-    let kind = project.kind.as_str();
-    let settings = project.serve_settings.clone().unwrap_or_default();
+    overrides(
+        project.kind.as_str(),
+        project.serve_settings.clone().unwrap_or_default(),
+        project.config_path.clone(),
+        parsed,
+    )
+}
+
+/// The serve settings of a project of `kind` with `--transport`, `--host` and `--port` applied,
+/// validated, and the issues found.
+fn overrides(
+    kind: &str,
+    settings: ConfigValue,
+    file: String,
+    parsed: &Parsed,
+) -> (Option<ConfigValue>, Vec<ConfigValue>) {
     let mut issues = Vec::new();
-    let file = project.config_path.clone();
     let mut issue =
         |code: ConfigValue, path: &[ConfigValue], expected: ConfigValue, hint: ConfigValue| {
             issues.push(object(vec![
@@ -3770,6 +3794,216 @@ fn serve_project(state: &Run, project: &Project, settings: ConfigValue) -> Resul
         });
     state.events.serving(false);
     outcome
+}
+
+/// The host of serving an index of the versioned store: its indexes are keyword indexes, so
+/// no models and no index tool.
+struct StoreServer {
+    host: String,
+    events: Arc<dyn CliEvents>,
+}
+
+impl crate::embed::Charge for StoreServer {
+    fn charge(&self, _bytes: usize) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+impl crate::search_stage::SearchHost for StoreServer {
+    fn index_tool(&self) -> Result<String, String> {
+        Err("An index of this form has no vector index.".into())
+    }
+}
+
+impl crate::serve::ServeHost for StoreServer {
+    fn search_models(&self, _build: &ConfigValue) -> Result<ConfigValue, String> {
+        Ok(object(Vec::new()))
+    }
+
+    fn listening(&self, address: &ConfigValue) {
+        match address.get("port") {
+            None | Some(ConfigValue::Null) => print_error(&format!(
+                "Knowledge-Nest MCP stdio ({})",
+                js_string(address.get("buildId"))
+            )),
+            Some(port) => print_error(&format!(
+                "Knowledge-Nest: {}/",
+                serve_address(&self.host, &js_string(Some(port)))
+            )),
+        }
+    }
+
+    fn opened(&self, directory: &str) {
+        self.events.opened(directory);
+    }
+}
+
+/// `serve` of a project whose `KnowledgeNestfile.yaml` is written for the versioned store: it
+/// serves the index that the `tag` of its `serve` section names (default `release`), and moves
+/// to the next one whenever `nest release` moves that name. The rest of `serve` holds the same
+/// settings as a RAG project's, without the answer endpoint; without a transport it serves MCP on
+/// standard input and output. `None` when the file is not of this form.
+fn serve_staged(state: &mut Run, parsed: &Parsed, project: &str) -> Result<Option<Done>, CliError> {
+    let file = std::path::Path::new(project).join("KnowledgeNestfile.yaml");
+    let Ok(config) = std::fs::read_to_string(&file) else {
+        return Ok(None);
+    };
+    if !crate::settings::staged(&config) {
+        return Ok(None);
+    }
+    let settings = crate::settings::Settings::parse(&config).map_err(invalid)?;
+    let plan = settings.plan().map_err(invalid)?;
+    let name = plan.release.clone().unwrap_or_else(|| "release".to_owned());
+    let written = settings
+        .get("serve")
+        .and_then(serde_json::Value::as_object)
+        .map(|serve| {
+            serve
+                .iter()
+                .filter(|(key, _)| key.as_str() != "tag")
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect::<serde_json::Map<_, _>>()
+        })
+        .unwrap_or_default();
+    // The answer endpoint needs an answer model, which this form does not have yet.
+    let answers = written
+        .get("endpoints")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|endpoints| endpoints.iter().any(|endpoint| endpoint == "responses"));
+    if answers {
+        return Err(invalid(
+            "The responses endpoint needs an answer model, which a configuration file of this form does not have yet. Serve the search and MCP endpoints.",
+        ));
+    }
+    let mut written = parse_json(&serde_json::Value::Object(written).to_string())?;
+    if written.get("transport").is_none() {
+        assign_object(&mut written, "transport", text("stdio"));
+    }
+    let file_name = file.to_string_lossy().into_owned();
+    let (settings, issues) = overrides("rag", written, file_name, parsed);
+    if let Some(issue) = issues.first() {
+        let hint = js_string(issue.get("hint"));
+        return Err(CliError::new(2, "INVALID_CONFIG", hint).with_diagnostics(issues));
+    }
+    let mut settings = settings.unwrap_or_default();
+    // The endpoints a RAG project has by default, but the answer endpoint.
+    if let ConfigValue::Object(entries) = &mut settings
+        && let Some((_, ConfigValue::Array(endpoints))) =
+            entries.iter_mut().find(|(key, _)| key == "endpoints")
+    {
+        endpoints.retain(|endpoint| endpoint.as_str() != Some("responses"));
+    }
+    let http = string_field(&settings, "transport") == Some("http");
+    if parsed.flag("print-config") {
+        state.context = Some(object(vec![("project", text(project))]));
+        if http {
+            let endpoints = items(settings.get("endpoints"));
+            if !endpoints
+                .iter()
+                .any(|endpoint| endpoint.as_str() == Some("mcp"))
+                || settings.get("port") == Some(&ConfigValue::Number(0.0))
+            {
+                return Err(invalid(
+                    "MCP registration requires an enabled MCP endpoint and a fixed HTTP port.",
+                ));
+            }
+            return Ok(Some(Done::Data(object(vec![(
+                "url",
+                text(&format!(
+                    "{}/mcp",
+                    serve_address(
+                        &js_string(settings.get("host")),
+                        &js_string(settings.get("port"))
+                    )
+                )),
+            )]))));
+        }
+        let args = vec![
+            text(&state.env.cli),
+            text("serve"),
+            text("--project"),
+            text(project),
+            text("--transport"),
+            text("stdio"),
+        ];
+        return Ok(Some(Done::Data(object(vec![
+            ("command", text(&state.env.exec_path)),
+            ("args", ConfigValue::Array(args)),
+        ]))));
+    }
+    if http {
+        serve_credential(&settings)?;
+    }
+    let token = if http {
+        serve_token(&settings)
+    } else {
+        ConfigValue::Null
+    };
+    let data = std::path::Path::new(project).join(".knowledge-nest");
+    let indexes = data.join("indexes").to_string_lossy().into_owned();
+    // The search a RAG project has by default, with the most chunks the `search` section says.
+    let search = parse_json(
+        &serde_json::json!([
+            { "use": "retrieval.keyword", "with": { "top_k": plan.top_k } },
+            { "use": "context.assemble", "with": {
+                "budget_chars": 4000,
+                "retrieval": "fill_budget",
+                "max_candidates": 100,
+                "merge_overlaps": true,
+                "truncate_last": true,
+                "include_headings": true,
+            } },
+        ])
+        .to_string(),
+    )?;
+    let request = object(vec![
+        ("projectType", text("rag")),
+        ("settings", settings.clone()),
+        ("token", token),
+        (
+            "paths",
+            object(vec![
+                ("state", text("")),
+                ("artifacts", text(&indexes)),
+                ("corpus", text("")),
+            ]),
+        ),
+        ("search", search),
+    ]);
+    let request: crate::serve::ServeRequest = deserialize(&request, "serve")?;
+    let host: Arc<dyn crate::serve::ServeHost> = Arc::new(StoreServer {
+        host: js_string(settings.get("host")),
+        events: state.events.clone(),
+    });
+    let stdio = !http;
+    state.events.serving(true);
+    let outcome = crate::serve::Serving::open_store(request, host, &data.join("store"), &name)
+        .map_err(CliError::from)
+        .and_then(|serving| {
+            let serving = Arc::new(serving);
+            if stdio {
+                crate::serve::serve_stdio(serving, false, state.cancel)
+            } else {
+                crate::serve::serve_http(serving, state.cancel)
+            }
+            .map_err(CliError::plain)
+        });
+    state.events.serving(false);
+    outcome.map(|()| Some(Done::Quiet))
+}
+
+/// Whether the project's `KnowledgeNestfile.yaml` is there and of the form `init` writes, not
+/// written for the versioned store.
+fn made_by_init(project: &str) -> bool {
+    std::fs::read_to_string(std::path::Path::new(project).join("KnowledgeNestfile.yaml"))
+        .is_ok_and(|config| !crate::settings::staged(&config))
+}
+
+/// Sets a key of a JSON object value.
+fn assign_object(value: &mut ConfigValue, key: &str, entry: ConfigValue) {
+    if let ConfigValue::Object(entries) = value {
+        entries.push((key.to_owned(), entry));
+    }
 }
 
 struct WikiServer {

@@ -74,7 +74,7 @@ trying things. Run `test` once, at the end, on the setting you chose. A setting 
 
 **Building is safe; serving is the user's decision.** Building, evaluating and optimizing
 only add versions to the project's store: nothing is overwritten and what is served does
-not move. `nest release`, `nest build --release` and (classic) `nest use` change
+not move. `nest release`, `nest build --release` and (classic) `nest release` change
 what real users of the search get. Recommend, show the numbers, and release only when the
 user says so.
 

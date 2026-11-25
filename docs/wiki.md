@@ -32,7 +32,7 @@ wiki-demo/
 └─ .knowledge-nest/        ← 原本から取り出した本文と版、作業の記録（作り直せる控え）
 ```
 
-`nest ingest` は `nest ingress` の、`nest lint` は `nest verify` の別名です。どちらの名前でも同じ動きをします。
+`nest ingest` と `nest lint` が、取り込みと点検のコマンドです。前の名前の `nest ingress` と `nest verify` も受け付け、同じ動きをします。
 
 ## LLM-Wiki との対応
 
@@ -185,7 +185,7 @@ nest browser https://x.com/login
 |---|---|
 | 既定（`loader.auto` の `fetch: browser`、`browser: auto`） | Chrome、Edge、Chromium の順に、専用プロファイルのあるものを使う |
 | `browser: chrome`、`browser: edge`、実行ファイルのパス | そのブラウザだけを使う |
-| `fetch: http`、または `nest ingress --fetch http <URL>` | ブラウザを使わず、HTTP で1回ダウンロードする。スクリプトは動かず、ログインの状態もない |
+| `fetch: http`、または `nest ingest --fetch http <URL>` | ブラウザを使わず、HTTP で1回ダウンロードする。スクリプトは動かず、ログインの状態もない |
 
 ```yaml
 ingress:
@@ -225,11 +225,11 @@ nest ingest https://x.com/i/bookmarks --scroll 100 --no-follow
 
 作業の結果の `fetched` には、X のページから読んだ投稿の数が `posts` に出ます。
 
-Shift_JIS や EUC-JP のページは UTF-8 に直して保存します。取得した内容は `raw/<ホスト名>/<パス>` に原本として保存され（例：`raw/example.com/manuals/pump.html`）、ページの出典は元の URL を指します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。CLI でも `nest ingress https://example.com/page` のように URL を渡せます。
+Shift_JIS や EUC-JP のページは UTF-8 に直して保存します。取得した内容は `raw/<ホスト名>/<パス>` に原本として保存され（例：`raw/example.com/manuals/pump.html`）、ページの出典は元の URL を指します。同じ URL をもう一度取り込むと、同じ資料の新しい版になります。CLI でも `nest ingest https://example.com/page` のように URL を渡せます。
 
 `serve` の画面を他の人にも開く場合（`serve.host` を `127.0.0.1` 以外にする場合）は、`serve.access.auth` で認証を付けてください。家や職場の LAN の中だけに開くなら、`serve.access.allowed_clients` に `192.168.11.0/24` のような範囲を書くと、範囲の外からの接続を断ります。この場合は認証なしでも起動できますが、範囲の中の端末はだれでも読み書きでき、画面からこのマシンのファイルをパスで取り込めます。設定の例は [提供する入口と、接続を許す相手を決める](serve.md) にあります。この PC のすべてのプロジェクトにまとめて設定するなら、`nest config set serve --host 0.0.0.0 --allowed-hosts localhost,127.0.0.1,192.168.11.16 --allowed-clients 192.168.11.0/24` のようにコマンドで書けます。画面から渡した URL は、`serve` を動かしているマシンから取得されます。
 
-CLI の `ingress` も作業 ID を表示します。別の端末でプロジェクトを開き、`WORK_ID` を表示された ID に置き換えると進捗を確認できます。
+CLI の `ingest` も作業 ID を表示します。別の端末でプロジェクトを開き、`WORK_ID` を表示された ID に置き換えると進捗を確認できます。
 
 ```sh
 nest progress WORK_ID --json

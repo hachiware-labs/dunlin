@@ -33,7 +33,7 @@ nest serve
 ```sh
 nest init wiki ./wiki-demo --purpose "ポンプの保全手順をまとめる" --llm-provider ollama --llm-model qwen3:4b --no-ocr
 cd wiki-demo
-nest ingress ../examples/manuals
+nest ingest ../examples/manuals
 nest serve
 ```
 
@@ -46,7 +46,7 @@ Wiki の `serve` を使っている場合は `Ctrl+C` で止めてから、リ�
 ```sh
 nest init para ./para-demo --purpose "設備保全に関する資料を整理する" --llm-provider ollama --llm-model qwen3:4b --no-ocr
 cd para-demo
-nest ingress ../examples/manuals
+nest ingest ../examples/manuals
 nest serve
 ```
 

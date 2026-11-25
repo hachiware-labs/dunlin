@@ -94,16 +94,16 @@ pub const COMMANDS: [(&str, &str); 38] = [
         "nest evidence-map <create|list|show|export|import|confirm> [--project <directory>] [--build <ref>] [--json]",
     ),
     (
-        "ingress",
-        "nest ingress <path or URL...> | nest ingress --pending [--project <directory>] [--fetch browser|http] [--scroll <n>] [--no-follow] [--dry-run] [--source-only] [--json]",
+        "ingest",
+        "nest ingest <path or URL...> | nest ingest --pending [--project <directory>] [--fetch browser|http] [--scroll <n>] [--no-follow] [--dry-run] [--source-only] [--json]",
     ),
     (
         "query",
         "nest query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]",
     ),
     (
-        "verify",
-        "nest verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]",
+        "lint",
+        "nest lint [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]",
     ),
     (
         "issue",
@@ -140,7 +140,7 @@ pub const COMMANDS: [(&str, &str); 38] = [
     ),
     (
         "release",
-        "nest release <index> [--name <served-name>] [--project <directory>] [--json]",
+        "nest release <build or index> [--name <served-name>] [--project <directory>] [--json]",
     ),
     (
         "optimize",
@@ -152,7 +152,27 @@ pub const COMMANDS: [(&str, &str); 38] = [
     ),
 ];
 
+/// The name a command is shown by. `ingress` and `verify` are shown as `ingest` and `lint`, the
+/// names an LLM Wiki gives its operations; the old names are still taken.
+pub fn public_name(command: &str) -> &str {
+    match command {
+        "ingress" => "ingest",
+        "verify" => "lint",
+        _ => command,
+    }
+}
+
+/// The name a command runs by: its work records, plans and screens keep the old names.
+pub fn internal_name(command: &str) -> &str {
+    match command {
+        "ingest" => "ingress",
+        "lint" => "verify",
+        _ => command,
+    }
+}
+
 pub fn usage(command: &str) -> Option<&'static str> {
+    let command = public_name(command);
     COMMANDS
         .iter()
         .find(|(name, _)| *name == command)
@@ -194,13 +214,19 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
                 "status",
                 "Show the serving build, its evaluation and storage",
             ),
-            ("use", "Serve another build"),
+            (
+                "use",
+                "The earlier name of release, for a project made by init",
+            ),
             ("tag", "Name a build"),
             (
                 "list",
                 "List the named versions of documents, indexes and results",
             ),
-            ("release", "Serve an index that is there, or go back to one"),
+            (
+                "release",
+                "Serve a build or an index that is there, or go back to one",
+            ),
         ],
     ),
     (
@@ -230,13 +256,10 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
     (
         "Wiki and PARA",
         &[
-            ("ingress", "Read sources and write wiki pages from them"),
+            ("ingest", "Read sources and write wiki pages from them"),
             ("query", "Answer a question from the wiki pages"),
-            ("verify", "Check pages against their sources"),
-            (
-                "issue",
-                "Open, resolve or dismiss an issue that verify found",
-            ),
+            ("lint", "Check pages against their sources"),
+            ("issue", "Open, resolve or dismiss an issue that lint found"),
             ("rules", "Print the writing rules of the wiki"),
             ("progress", "Show the progress of a running job"),
             (
@@ -264,6 +287,7 @@ pub const GROUPS: [(&str, &[(&str, &str)]); 5] = [
 
 /// What a command does, as `nest --help` lists it.
 pub fn description(command: &str) -> Option<&'static str> {
+    let command = public_name(command);
     GROUPS
         .iter()
         .flat_map(|(_, commands)| commands.iter())
@@ -354,6 +378,7 @@ fn staged_help(command: &str) -> Option<&'static str> {
 
 /// The help of one command: what it does and its usage.
 pub fn command_help(command: &str) -> Option<String> {
+    let command = public_name(command);
     let mut help = format!(
         "nest {command} — {}\n\nUsage:\n{}",
         description(command).unwrap_or_default(),

@@ -31,7 +31,7 @@ nest status [--project <directory>] [--json]
 nest use <build> [--project <directory>] [--json]
 nest tag <name> [build] [--move] [--project <directory>] [--json]
 nest list [documents|chunks|indexes|eval-data|results] [--project <directory>] [--json]
-nest release <index> [--name <served-name>] [--project <directory>] [--json]
+nest release <build or index> [--name <served-name>] [--project <directory>] [--json]
 ```
 
 ## 評価と辞書
@@ -49,9 +49,9 @@ nest results [<name>] [--project <directory>] [--json]
 ## Wiki・PARA の操作
 
 ```text
-nest ingress <path or URL...> | nest ingress --pending [--project <directory>] [--fetch browser|http] [--scroll <n>] [--no-follow] [--dry-run] [--source-only] [--json]
+nest ingest <path or URL...> | nest ingest --pending [--project <directory>] [--fetch browser|http] [--scroll <n>] [--no-follow] [--dry-run] [--source-only] [--json]
 nest query <question> [--page <id>] [--target <text>] [--project <directory>] [--json]
-nest verify [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]
+nest lint [--page <id>] [--content] [--all-issues] [--project <directory>] [--json]
 nest issue <id> <open|resolved|dismissed> [--project <directory>] [--json]
 nest rules [--project <directory>] [--json]
 nest progress <work-id> [--project <directory>] [--json]

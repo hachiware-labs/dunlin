@@ -266,6 +266,28 @@ pub fn index(store: &Store, request: &IndexRequest<'_>) -> StoreResult<IndexOutc
     })
 }
 
+/// The name of the directory below `directory` that holds the keyword index of an `index`
+/// snapshot, when the snapshot is one and its index is built.
+pub fn located(store: &Store, directory: &Path, id: SnapshotId) -> StoreResult<Option<String>> {
+    let snapshot = store.snapshot(id)?;
+    if snapshot.kind != "index" {
+        return Ok(None);
+    }
+    let Some(info) = snapshot
+        .items
+        .iter()
+        .find(|(name, _)| name.as_slice() == ["keyword"])
+        .and_then(|(_, id)| InfoId::parse(id))
+    else {
+        return Ok(None);
+    };
+    Ok(built(store, &info, directory)?.and_then(|location| {
+        location
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+    }))
+}
+
 /// Searches the keyword index of an `index` snapshot, given by a tag or its serial number.
 pub fn search(
     store: &Store,

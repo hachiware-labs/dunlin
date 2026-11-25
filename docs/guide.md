@@ -8,7 +8,7 @@
 
 MCP・RAG の検索を、まず [MCP 入門](start-mcp.md) か [RAG 入門](start-rag.md) で動かしてから読むと分かりやすい文書です。2章で最初の設定を書き、3章から先で改善の進め方を説明します。
 
-> この文書の新しいコマンドは、いまはテキストと Markdown（`.md`、`.markdown`、`.txt`）、キーワード検索、根拠の回収率に対応しています。ベクトル検索、ユーザー辞書、PDF や Office の読み込み、`serve` などは `init` が作る形の設定で使います（[10 従来の流れで使うもの](#10-従来の流れで使うもの)）。
+> この文書の新しいコマンドは、いまはテキストと Markdown（`.md`、`.markdown`、`.txt`）、キーワード検索、根拠の回収率に対応しています。ベクトル検索、ユーザー辞書、PDF や Office の読み込み、`ask` などは `init` が作る形の設定で使います（[10 従来の流れで使うもの](#10-従来の流れで使うもの)）。
 
 ## 1 考え方
 
@@ -328,7 +328,27 @@ nest release main           # 確かめた索引を提供する
 - **前の版に戻す。** 戻したい索引をもう一度 `release` します。どの版からどの版へ切り替えたかが表示され、記録は消えません。
 - `nest list indexes` に、どの索引がどの名前で提供されているかが出ます。
 
-> `serve` は、この提供用の名前をまだ読みません。MCP や HTTP で提供するときは、従来の流れを使います。
+### 提供した索引を、エージェントやアプリに引かせる
+
+`nest serve` は、設定の `serve` の `tag`（書かなければ `release`）が指す索引を提供します。`release` で名前を動かすと、動いている `serve` は止めずに、次の要求から新しい索引を使います。
+
+```yaml
+serve:
+  tag: release
+  # transport を書かなければ、MCP を標準入出力で出す。HTTP で出すときは次のように書く
+  # transport: http
+  # port: 4318
+```
+
+```sh
+nest serve --print-config                  # MCP クライアントに貼る設定を出す
+nest serve --transport http --port 4318    # /v1/search と /mcp を HTTP で出す
+```
+
+- 何も `release` していないときは、`serve` は何を `release` すればよいかを示して止まります。
+- HTTP の設定（`host`、`port`、`endpoints`、`access`、`limits`）は、RAG のプロジェクトと同じです。 [提供する入口と、接続を許す相手を決める](serve.md)
+- 検索は、`search` の `top_k` の数までのチャンクを探し、4000 文字までの文脈にまとめて返します。
+- 答えを返す `/v1/responses` と `nest ask` は、この形ではまだ使えません。回答モデルを書く場所が、この形の設定にまだないためです。
 
 ## 9 資料の変更の取り込み方を選ぶ
 
@@ -354,7 +374,7 @@ extract:
 | ユーザー辞書 | `dictionary suggest` と `dictionary add`。[検索評価とユーザー辞書](evaluation.md) |
 | 質問の自動生成と確認 | `eval-data generate` と `eval-data review`。[検索評価とユーザー辞書](evaluation.md) |
 | PDF、Office、HTML、OCR | `loader.auto` と `nest add ocr`。[PDF の抽出](pdf-extraction.md) |
-| MCP・HTTP での提供、`ask` | `serve`、`ask`。[MCP と RAG](mcp.md) · [提供する入口と、接続を許す相手を決める](serve.md) |
+| 答えを返す `ask` と `/v1/responses` | `ask` と、`serve` の `responses`。[MCP と RAG](mcp.md) |
 | エージェントとの調整 | [エージェントと試行する](agents.md) |
 
 どちらの流れかは、コマンドが読む設定ファイルの形で決まります。段階が `- source.filesystem: ...` のような並びなら新しい流れ、`modules:` と `use:` なら従来の流れです。1つのプロジェクトに、両方の形のファイルを置いても構いません。
@@ -365,15 +385,16 @@ extract:
 
 | 設定ファイルの形 | 例 | 仕組み | 使えるコマンド |
 |---|---|---|---|
-| `modules:` と `use:` を使う形 | `nest init mcp`・`init rag` が作るもの（MCP 入門、RAG 入門） | これまでのビルド | `build`、`search`、`eval`、`eval-data`、`source`、`transform`、`index`、`status`、`use`、`tag`、`serve`、`ask` |
-| 段階ごとの並び（`extract:` の下に `- source.filesystem: ...`） | 2章の設定 | 版の保管（`.knowledge-nest/store`） | `build`、`search`、`eval`、`eval-data import`、`list`、`results`、`optimize`、`release` |
+| `modules:` と `use:` を使う形 | `nest init mcp`・`init rag` が作るもの（MCP 入門、RAG 入門） | これまでのビルド | `build`、`search`、`eval`、`eval-data`、`source`、`transform`、`index`、`status`、`release`、`tag`、`serve`、`ask` |
+| 段階ごとの並び（`extract:` の下に `- source.filesystem: ...`） | 2章の設定 | 版の保管（`.knowledge-nest/store`） | `build`、`search`、`eval`、`eval-data import`、`list`、`results`、`optimize`、`release`、`serve` |
 
 | できること | `init` が作る形 | 段階ごとの並び |
 |---|---|---|
 | 読める資料 | Markdown、テキスト、HTML、PDF、Word、Excel、PowerPoint、OCR | `.md`、`.markdown`、`.txt` |
 | 検索 | キーワード、ベクトル、ハイブリッド、リランク、ユーザー辞書 | キーワード |
 | 版の記録と再利用、候補の一括比較 | — | ○ |
-| `serve`（MCP・HTTP）、`ask` | ○ | まだ |
+| `release` で提供を切り替える、`serve`（MCP・HTTP の検索） | ○ | ○ |
+| `ask`、`/v1/responses`（答え） | ○ | まだ |
 
 - 段階ごとの並びでは、`build` の `--from`、`--until`、`--force`、`--input`、`--dry-run`、`--skip-unsupported`、`--tag`、`eval` の `--build`、`--split`、`--tag` はまだ使えません。
 - 1つのフォルダに、両方の形の設定ファイルを置いても構いません。

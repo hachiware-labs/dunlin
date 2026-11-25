@@ -358,7 +358,7 @@ fn build_text(command: &str, data: &ConfigValue) -> String {
             lines.push("Now serving this build.".to_owned());
         } else {
             lines.push(format!(
-                "The project still serves its previous build. Run nest use {} to serve this one.",
+                "The project still serves its previous build. Run nest release {} to serve this one.",
                 field(data, "build_id")
             ));
         }
@@ -1209,7 +1209,7 @@ pub fn text_output(
         "evidence-map" => evidence_map_text(kind, data),
         "serve" => mcp_config_text(data, context),
         "query" if string_field(data, "status") == Some("insufficient_evidence") => {
-            "The wiki pages do not answer this question. Add sources with nest ingress, or ask another way.".into()
+            "The wiki pages do not answer this question. Add sources with nest ingest, or ask another way.".into()
         }
         "query" if data.get("answer").is_some() => {
             let mut lines = vec![field(data, "answer")];

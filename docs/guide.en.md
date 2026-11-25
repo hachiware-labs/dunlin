@@ -8,7 +8,7 @@ You cannot tell how good search is by looking. A setting that helps one question
 
 It is easiest to read after you have search running with the [MCP](start-mcp.en.md) or [RAG](start-rag.en.md) introduction. Section 2 writes a first configuration, and the sections after it show how to improve it.
 
-> The new commands in this guide support text and Markdown (`.md`, `.markdown`, `.txt`), keyword search, and evidence recall for now. Vector search, user dictionaries, PDF and Office loading, `serve`, and more use the form of configuration that `init` writes (see [10 What still uses the earlier flow](#10-what-still-uses-the-earlier-flow)).
+> The new commands in this guide support text and Markdown (`.md`, `.markdown`, `.txt`), keyword search, and evidence recall for now. Vector search, user dictionaries, PDF and Office loading, `ask`, and more use the form of configuration that `init` writes (see [10 What still uses the earlier flow](#10-what-still-uses-the-earlier-flow)).
 
 ## 1 The idea
 
@@ -330,7 +330,27 @@ nest release main           # serve the index you checked
 - **Go back to an earlier version.** Release that index again. It says which version it switched from and to, and the record is never erased.
 - `nest list indexes` shows which index is served under which name.
 
-> `serve` does not read these served names yet. To serve over MCP or HTTP, use the earlier flow.
+### Let agents and apps search what you released
+
+`nest serve` serves the index that the `tag` of the `serve` section names (`release` when it is not written). When `release` moves the name, a running `serve` uses the new index from its next request, without stopping.
+
+```yaml
+serve:
+  tag: release
+  # without a transport, MCP is served on standard input and output; for HTTP write
+  # transport: http
+  # port: 4318
+```
+
+```sh
+nest serve --print-config                  # what to paste into an MCP client
+nest serve --transport http --port 4318    # serve /v1/search and /mcp over HTTP
+```
+
+- With nothing released, `serve` stops and says what to release.
+- The HTTP settings (`host`, `port`, `endpoints`, `access`, `limits`) are those of a RAG project. [Choose what to serve and whom to let in](serve.en.md)
+- Search finds up to the `top_k` of the `search` section in chunks, and returns them as a context of up to 4000 characters.
+- `/v1/responses` and `nest ask`, which answer, do not work with this form yet: its configuration has no place for an answer model yet.
 
 ## 9 Choose which changes of the folder to take in
 
@@ -356,7 +376,7 @@ These are not in the new flow yet. Use the configuration that `nest init` writes
 | User dictionary | `dictionary suggest` and `dictionary add`. [Evaluation and dictionary](evaluation.md) |
 | Generate and review questions | `eval-data generate` and `eval-data review`. [Evaluation and dictionary](evaluation.md) |
 | PDF, Office, HTML, OCR | `loader.auto` and `nest add ocr`. [PDF extraction](pdf-extraction.md) |
-| Serve over MCP or HTTP, `ask` | `serve`, `ask`. [MCP and RAG](mcp.md) · [Choose what to serve and whom to let in](serve.en.md) |
+| Answer with `ask` and `/v1/responses` | `ask`, and `responses` of `serve`. [MCP and RAG](mcp.md) |
 | Tuning with an agent | [Agents and trials](agents.md) |
 
 Which flow a command uses depends on the form of the configuration file it reads. Sections written as lists of steps such as `- source.filesystem: ...` use the new flow; `modules:` with `use:` uses the earlier flow. One project may hold files of both forms. (Most of the linked pages are in Japanese.)
@@ -367,15 +387,16 @@ The search commands (`mcp` and `rag`) pick their mechanism by the form of the co
 
 | Form of the file | Example | Mechanism | Commands |
 |---|---|---|---|
-| The `modules:` and `use:` form | What `nest init mcp` and `init rag` write (the MCP and RAG introductions) | The earlier builds | `build`, `search`, `eval`, `eval-data`, `source`, `transform`, `index`, `status`, `use`, `tag`, `serve`, `ask` |
-| Sections as lists of steps (`- source.filesystem: ...` under `extract:`) | The file in section 2 | The versioned store (`.knowledge-nest/store`) | `build`, `search`, `eval`, `eval-data import`, `list`, `results`, `optimize`, `release` |
+| The `modules:` and `use:` form | What `nest init mcp` and `init rag` write (the MCP and RAG introductions) | The earlier builds | `build`, `search`, `eval`, `eval-data`, `source`, `transform`, `index`, `status`, `release`, `tag`, `serve`, `ask` |
+| Sections as lists of steps (`- source.filesystem: ...` under `extract:`) | The file in section 2 | The versioned store (`.knowledge-nest/store`) | `build`, `search`, `eval`, `eval-data import`, `list`, `results`, `optimize`, `release`, `serve` |
 
 | Feature | The form `init` writes | Lists of steps |
 |---|---|---|
 | Documents it reads | Markdown, text, HTML, PDF, Word, Excel, PowerPoint, OCR | `.md`, `.markdown`, `.txt` |
 | Search | Keyword, vector, hybrid, rerank, user dictionary | Keyword |
 | Versions and reuse, comparing many candidates | — | Yes |
-| `serve` (MCP and HTTP), `ask` | Yes | Not yet |
+| Switch what is served with `release`, `serve` (search over MCP and HTTP) | Yes | Yes |
+| `ask`, `/v1/responses` (answers) | Yes | Not yet |
 
 - With lists of steps, `--from`, `--until`, `--force`, `--input`, `--dry-run`, `--skip-unsupported`, and `--tag` of `build`, and `--build`, `--split`, and `--tag` of `eval`, are not available yet.
 - One folder may hold configuration files of both forms.

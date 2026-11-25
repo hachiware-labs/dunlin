@@ -137,19 +137,142 @@ pub struct Serving {
     request: ServeRequest,
     host: Arc<dyn ServeHost>,
     initial: ConfigValue,
-    generation: i64,
     uses_keyword: bool,
     uses_vector: bool,
-    state: Mutex<Connection>,
+    builds: Builds,
     active: Mutex<Active>,
+}
+
+/// Where the builds to serve come from.
+enum Builds {
+    /// The builds of `state.sqlite`, in the serving generation of startup.
+    State {
+        connection: Mutex<Connection>,
+        generation: i64,
+    },
+    /// The index the versioned store serves under a name (`nest release`). Its directories are
+    /// below `indexes`.
+    Store {
+        store: Mutex<crate::store::Store>,
+        indexes: PathBuf,
+        name: String,
+    },
 }
 
 fn sql(error: rusqlite::Error) -> StageError {
     StageError::plain(error.to_string())
 }
 
+fn stored(error: crate::store::StoreError) -> StageError {
+    StageError::plain(error.to_string())
+}
+
 fn index_of(build: &ConfigValue) -> String {
     string_field(build, "index").unwrap_or_default().to_owned()
+}
+
+/// What serving needs of an index of the versioned store, written as a saved build is: its
+/// directory, and the keyword settings every index of the store is built with.
+fn store_build(
+    store: &crate::store::Store,
+    indexes: &Path,
+    id: crate::store::SnapshotId,
+) -> Result<Option<ConfigValue>, StageError> {
+    let Some(location) = crate::index::located(store, indexes, id).map_err(stored)? else {
+        return Ok(None);
+    };
+    serde_json::from_value(serde_json::json!({
+        "build_id": format!("index-{}", id.0),
+        "index": location,
+        "keyword": { "tokenizer": "lindera" },
+    }))
+    .map(Some)
+    .map_err(|_| StageError::plain("Could not describe a served index."))
+}
+
+impl Builds {
+    /// The build served now. `None` from `state.sqlite` when the startup generation has none.
+    fn served(&self) -> Result<Option<ConfigValue>, StageError> {
+        match self {
+            Self::State {
+                connection,
+                generation,
+            } => {
+                let state = connection
+                    .lock()
+                    .map_err(|_| StageError::plain("Could not read the serving build."))?;
+                let manifest: Option<String> = state
+                    .query_row(
+                        "SELECT manifest FROM serving_generations JOIN builds ON builds.id = serving_generations.build_id
+                         WHERE serving_generations.id = ?",
+                        [generation],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(sql)?;
+                manifest
+                    .map(|manifest| {
+                        serde_json::from_str(&manifest)
+                            .map_err(|_| StageError::plain("A saved build is not valid JSON."))
+                    })
+                    .transpose()
+            }
+            Self::Store {
+                store,
+                indexes,
+                name,
+            } => {
+                let store = store
+                    .lock()
+                    .map_err(|_| StageError::plain("Could not read the served index."))?;
+                match store.releases(name).map_err(stored)?.last() {
+                    Some(id) => store_build(&store, indexes, *id),
+                    None => Ok(None),
+                }
+            }
+        }
+    }
+
+    /// The builds to read evidence from when the one served no longer has it, newest first.
+    fn earlier(&self) -> Result<Vec<ConfigValue>, StageError> {
+        match self {
+            Self::State { connection, .. } => {
+                let manifests: Vec<String> = {
+                    let state = connection
+                        .lock()
+                        .map_err(|_| StageError::plain("Could not read the builds."))?;
+                    let mut statement = state
+                        .prepare("SELECT manifest FROM builds ORDER BY rowid DESC")
+                        .map_err(sql)?;
+                    statement
+                        .query_map([], |row| row.get(0))
+                        .map_err(sql)?
+                        .collect::<Result<_, _>>()
+                        .map_err(sql)?
+                };
+                Ok(manifests
+                    .iter()
+                    .filter_map(|manifest| serde_json::from_str(manifest).ok())
+                    .collect())
+            }
+            Self::Store {
+                store,
+                indexes,
+                name,
+            } => {
+                let store = store
+                    .lock()
+                    .map_err(|_| StageError::plain("Could not read the served indexes."))?;
+                let mut builds = Vec::new();
+                for id in store.releases(name).map_err(stored)?.iter().rev() {
+                    if let Some(build) = store_build(&store, indexes, *id)? {
+                        builds.push(build);
+                    }
+                }
+                Ok(builds)
+            }
+        }
+    }
 }
 
 impl Serving {
@@ -180,6 +303,45 @@ impl Serving {
         };
         let initial: ConfigValue = serde_json::from_str(&manifest)
             .map_err(|_| StageError::plain("A saved build is not valid JSON."))?;
+        let builds = Builds::State {
+            connection: Mutex::new(state),
+            generation,
+        };
+        Self::start(request, host, initial, builds)
+    }
+
+    /// Serves the index the versioned store in `store` serves under `name`, and the index it
+    /// serves next whenever `nest release` moves the name. `request.paths.artifacts` is the
+    /// directory of the store's indexes.
+    pub fn open_store(
+        request: ServeRequest,
+        host: Arc<dyn ServeHost>,
+        store: &Path,
+        name: &str,
+    ) -> Result<Self, StageError> {
+        let builds = Builds::Store {
+            store: Mutex::new(crate::store::Store::open(store).map_err(stored)?),
+            indexes: PathBuf::from(&request.paths.artifacts),
+            name: name.to_owned(),
+        };
+        let Some(initial) = builds.served()? else {
+            return Err(StageError::coded(
+                "BUILD_REQUIRED",
+                format!(
+                    "No index is served as {name}. Run nest release <index>, or nest build --release."
+                ),
+                3,
+            ));
+        };
+        Self::start(request, host, initial, builds)
+    }
+
+    fn start(
+        request: ServeRequest,
+        host: Arc<dyn ServeHost>,
+        initial: ConfigValue,
+        builds: Builds,
+    ) -> Result<Self, StageError> {
         let plan = crate::index_stage::items(Some(&request.search));
         crate::search_stage::assert_indexes(&initial, plan)?;
         let uses = |names: &[&str]| {
@@ -192,10 +354,9 @@ impl Serving {
             request,
             host,
             initial: initial.clone(),
-            generation,
             uses_keyword,
             uses_vector,
-            state: Mutex::new(state),
+            builds,
             active: Mutex::new(Active {
                 compatible: initial.clone(),
                 indexes: HashMap::new(),
@@ -257,26 +418,12 @@ impl Serving {
         })
     }
 
-    /// The build serving now in the startup generation, or the startup build.
+    /// The build serving now, or the startup build.
     fn current(&self) -> Result<ConfigValue, StageError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| StageError::plain("Could not read the serving build."))?;
-        let manifest: Option<String> = state
-            .query_row(
-                "SELECT manifest FROM serving_generations JOIN builds ON builds.id = serving_generations.build_id
-                 WHERE serving_generations.id = ?",
-                [self.generation],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(sql)?;
-        match manifest {
-            Some(manifest) => serde_json::from_str(&manifest)
-                .map_err(|_| StageError::plain("A saved build is not valid JSON.")),
-            None => Ok(self.initial.clone()),
-        }
+        Ok(self
+            .builds
+            .served()?
+            .unwrap_or_else(|| self.initial.clone()))
     }
 
     /// `withActive`: runs `work` on the index of the build to use, keeping it open meanwhile.
@@ -470,24 +617,7 @@ impl Serving {
             Err(error) if stale(&error) => error,
             Err(error) => return Err(StageError::native(error)),
         };
-        let manifests: Vec<String> = {
-            let state = self
-                .state
-                .lock()
-                .map_err(|_| StageError::plain("Could not read the builds."))?;
-            let mut statement = state
-                .prepare("SELECT manifest FROM builds ORDER BY rowid DESC")
-                .map_err(sql)?;
-            statement
-                .query_map([], |row| row.get(0))
-                .map_err(sql)?
-                .collect::<Result<_, _>>()
-                .map_err(sql)?
-        };
-        for manifest in manifests {
-            let Ok(build) = serde_json::from_str::<ConfigValue>(&manifest) else {
-                continue;
-            };
+        for build in self.builds.earlier()? {
             let Ok(archived) = self.open_build(&build) else {
                 continue;
             };

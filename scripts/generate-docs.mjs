@@ -20,7 +20,7 @@ const commandGroups = [
   ['初期化と設定', 'init config browser validate defaults modules add remove'],
   ['構築と提供', 'source transform index build search ask serve status use tag list release'],
   ['評価と辞書', 'eval-data eval report dictionary evidence-map optimize results'],
-  ['Wiki・PARA の操作', 'ingress query verify issue rules progress cite instruct save-answer archive undo'],
+  ['Wiki・PARA の操作', 'ingest query lint issue rules progress cite instruct save-answer archive undo'],
 ];
 
 function cliGuide() {

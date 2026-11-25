@@ -20,7 +20,7 @@ nest serve --print-config
 
 `build` は `source → transform → index` を実行します。各段階は同名のコマンドでも実行できます。チャンクの長さを変更するには `chunk.length` の `with.size` と `with.overlap` を編集します。`nest build --from transform` で保存済みの抽出結果から再開できます。 [KnowledgeNestfile の設定と既定値](config.md)
 
-`nest build --dry-run` で変更された文書を確認できます。候補設定の試行は `nest build --from transform --config candidate.yaml --tag trial` で作り、`nest search "手順" --build trial` で確認できます。採用には `nest use trial` を実行して MCP を再起動します。入力の版を試行間でそろえる場合は `--input <build>` を指定します。[試行と採用](knowledge-nest-spec.md#11-試行採用外部エージェントによる最適化)
+`nest build --dry-run` で変更された文書を確認できます。候補設定の試行は `nest build --from transform --config candidate.yaml --tag trial` で作り、`nest search "手順" --build trial` で確認できます。採用には `nest release trial` を実行して MCP を再起動します。入力の版を試行間でそろえる場合は `--input <build>` を指定します。[試行と採用](knowledge-nest-spec.md#11-試行採用外部エージェントによる最適化)
 
 ### 以前の init rag プロジェクトを移行する
 
@@ -131,7 +131,7 @@ index:
 nest validate
 nest build --from index --tag ann
 nest search "手順" --build ann
-nest use ann
+nest release ann
 ```
 
 `nest add` は配布物に含まれるバイナリの版と SHA-256 を検証し、プロジェクトに配置します。既存の抽出、チャンク、埋め込みを使って索引を構築できます。`nest remove hannoy` の前には現行構成から hannoy モジュールを外します。過去のビルドやタグを読み直せるよう、追加済みバイナリと過去の索引は保持します。

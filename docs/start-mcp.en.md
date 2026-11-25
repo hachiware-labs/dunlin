@@ -21,7 +21,7 @@ You ─question→ agent ─knowledge.search→ Knowledge-Nest ─→ passages a
 
 Knowledge-Nest returns evidence, not answers. The agent's own model writes the answer.
 
-Search is not done once loaded; you grow it. After you edit the documents, `nest build` replaces only the ones that changed, and a running agent sees the new content without being stopped. Measure how well it finds answers with questions and the quotes that answer them, and make it find more with a user dictionary and a better setup (section 4). Trying never changes the search being served; `nest use` switches only to a result you checked.
+Search is not done once loaded; you grow it. After you edit the documents, `nest build` replaces only the ones that changed, and a running agent sees the new content without being stopped. Measure how well it finds answers with questions and the quotes that answer them, and make it find more with a user dictionary and a better setup (section 4). Trying never changes the search being served; `nest release` switches only to a result you checked.
 
 ## Compared with other ways
 

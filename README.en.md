@@ -45,7 +45,7 @@ What MCP does well is **grow the search to fit your documents and how they are u
 | Measure how well it finds answers | Collect questions with the quotes that answer them, and measure the share of evidence search finds. An AI drafts candidate questions, and people check them before adding | `nest eval-data generate` and `review`, `nest eval` |
 | Teach it your words | From missed questions, suggest technical terms that get split apart, and add them to a user dictionary | `nest dictionary suggest` and `add` |
 | Improve the setup | Try chunk sizes, hybrid search, a reranker and more, and compare with earlier results. Trying candidates at once optimizes it too | `nest report compare`, `nest optimize` |
-| Switch safely | Trying never changes the search being served; only a result you checked is switched to | `nest use`, `nest release` |
+| Switch safely | Trying never changes the search being served; only a result you checked is switched to | `nest release` |
 
 **With other MCP servers** (filesystem or vector database MCP servers), you do this yourself:
 
@@ -226,7 +226,8 @@ npm run bench -- 1000 300
 |---|---|---|
 | Documents it reads | `.md`, `.markdown`, `.txt` | Those plus HTML, PDF, Word, Excel, PowerPoint, OCR |
 | Search | Keyword | Keyword, vector, hybrid, rerank, user dictionary |
-| Versions and reuse, `list`, `results`, `optimize`, `release` | Yes | — |
-| `serve` (MCP and HTTP), `ask` | Not yet | Yes |
+| Versions and reuse, `list`, `results`, `optimize` | Yes | — |
+| Switch what is served with `release`, `serve` (search over MCP and HTTP) | Yes | Yes |
+| `ask`, `/v1/responses` (answers) | Not yet | Yes |
 
 Wiki and PARA are a separate mechanism from both forms and always available. The full difference between the two forms is in the section 10 of [Improve search by numbers](docs/guide.en.md#10-what-still-uses-the-earlier-flow).

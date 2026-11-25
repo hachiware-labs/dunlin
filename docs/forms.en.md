@@ -15,7 +15,7 @@ This page is for those who want the details of how the four document databases K
 | When documents are read | At each question | At each question | At ingest | At ingest |
 | What an agent receives | Passages of the documents | Passages of the documents (`/mcp`) | Pages the AI wrote | Notes the AI organized |
 | AI model | Not needed | Needed to answer | Needed to write | Needed to write |
-| Updating documents | `build`, changed documents only | `build`, changed documents only | `ingress` adds to pages | `ingress` adds notes |
+| Updating documents | `build`, changed documents only | `build`, changed documents only | `ingest` adds to pages | `ingest` adds notes |
 | Served as | MCP | HTTP (answers, search) and MCP | Web (pages and a work screen) and MCP | Web (notes and a work screen) and MCP |
 
 MCP and RAG search the documents at each question, so even many or often-changing documents are reflected at once. Wiki and PARA have an AI read and organize the documents first; the result is knowledge people can read as it is.

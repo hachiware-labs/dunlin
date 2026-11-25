@@ -205,8 +205,8 @@ async function initialize(type, directory, values) {
     ? 'Run nest ask or nest serve.' : 'Set models.answerer.model before using ask or the responses endpoint.');
   else {
     const missing = [!models.llm?.model && 'models.writer.model', !purpose && 'about.purpose'].filter(Boolean);
-    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run nest ingress.'
-      : type === 'wiki' ? 'Put sources in raw/, then run nest ingest raw/<file>.' : 'Run nest ingress <path>.';
+    next = missing.length ? 'Set ' + missing.join(' and ') + ', then run nest ingest.'
+      : type === 'wiki' ? 'Put sources in raw/, then run nest ingest raw/<file>.' : 'Run nest ingest <path>.';
     next += ' To take in web pages, run nest browser first and sign in to the sites.';
   }
   return { config: configPath, type, next: ocr ? next + ' To prepare ' + ocr + ', run nest add ocr.' : next };

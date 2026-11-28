@@ -32,7 +32,7 @@ MCP   question ─→ [agent] ─asks for a search─→ Knowledge-Nest ─→ e
 RAG   question ─→ Knowledge-Nest ─→ search ─→ evidence ─→ a model Knowledge-Nest calls writes the answer ─→ answer with sources
 ```
 
-- **MCP** is a librarian who brings the documents to the person looking things up. The agent rephrases and searches as often as it needs. Results carry document, line and heading, and `knowledge.read` reads back the original text.
+- **MCP** is a librarian who brings the documents to the person looking things up. The agent rephrases and searches as often as it needs. Results are short text: a list of refs (document and lines, such as `docs:guide.md#L20-45`) with headings, and the text of the best passages. Passing a ref to `knowledge.read` reads the lines around it, or any lines of the document.
 - **RAG** is a librarian who reads the documents and hands over a written answer. One question in, one answer out. Responses take the shape of OpenAI's Responses API, and `/v1/responses`, `/v1/search` and `/mcp` are served on one port. Token authentication and connection limits are available when you open it to others.
 - RAG's `serve` also serves MCP (`/mcp`), so moving from MCP to RAG keeps agents' search working.
 

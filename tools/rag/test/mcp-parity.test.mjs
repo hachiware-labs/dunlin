@@ -71,7 +71,7 @@ async function compare(t, actual, expected) {
     expected.send({ id, method, params });
     const [a, b] = await Promise.all([actual.answer(id), expected.answer(id)]);
     assert.deepEqual(a.error, b.error, JSON.stringify({ method, params }));
-    assert.deepEqual(timeless(a.result), timeless(currentSearchSchema(b.result)), JSON.stringify({ method, params }));
+    assert.deepEqual(timeless(a.result), timeless(currentSearchSchema(b.result, a.result)), JSON.stringify({ method, params }));
     return a.result;
   };
   for (const version of ['2025-11-25']) {
@@ -111,12 +111,12 @@ const invalidSearches = [
   { query: 'x', limit: 1.5 }, { query: 'x', limit: '3' }, { query: 'x', sourceIds: [] }, { query: 'x'.repeat(5000) },
 ];
 
-async function reads(call, evidence) {
+async function reads(call, evidence, empty = true) {
   await call('knowledge.read', { evidence });
   await call('knowledge.read', { evidence: { ...evidence, range: { startLine: 1, endLine: 999 } } });
   await call('knowledge.read', { evidence: { ...evidence, range: { startLine: 2 ** 20 + 1, endLine: 2 ** 20 + 2 } } });
   await call('knowledge.read', { evidence: { source: {}, range: { startLine: 0 } } });
-  await call('knowledge.read', {});
+  if (empty) await call('knowledge.read', {});
 }
 
 test('serves an index over stdio like the former Node API server', { timeout: 120_000 }, async (t) => {
@@ -144,11 +144,18 @@ test('serves a project over stdio like the former project server', { timeout: 12
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5 }));
   const { tools, call } = await compare(t, actual, expected);
   assert.deepEqual(tools.map(({ name }) => name), ['knowledge.search', 'knowledge.read']);
-  const found = await call('knowledge.search', { query: 'pump' });
+  // The full result of the former server is the result of format: json. The text written for a
+  // model by default is checked in serve-store.test.mjs.
+  const found = await call('knowledge.search', { query: 'pump', format: 'json' });
   assert.ok(found.structuredContent.results.length > 0);
-  await call('knowledge.search', { query: 'pump', limit: 1, budget_chars: 50, source_ids: ['docs'] });
+  await call('knowledge.search', { query: 'pump', limit: 1, budget_chars: 50, source_ids: ['docs'], format: 'json' });
   await call('knowledge.search', { query: 'pump', budgetChars: 50, budget_chars: 50 });
   await call('knowledge.search', { query: '   ' });
   for (const args of invalidSearches) await call('knowledge.search', args);
-  await reads(call, found.structuredContent.results[0].evidence);
+  // A read with neither a ref nor evidence asks for a ref, which the former server did not take.
+  await reads(call, found.structuredContent.results[0].evidence, false);
+  actual.send({ jsonrpc: '2.0', id: 'empty', method: 'tools/call', params: { name: 'knowledge.read', arguments: {} } });
+  const empty = (await actual.answer('empty')).result;
+  assert.equal(empty.isError, true);
+  assert.match(empty.content[0].text, /^Give the ref of a passage from knowledge\.search/u);
 });

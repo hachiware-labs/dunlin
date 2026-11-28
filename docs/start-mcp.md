@@ -75,8 +75,27 @@ Claude   毎月最初の営業日です。点検の前にポンプを止め、�
 
 | 道具 | 内容 |
 |---|---|
-| `knowledge.search` | 資料を検索し、該当箇所と出典、文脈を返す。件数（`limit`）、文脈の文字数（`budget_chars`）、対象の資料（`source_ids`）を指定できる |
-| `knowledge.read` | 検索で見つけた箇所を、原文の行として読む |
+| `knowledge.search` | 資料を検索し、見つけた箇所の一覧と、上位の箇所の本文を返す。件数（`limit`）、本文の文字数（`budget_chars`）、対象の資料（`source_ids`）を指定できる |
+| `knowledge.read` | 検索で見つけた箇所を、行番号付きで読む。前後の行（`around`）や、文書の好きな行も読める |
+
+検索の結果は、エージェントが読みやすく、文脈を食わない短いテキストです。
+
+```text
+3 passages for "ポンプの点検". Read more of one with knowledge.read and its ref.
+1. docs:maintenance.md#L3-5 — ポンプの保全手順
+2. ...
+
+Text of the best passages:
+
+maintenance.md — ポンプの保全手順
+file:///.../maintenance.md:3
+ポンプの点検は毎月最初の営業日に行う。
+...
+```
+
+- `docs:maintenance.md#L3-5` のような **ref** が、資料と行です。エージェントはこれを出典として示し、`knowledge.read` に渡して続きを読みます。`docs:maintenance.md#L1-200` のように好きな行を、`docs:maintenance.md` で文書全体を読めます。読み出しは既定で 20000 文字までで、収まらないときは続きの ref を示します。
+- 道具の説明には、資料の数と、どの資料のフォルダに入っているかが書かれます。エージェントは、これを見て道具を使う場面を決めます。
+- 得点や版、出典の範囲まで欲しいときは、`knowledge.search` に `format: "json"` を渡します。`nest search --json` と同じ形の結果が返ります。
 
 ## 3 資料を更新する
 

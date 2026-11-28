@@ -36,7 +36,7 @@ async function project(t) {
 }
 
 async function search(client, query) {
-  const output = await client.callTool({ name: 'knowledge.search', arguments: { query } });
+  const output = await client.callTool({ name: 'knowledge.search', arguments: { query, format: 'json' } });
   return JSON.parse(output.content[0].text);
 }
 
@@ -81,6 +81,60 @@ test('serves the released index of the versioned store over MCP, and the next on
   // The text of a result is read back from the index served.
   const read = await client.callTool({ name: 'knowledge.read', arguments: { evidence: after.results[0].evidence } });
   assert.match(read.content[0].text, /スピンドル交換手順/);
+});
+
+test('writes search results for a model, and reads any lines of a document by a ref', async (t) => {
+  const kb = await project(t);
+  await writeFile(join(kb.cwd, 'docs', 'valve.md'), [
+    '# バルブ', '', '## 点検', '', '月に一度、漏れを確かめる。', '', '## 交換', '',
+    'バルブの交換はスピンドル交換手順に従う。', '交換の後に漏れを確かめる。', '',
+  ].join('\n'));
+  assert.equal((await kb.json('build', '--release')).status, 'succeeded');
+  const client = new Client({ name: 'serve-store-text', version: '1.0.0' });
+  kb.cleanup.push(() => client.close());
+  const launch = (await kb.json('serve', '--print-config')).data;
+  await client.connect(new StdioClientTransport({ ...launch, cwd: kb.cwd, env: kb.env, stderr: 'ignore' }));
+
+  // The tools say what the project holds.
+  const tools = Object.fromEntries((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+  assert.match(tools['knowledge.search'].description, /It holds 5 documents, by source: docs \(5\)\./);
+  assert.deepEqual(Object.keys(tools['knowledge.read'].inputSchema.properties).sort(), ['around', 'evidence', 'max_chars', 'ref']);
+
+  // By default a search is the passages as refs with their headings, then the text of the best
+  // ones: no scores, versions or evidence, and no structured copy.
+  const text = await client.callTool({ name: 'knowledge.search', arguments: { query: 'スピンドル交換手順' } });
+  assert.equal(text.structuredContent, undefined);
+  const written = text.content[0].text;
+  assert.match(written, /^\d+ passages for "スピンドル交換手順"\. Read more of one with knowledge\.read and its ref\.\n1\. docs:valve\.md#L\d+(-\d+)? — /u);
+  assert.match(written, /\nText of the best passages:\n\n[\s\S]*スピンドル交換手順/u);
+  assert.doesNotMatch(written, /document_version|acquiredAtMs|"score"/u);
+  const full = await client.callTool({ name: 'knowledge.search', arguments: { query: 'スピンドル交換手順', format: 'json' } });
+  assert.ok(written.length * 2 < full.content[0].text.length, `${written.length} against ${full.content[0].text.length}`);
+  const none = await client.callTool({ name: 'knowledge.search', arguments: { query: 'ゼブラ' } });
+  assert.match(none.content[0].text, /^No passages found for "ゼブラ"\. Search again with other words/u);
+  const wrongFormat = await client.callTool({ name: 'knowledge.search', arguments: { query: 'x', format: 'yaml' } });
+  assert.equal(wrongFormat.isError, true);
+  assert.match(wrongFormat.content[0].text, /format: Invalid option: expected one of "text"\|"json"/u);
+
+  // A ref reads its lines, numbered, with lines around them if asked.
+  const read = async (args) => (await client.callTool({ name: 'knowledge.read', arguments: args }));
+  assert.equal((await read({ ref: 'docs:valve.md#L9' })).content[0].text,
+    'docs:valve.md#L9-9 (10 lines in the document)\n9| バルブの交換はスピンドル交換手順に従う。\n');
+  assert.equal((await read({ ref: 'docs:valve.md#L9-9', around: 2 })).content[0].text, [
+    'docs:valve.md#L7-10 (10 lines in the document)',
+    ' 7| ## 交換', ' 8| ', ' 9| バルブの交換はスピンドル交換手順に従う。', '10| 交換の後に漏れを確かめる。', '',
+  ].join('\n'));
+  // The whole document, and what is left when it does not fit.
+  assert.match((await read({ ref: 'docs:valve.md' })).content[0].text, /^docs:valve\.md#L1-10 \(10 lines/u);
+  assert.match((await read({ ref: 'docs:valve.md', max_chars: 100 })).content[0].text,
+    /\n… stopped at L(\d+) to stay within 100 characters\. Read on with docs:valve\.md#L\d+-10\.\n$/u);
+  // What cannot be read says what can.
+  const beyond = await read({ ref: 'docs:valve.md#L40-50' });
+  assert.equal(beyond.isError, true);
+  assert.equal(beyond.content[0].text, 'docs:valve.md has 10 lines. Ask for lines up to L10.');
+  assert.match((await read({ ref: 'docs:missing.md#L1' })).content[0].text, /^There is no document docs:missing\.md in the index served\./u);
+  assert.match((await read({ ref: 'valve.md#L1' })).content[0].text, /^valve\.md#L1 is not a ref\./u);
+  assert.match((await read({ ref: 'docs:valve.md#L5-2' })).content[0].text, /is not a ref\./u);
 });
 
 test('release serves a build of a project made by init, as use did', async (t) => {

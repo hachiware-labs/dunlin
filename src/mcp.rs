@@ -20,7 +20,7 @@ use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use serde_json::Value;
 
 use crate::config_value::ConfigValue;
-use crate::{Cancellation, Evidence, ExploreOptions, KnowledgeBase};
+use crate::{Cancellation, DocumentRef, Evidence, ExploreOptions, KnowledgeBase, ReadOutcome};
 
 /// The project search and read of a project server.
 pub trait McpHost: Send + Sync {
@@ -29,6 +29,15 @@ pub trait McpHost: Send + Sync {
     fn search(&self, arguments: &ConfigValue, cancel: &Cancellation) -> Result<String, String>;
     /// Reads evidence and returns `{ content, evidence }` as JSON text, or the error message.
     fn read(&self, evidence: &Evidence, cancel: &Cancellation) -> Result<String, String>;
+    /// A document of the index served now, whole: its text and its evidence. `None` when the
+    /// host does not read documents, and the server reads them from the index it was given.
+    fn document(
+        &self,
+        _document: &DocumentRef,
+        _cancel: &Cancellation,
+    ) -> Option<Result<Option<ReadOutcome>, String>> {
+        None
+    }
 }
 
 const SCHEMA: &str = "https://json-schema.org/draft/2020-12/schema";
@@ -42,7 +51,7 @@ fn search_schema(project: bool) -> String {
     if project {
         // `sourceIds` and `budgetChars` are still accepted for earlier clients (`project_aliases`).
         return format!(
-            r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"query":{{"type":"string","description":"Words or a question to search for."}},"limit":{{"type":"integer","minimum":1,"maximum":100,"description":"The most results to return."}},"source_ids":{{"minItems":1,"maxItems":100,"type":"array","items":{SOURCE_ID},"description":"Search only these sources: the source IDs of the project."}},"budget_chars":{{"type":"integer","minimum":1,"maximum":1000000,"description":"The most characters of source context to return."}}}},"required":["query"]}}"#
+            r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"query":{{"type":"string","description":"Words or a question to search for."}},"limit":{{"type":"integer","minimum":1,"maximum":100,"description":"The most results to return."}},"source_ids":{{"minItems":1,"maxItems":100,"type":"array","items":{SOURCE_ID},"description":"Search only these sources: the source IDs of the project."}},"budget_chars":{{"type":"integer","minimum":1,"maximum":1000000,"description":"The most characters of source context to return."}},"format":{{"type":"string","enum":["text","json"],"description":"text (the default): the passages found as refs, and the text of the best ones. json: the full result, with scores and evidence."}}}},"required":["query"]}}"#
         );
     }
     format!(
@@ -76,9 +85,25 @@ fn project_aliases(
 
 const SAFE: &str = "9007199254740991";
 
+/// The `evidence` property of a read: the evidence of a search result.
+fn evidence_property() -> String {
+    format!(
+        r#""evidence":{{"type":"object","properties":{{"source":{{"type":"object","properties":{{"sourceId":{{"type":"string"}},"objectId":{{"type":"string"}},"url":{{"type":"string"}},"version":{{"type":"string"}},"modifiedAtMs":{{"anyOf":[{{"type":"integer","minimum":-{SAFE},"maximum":{SAFE}}},{{"type":"null"}}]}}}},"required":["sourceId","objectId","url","version","modifiedAtMs"]}},"range":{{"type":"object","properties":{{"startLine":{{"type":"integer","exclusiveMinimum":0,"maximum":{SAFE}}},"endLine":{{"type":"integer","exclusiveMinimum":0,"maximum":{SAFE}}}}},"required":["startLine","endLine"]}},"acquiredAtMs":{{"type":"integer","minimum":0,"maximum":{SAFE}}},"byteRange":{{"type":"object","properties":{{"start":{{"type":"integer","minimum":0,"maximum":{SAFE}}},"end":{{"type":"integer","exclusiveMinimum":0,"maximum":{SAFE}}}}},"required":["start","end"]}}}},"required":["source","range","acquiredAtMs"]}}"#
+    )
+}
+
 fn read_schema() -> String {
     format!(
-        r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"evidence":{{"type":"object","properties":{{"source":{{"type":"object","properties":{{"sourceId":{{"type":"string"}},"objectId":{{"type":"string"}},"url":{{"type":"string"}},"version":{{"type":"string"}},"modifiedAtMs":{{"anyOf":[{{"type":"integer","minimum":-{SAFE},"maximum":{SAFE}}},{{"type":"null"}}]}}}},"required":["sourceId","objectId","url","version","modifiedAtMs"]}},"range":{{"type":"object","properties":{{"startLine":{{"type":"integer","exclusiveMinimum":0,"maximum":{SAFE}}},"endLine":{{"type":"integer","exclusiveMinimum":0,"maximum":{SAFE}}}}},"required":["startLine","endLine"]}},"acquiredAtMs":{{"type":"integer","minimum":0,"maximum":{SAFE}}},"byteRange":{{"type":"object","properties":{{"start":{{"type":"integer","minimum":0,"maximum":{SAFE}}},"end":{{"type":"integer","exclusiveMinimum":0,"maximum":{SAFE}}}}},"required":["start","end"]}}}},"required":["source","range","acquiredAtMs"]}}}},"required":["evidence"]}}"#
+        r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{{}}},"required":["evidence"]}}"#,
+        evidence_property()
+    )
+}
+
+/// The read of a project: by a ref of `knowledge.search`, or by its evidence as before.
+fn project_read_schema() -> String {
+    format!(
+        r#"{{"type":"object","$schema":"{SCHEMA}","properties":{{"ref":{{"type":"string","minLength":1,"maxLength":1100,"description":"A ref from knowledge.search, such as docs:guide.md#L20-45; or any lines of a document, such as docs:guide.md#L1-200; or docs:guide.md for all of it."}},"around":{{"type":"integer","minimum":0,"maximum":1000,"description":"Lines to read before and after the ref too."}},"max_chars":{{"type":"integer","minimum":100,"maximum":200000,"description":"The most characters to return (default 20000)."}},{}}}}}"#,
+        evidence_property()
     )
 }
 
@@ -89,7 +114,8 @@ fn explore_schema() -> String {
     )
 }
 
-fn tool(name: &'static str, description: &'static str, schema: &str) -> Tool {
+fn tool(name: &'static str, description: impl Into<String>, schema: &str) -> Tool {
+    let description: String = description.into();
     let Ok(Value::Object(schema)) = serde_json::from_str(schema) else {
         unreachable!("tool schemas are valid JSON objects")
     };
@@ -217,6 +243,15 @@ fn check(schema: &Value, value: Option<&Value>, path: &str, issues: &mut Vec<Str
             {
                 issue(format!(
                     "Too big: expected string to have <={maximum} characters"
+                ));
+            }
+            if let Some(Value::Array(options)) = schema.get("enum")
+                && !options.iter().any(|option| option.as_str() == Some(text))
+            {
+                let options: Vec<String> = options.iter().map(Value::to_string).collect();
+                issue(format!(
+                    "Invalid option: expected one of {}",
+                    options.join("|")
                 ));
             }
             if schema.get("pattern").is_some() && !valid_source_id(text) {
@@ -379,11 +414,12 @@ fn js_text(value: &impl serde::Serialize) -> Result<String, String> {
     Ok(parsed.to_js_json())
 }
 
-/// `{ content: [{ type: "text", text }], structuredContent }`
+/// `{ content: [{ type: "text", text }], structuredContent }`, the structured content only when the
+/// text is JSON: the text a project search and read write for a model has none.
 fn result(text: String) -> CallToolResult {
-    let structured: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    let structured = serde_json::from_str::<Value>(&text).ok();
     let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
-    result.structured_content = Some(structured);
+    result.structured_content = structured;
     result.is_error = None;
     result
 }
@@ -419,7 +455,12 @@ pub struct McpServer {
     database: Arc<KnowledgeBase>,
     host: Option<Arc<dyn McpHost>>,
     search_only: bool,
+    /// What the documents of a project are, for the descriptions of its tools.
+    about: Option<String>,
 }
+
+/// The most characters a read by ref returns when `max_chars` is not given.
+const READ_CHARS: usize = 20_000;
 
 impl McpServer {
     pub fn new(
@@ -431,34 +472,52 @@ impl McpServer {
             database,
             host,
             search_only,
+            about: None,
         }
+    }
+
+    /// Says in the descriptions of the tools what the documents are, such as how many there are
+    /// and in which sources.
+    #[must_use]
+    pub fn with_about(mut self, about: Option<String>) -> Self {
+        self.about = about;
+        self
     }
 
     fn tools(&self) -> Vec<(Tool, String)> {
         let project = self.host.is_some();
+        let about = self
+            .about
+            .as_deref()
+            .map_or(String::new(), |about| format!(" {about}"));
+        let search = if project {
+            format!(
+                "Search the documents of this project and get the passages that answer, each with the document and lines it is in.{about} Returns a numbered list of passages as refs (document#Lstart-end) with their headings, then the text of the best ones. Rephrase and search again when the passages miss; read more of a passage with knowledge.read and its ref."
+            )
+        } else {
+            "Find indexed source ranges using keyword search.".to_owned()
+        };
         let mut tools = vec![(
-            tool(
-                "knowledge.search",
-                if project {
-                    "Retrieve indexed evidence and assemble source context using the project search settings."
-                } else {
-                    "Find indexed source ranges using keyword search."
-                },
-                &search_schema(project),
-            ),
+            tool("knowledge.search", search, &search_schema(project)),
             search_schema(project),
         )];
         if self.search_only {
             return tools;
         }
-        tools.push((
-            tool(
-                "knowledge.read",
-                "Read the indexed lines identified by evidence from knowledge.search.",
-                &read_schema(),
-            ),
-            read_schema(),
-        ));
+        let (read, schema) = if project {
+            (
+                format!(
+                    "Read lines of a document of this project, numbered: a ref from knowledge.search, with lines around it if asked, or any lines of a document by its ref.{about}"
+                ),
+                project_read_schema(),
+            )
+        } else {
+            (
+                "Read the indexed lines identified by evidence from knowledge.search.".to_owned(),
+                read_schema(),
+            )
+        };
+        tools.push((tool("knowledge.read", read, &schema), schema));
         if project {
             return tools;
         }
@@ -548,9 +607,38 @@ impl McpServer {
                         .get("budgetChars")
                         .or_else(|| arguments.get("budget_chars")),
                 );
-                host.search(&ConfigValue::Object(options), cancel)
+                let found = host.search(&ConfigValue::Object(options), cancel)?;
+                if string("format") == "json" {
+                    return Ok(found);
+                }
+                passages(&found)
+            }
+            ("knowledge.read", Some(host)) if arguments.get("ref").is_some() => {
+                if arguments.get("evidence").is_some() {
+                    return Err("Give a ref or evidence, not both.".into());
+                }
+                let (document, lines) = parse_ref(string("ref"))?;
+                let read = match host.document(&document, cancel) {
+                    Some(read) => read?,
+                    None => self
+                        .database
+                        .get_document(&document, cancel)
+                        .map_err(native)?,
+                };
+                let Some(read) = read else {
+                    return Err(format!(
+                        "There is no document {}:{} in the index served. Use the document of a ref from knowledge.search.",
+                        document.source_id, document.object_id
+                    ));
+                };
+                let around = number("around").unwrap_or(0) as usize;
+                let budget = number("max_chars").map_or(READ_CHARS, |chars| chars as usize);
+                read_lines(&document, &read.content, lines, around, budget)
             }
             ("knowledge.read", Some(host)) => {
+                if arguments.get("evidence").is_none() {
+                    return Err("Give the ref of a passage from knowledge.search, such as docs:guide.md#L20-45.".into());
+                }
                 evidence_limits(&arguments["evidence"])?;
                 let evidence: Evidence = serde_json::from_value(arguments["evidence"].clone())
                     .map_err(|_| "Expected source evidence from search".to_owned())?;
@@ -606,6 +694,164 @@ impl McpServer {
     }
 }
 
+/// The ref of a search result: its document and lines, `docs:guide.md#L20-45`.
+fn passage_ref(result: &Value) -> String {
+    let document = result["document_id"].as_str().unwrap_or_default();
+    let range = &result["evidence"]["range"];
+    match (range["startLine"].as_u64(), range["endLine"].as_u64()) {
+        (Some(start), Some(end)) if start == end => format!("{document}#L{start}"),
+        (Some(start), Some(end)) => format!("{document}#L{start}-{end}"),
+        _ => document.to_owned(),
+    }
+}
+
+/// A project search written for a model: the passages found as refs with their headings, then
+/// the text of the best ones. The scores, versions and evidence stay in the JSON of `format: json`.
+fn passages(text: &str) -> Result<String, String> {
+    let found: Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
+    // A search a Node.js caller passed to `serveMcp` may answer in another form: kept as it is.
+    if !found["results"].is_array() || !found["context"].is_object() {
+        return Ok(text.to_owned());
+    }
+    let query = found["query"].as_str().unwrap_or_default();
+    let results = found["results"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut out = if results.is_empty() {
+        format!(
+            "No passages found for \"{query}\". Search again with other words: a synonym, or a word the documents would use.\n"
+        )
+    } else {
+        format!(
+            "{} passages for \"{query}\". Read more of one with knowledge.read and its ref.\n",
+            results.len()
+        )
+    };
+    for (number, result) in results.iter().enumerate() {
+        let rank = result["rank"].as_u64().unwrap_or(number as u64 + 1);
+        out.push_str(&format!("{rank}. {}", passage_ref(result)));
+        if let Some(heading) = result["heading"]
+            .as_str()
+            .filter(|heading| !heading.is_empty())
+        {
+            out.push_str(&format!(" — {heading}"));
+        }
+        out.push('\n');
+    }
+    for warning in found["warnings"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        if let Some(message) = warning["message"].as_str() {
+            out.push_str(&format!("Note: {message}\n"));
+        }
+    }
+    let context = found["context"]["text"].as_str().unwrap_or_default();
+    if !context.trim().is_empty() {
+        out.push_str("\nText of the best passages:\n\n");
+        out.push_str(&context.replace("\r\n", "\n"));
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    Ok(out)
+}
+
+/// The document and the lines of a ref: `docs:guide.md#L20-45`, `docs:guide.md#L20`, or the
+/// document alone.
+fn parse_ref(text: &str) -> Result<(DocumentRef, Option<(usize, usize)>), String> {
+    let wrong = || {
+        format!(
+            "{text} is not a ref. A ref is a document and its lines, such as docs:guide.md#L20-45, as knowledge.search gives them."
+        )
+    };
+    let (document, lines) = match text.rfind("#L") {
+        Some(at) => (&text[..at], Some(&text[at + 2..])),
+        None => (text, None),
+    };
+    let lines = match lines {
+        None => None,
+        Some(lines) => {
+            let number = |text: &str| text.trim().parse::<usize>().ok().filter(|n| *n > 0);
+            let (start, end) = match lines.split_once('-') {
+                Some((start, end)) => (number(start), number(end.trim_start_matches('L'))),
+                None => (number(lines), number(lines)),
+            };
+            match (start, end) {
+                (Some(start), Some(end)) if start <= end => Some((start, end)),
+                _ => return Err(wrong()),
+            }
+        }
+    };
+    let (source_id, object_id) = document.split_once(':').ok_or_else(wrong)?;
+    if !valid_source_id(source_id) || object_id.is_empty() {
+        return Err(wrong());
+    }
+    Ok((
+        DocumentRef {
+            source_id: source_id.to_owned(),
+            object_id: object_id.to_owned(),
+        },
+        lines,
+    ))
+}
+
+/// Lines of a document, numbered, with `around` lines before and after, within `budget`
+/// characters; the ref to read on with when the budget stops them.
+fn read_lines(
+    document: &DocumentRef,
+    content: &str,
+    lines: Option<(usize, usize)>,
+    around: usize,
+    budget: usize,
+) -> Result<String, String> {
+    let name = format!("{}:{}", document.source_id, document.object_id);
+    let mut all: Vec<&str> = content
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .collect();
+    // The newline at the end ends the last line; it starts none.
+    if content.ends_with('\n') {
+        all.pop();
+    }
+    let total = all.len();
+    if total == 0 {
+        return Ok(format!("{name} has no text.\n"));
+    }
+    let (start, end) = lines.unwrap_or((1, total));
+    if start > total {
+        return Err(format!(
+            "{name} has {total} lines. Ask for lines up to L{total}."
+        ));
+    }
+    let first = start.saturating_sub(around).max(1);
+    let last = end.saturating_add(around).min(total);
+    let width = last.to_string().len();
+    let mut body = String::new();
+    let mut chars = 0;
+    let mut shown = first - 1;
+    for (number, line) in all.iter().enumerate().take(last).skip(first - 1) {
+        let numbered = format!("{:>width$}| {line}\n", number + 1);
+        let length = numbered.chars().count();
+        if chars + length > budget && shown >= first {
+            break;
+        }
+        chars += length;
+        body.push_str(&numbered);
+        shown = number + 1;
+    }
+    let mut out = format!("{name}#L{first}-{shown} ({total} lines in the document)\n{body}");
+    if shown < last {
+        out.push_str(&format!(
+            "… stopped at L{shown} to stay within {budget} characters. Read on with {name}#L{}-{last}.\n",
+            shown + 1
+        ));
+    }
+    Ok(out)
+}
+
 fn string_json(text: &str) -> String {
     ConfigValue::String(text.to_owned()).to_js_json()
 }
@@ -650,8 +896,12 @@ impl McpServer {
             Err(message) => return Ok(error_json(&message)),
         };
         Ok(match self.run(name, &checked, cancel) {
-            Ok(text) => format!(
+            Ok(text) if serde_json::from_str::<Value>(&text).is_ok() => format!(
                 r#"{{"content":[{{"type":"text","text":{}}}],"structuredContent":{text}}}"#,
+                string_json(&text)
+            ),
+            Ok(text) => format!(
+                r#"{{"content":[{{"type":"text","text":{}}}]}}"#,
                 string_json(&text)
             ),
             Err(message) => error_json(&message),
@@ -711,6 +961,7 @@ impl ServerHandler for McpServer {
             database: self.database.clone(),
             host: self.host.clone(),
             search_only: self.search_only,
+            about: self.about.clone(),
         };
         let outcome =
             tokio::task::spawn_blocking(move || server.run(&name, &arguments, &cancel)).await;

@@ -134,7 +134,7 @@ test('serves HTTP like the former JavaScript server', { timeout: 180_000 }, asyn
     mcpInitializeOld: rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '1999-01-01', capabilities: {}, clientInfo: { name: 'p', version: '1' } } }),
     mcpNotification: rpc({ jsonrpc: '2.0', method: 'notifications/initialized' }),
     mcpList: rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
-    mcpCall: rpc({ jsonrpc: '2.0', id: 'a', method: 'tools/call', params: { name: 'knowledge.search', arguments: { query: 'ポンプ', limit: 1 } } }),
+    mcpCall: rpc({ jsonrpc: '2.0', id: 'a', method: 'tools/call', params: { name: 'knowledge.search', arguments: { query: 'ポンプ', limit: 1, format: 'json' } } }),
     mcpCallInvalid: rpc({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'knowledge.search', arguments: { query: 'x', limit: 0 } } }),
     mcpCallTwice: rpc({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'knowledge.search', arguments: { query: 'x', budgetChars: 5, budget_chars: 5 } } }),
     mcpUnknownTool: rpc({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'knowledge.read', arguments: {} } }),
@@ -164,7 +164,7 @@ test('serves HTTP like the former JavaScript server', { timeout: 180_000 }, asyn
     for (const header of compared) assert.equal(a.headers[header], b.headers[header], name + ' ' + header);
     if (a.status === 413) assert.equal(a.headers.connection, b.headers.connection, name);
     if (changed[name]) changed[name](a.body);
-    else assert.equal(stable(a.body), stable(currentSearchSchemaText(b.body)), name);
+    else assert.equal(stable(a.body), stable(currentSearchSchemaText(b.body, a.body)), name);
   }
   const latin1 = await send(actual, { headers: json, body: Buffer.from('{"query":"é"}', 'latin1') });
   assert.equal(latin1.status, 400);

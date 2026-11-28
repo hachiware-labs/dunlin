@@ -157,7 +157,7 @@ test('shares one RAG search payload, grounded answers and live index across CLI,
   await mcp.connect(new StreamableHTTPClientTransport(new URL('/mcp', base)));
   assert.deepEqual((await mcp.listTools()).tools.map(({ name }) => name), ['knowledge.search']);
   const mcpSearch = async (client, args = {}) => {
-    const output = await client.callTool({ name: 'knowledge.search', arguments: { query, ...args } });
+    const output = await client.callTool({ name: 'knowledge.search', arguments: { query, format: 'json', ...args } });
     assert.ok(!output.isError, JSON.stringify(output));
     return output.structuredContent;
   };

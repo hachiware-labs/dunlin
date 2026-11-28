@@ -76,8 +76,27 @@ The agent gets two tools:
 
 | Tool | What it does |
 |---|---|
-| `knowledge.search` | Searches the documents and returns passages, sources, and context. Accepts a count (`limit`), a context size in characters (`budget_chars`), and the documents to search (`source_ids`) |
-| `knowledge.read` | Reads a passage found by search as lines of the original |
+| `knowledge.search` | Searches the documents and returns the list of passages found, and the text of the best ones. Accepts a count (`limit`), a size of the text in characters (`budget_chars`), and the documents to search (`source_ids`) |
+| `knowledge.read` | Reads a passage found by search with line numbers, with lines around it (`around`) if asked, or any lines of a document |
+
+A search answers with short text that is easy for an agent to read and light on its context:
+
+```text
+3 passages for "pump inspection". Read more of one with knowledge.read and its ref.
+1. docs:maintenance.md#L3-5 — Pump maintenance
+2. ...
+
+Text of the best passages:
+
+maintenance.md — Pump maintenance
+file:///.../maintenance.md:3
+Inspect the pump on the first business day of every month.
+...
+```
+
+- A **ref** such as `docs:maintenance.md#L3-5` is a document and its lines. The agent cites it as the source, and passes it to `knowledge.read` to read on. `docs:maintenance.md#L1-200` reads any lines, and `docs:maintenance.md` the whole document. A read returns up to 20000 characters by default, and gives the ref to read on with when the rest does not fit.
+- The tool descriptions say how many documents there are, in which source folders. An agent decides from them when to use the tools.
+- For scores, versions and evidence ranges, pass `format: "json"` to `knowledge.search`. It returns the result of `nest search --json`.
 
 ## 3 Update the documents
 

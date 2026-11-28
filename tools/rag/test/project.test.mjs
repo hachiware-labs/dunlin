@@ -434,7 +434,7 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   assert.match(printed.stderr, /mcpServers/u);
   const launch = servers['knowledge-nest-knowledge'];
   await client.connect(new StdioClientTransport({ ...launch, cwd: root, stderr: 'ignore' }));
-  const { structuredContent, isError } = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順' } });
+  const { structuredContent, isError } = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順', format: 'json' } });
   assert.ok(!isError);
   assert.equal(structuredContent.build_id, result.build_id);
   assert.equal(structuredContent.search_config_id, result.search_config_id);
@@ -445,7 +445,7 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
 
   await writeFile(join(docs, 'guide.md'), '# ガイド\n保全手順を更新しました。\n');
   const updated = (await json(project, 'build', '--skip-unsupported')).data;
-  const current = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順' } });
+  const current = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順', format: 'json' } });
   assert.equal(current.structuredContent.build_id, updated.build_id);
   assert.match(current.structuredContent.context.text, /保全手順/u);
 
@@ -459,7 +459,7 @@ test('initializes, builds, searches and serves the same Japanese evidence over M
   await writeFile(join(project, 'KnowledgeNestfile.yaml'), stringify(edited));
   const incompatible = (await json(project, 'build', '--skip-unsupported')).data;
   assert.notEqual(incompatible.build_id, updated.build_id);
-  const pinned = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順' } });
+  const pinned = await client.callTool({ name: 'knowledge.search', arguments: { query: '手順', format: 'json' } });
   assert.equal(pinned.structuredContent.build_id, updated.build_id);
   assert.match(pinned.structuredContent.context.text, /保全手順/u);
 });

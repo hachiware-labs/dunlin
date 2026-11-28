@@ -58,7 +58,7 @@ HTTP の登録用 URL を出力するには、`mcp` エンドポイントと固�
 
 ## 検索と回答の JSON
 
-`search --json` の `data`、MCP の `structuredContent`、`POST /v1/search` の応答は共通形式です。`build_id` と `search_config_id` で実行時の構成を確認できます。`results` に検索結果、`context` に組み立てた文脈と文字数・出典範囲・停止理由が入ります。
+`search --json` の `data`、MCP の `knowledge.search` に `format: "json"` を渡したときの結果、`POST /v1/search` の応答は共通形式です。MCP の既定の結果は、エージェント向けの短いテキスト（見つけた箇所の ref の一覧と、上位の箇所の本文）です。 [MCP 入門](start-mcp.md#2-エージェントにつなぐ)`build_id` と `search_config_id` で実行時の構成を確認できます。`results` に検索結果、`context` に組み立てた文脈と文字数・出典範囲・停止理由が入ります。
 
 件数、文脈予算、対象ソースの上書きはその要求にだけ適用されます。CLI では `--limit`、`--budget-chars`、`--source-id`、HTTP と MCP では `limit`、`budget_chars`、`source_ids` を指定します。応答の `search_config_id` は実効設定を表し、`warnings` に上書きが記録されます。
 

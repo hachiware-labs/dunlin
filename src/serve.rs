@@ -141,6 +141,8 @@ pub struct Serving {
     uses_vector: bool,
     builds: Builds,
     active: Mutex<Active>,
+    /// What the index served at startup holds, for the descriptions of the MCP tools.
+    about: Option<String>,
 }
 
 /// Where the builds to serve come from.
@@ -357,12 +359,15 @@ impl Serving {
             uses_keyword,
             uses_vector,
             builds,
+            about: None,
             active: Mutex::new(Active {
                 compatible: initial.clone(),
                 indexes: HashMap::new(),
             }),
         };
         let first = serving.open_build(&initial)?;
+        serving.about =
+            holdings(&Path::new(&serving.request.paths.artifacts).join(index_of(&initial)));
         serving
             .active
             .get_mut()
@@ -631,6 +636,28 @@ impl Serving {
     }
 }
 
+/// What an index holds, in words: how many documents, in which sources.
+fn holdings(directory: &Path) -> Option<String> {
+    let status = KnowledgeBase::inspect_index(directory, &Cancellation::default())
+        .ok()
+        .flatten()?;
+    let sources: Vec<String> = status
+        .sources
+        .iter()
+        .map(|(source, documents)| format!("{source} ({documents})"))
+        .collect();
+    let documents = status.searchable_documents;
+    let noun = if documents == 1 {
+        "document"
+    } else {
+        "documents"
+    };
+    Some(format!(
+        "It holds {documents} {noun}, by source: {}.",
+        sources.join(", ")
+    ))
+}
+
 impl McpHost for Serving {
     fn search(&self, arguments: &ConfigValue, cancel: &Cancellation) -> Result<String, String> {
         let number = |name: &str| match field(arguments, name) {
@@ -656,6 +683,21 @@ impl McpHost for Serving {
     fn read(&self, evidence: &Evidence, cancel: &Cancellation) -> Result<String, String> {
         Serving::read(self, evidence, cancel).map_err(|error| error.message)
     }
+
+    fn document(
+        &self,
+        document: &crate::DocumentRef,
+        cancel: &Cancellation,
+    ) -> Option<Result<Option<crate::ReadOutcome>, String>> {
+        Some(
+            self.with_active(|database, _, _| {
+                database
+                    .get_document(document, cancel)
+                    .map_err(StageError::native)
+            })
+            .map_err(|error| error.message),
+        )
+    }
 }
 
 /// Serves MCP on standard input and output for a project.
@@ -674,7 +716,11 @@ pub fn serve_stdio(
             .unwrap_or(ConfigValue::Null),
     )]));
     let host: Arc<dyn McpHost> = serving.clone();
-    crate::mcp::serve_stdio(McpServer::new(database, Some(host), search_only), cancel)
+    let about = serving.about.clone();
+    crate::mcp::serve_stdio(
+        McpServer::new(database, Some(host), search_only).with_about(about),
+        cancel,
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1597,7 +1643,7 @@ pub fn serve_http(serving: Arc<Serving>, cancel: &Cancellation) -> Result<(), St
         digest,
         port,
         running: AtomicUsize::new(0),
-        mcp: McpServer::new(database, Some(host), true),
+        mcp: McpServer::new(database, Some(host), true).with_about(serving.about.clone()),
         serving: serving.clone(),
     });
     let header_timeout = Duration::from_secs(settings.limits.request_timeout_seconds.min(60));

@@ -62,7 +62,7 @@ HTTP の登録用 URL を出力するには、`mcp` エンドポイントと固�
 
 件数、文脈予算、対象ソースの上書きはその要求にだけ適用されます。CLI では `--limit`、`--budget-chars`、`--source-id`、HTTP と MCP では `limit`、`budget_chars`、`source_ids` を指定します。応答の `search_config_id` は実効設定を表し、`warnings` に上書きが記録されます。
 
-`ask --json` の `data` と `POST /v1/responses` は Responses API 形式です。HTTP の `input` は質問文字列、または最後のユーザーメッセージを含むメッセージ配列を受け付けます。回答の引用は `output[].content[].annotations`、引用した版と原文上の範囲は `knowledge_nest_citations`、ビルドと検索設定の ID は `metadata` に入ります。設定と異なる `model`、ストリーミング、ツール呼び出し、過去の応答の引き継ぎなどを指定した要求は HTTP 400 を返します。[応答形式](knowledge-nest-spec.md#27-search-と-ask-の返却形式種別-rag-の-serve)
+`ask --json` の `data` と `POST /v1/responses` は Responses API 形式です。HTTP の `input` は質問文字列、または最後のユーザーメッセージを含むメッセージ配列を受け付けます。回答の引用は `output[].content[].annotations`、引用した版と原文上の範囲は `knowledge_nest_citations`、ビルドと検索設定の ID は `metadata` に入ります。引用した本文が裏付けないとして答えから外したモデルの文があれば、その文と理由が `knowledge_nest_rejected` に入ります。 [答えの確かめ方](start-rag.md#しくみ)設定と異なる `model`、ストリーミング、ツール呼び出し、過去の応答の引き継ぎなどを指定した要求は HTTP 400 を返します。[応答形式](knowledge-nest-spec.md#27-search-と-ask-の返却形式種別-rag-の-serve)
 
 ## HTTP の接続制限
 

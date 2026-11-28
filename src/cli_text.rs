@@ -478,6 +478,17 @@ pub fn answer_text(response: &ConfigValue, search: Option<&ConfigValue>) -> Stri
             out.push_str(&format!("\n[{}] {label}", index + 1));
         }
     }
+    let rejected = items(response.get("knowledge_nest_rejected")).len();
+    if rejected > 0 {
+        let noun = if rejected == 1 {
+            "statement"
+        } else {
+            "statements"
+        };
+        out.push_str(&format!(
+            "\n\nLeft out {rejected} {noun} of the model that the passages do not bear out (see --json)."
+        ));
+    }
     out
 }
 

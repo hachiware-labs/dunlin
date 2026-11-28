@@ -20,6 +20,14 @@ Unlike MCP, the answer is written by a model that Knowledge-Nest calls. Your app
 
 An answer is only as good as the evidence found. The search the answers stand on grows as MCP's does: document updates, measuring, a user dictionary and a better setup (section 4 of the [MCP introduction](start-mcp.en.md)). Swap the model that writes answers by changing the settings and restarting `serve`.
 
+The model is given the question and the numbered passages of the search, nothing else. A program checks each statement it returns, and leaves out of the answer those the passages it cites do not bear out:
+
+- a statement that only says the question again
+- a statement with a number (of two or more digits) or a quotation in 「」 that the passages it cites do not have
+- a statement that names what the question asks about (such as 有給休暇) when the passages it cites do not: the words of the question put onto passages about something else
+
+With none left, it declines: "資料から回答の根拠を確認できませんでした。" (no grounds for an answer in the documents). The statements left out are listed with their reasons in `knowledge_nest_rejected` of `--json`, and `nest ask` says how many. This keeps a small local model such as `qwen3:4b` from returning made-up answers with sources.
+
 ## Compared with other ways
 
 - **Rather than building it with LangChain and the like.** No code to write: a configuration file and commands bring it up. The answer API takes the OpenAI SDK as it is, so an existing app only changes where it connects.
